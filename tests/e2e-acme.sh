@@ -123,7 +123,8 @@ EAB_KID="$(awk '$1 == "kid" {print $3}' "$WORK/eab.txt")"
 EAB_HMAC="$(awk '$1 == "hmac:" {print $2}' "$WORK/eab.txt")"
 [ -n "$EAB_KID" ] && [ -n "$EAB_HMAC" ] &&
   ok "eab credential parsed" || bad "eab output: $(cat "$WORK/eab.txt")"
-"$WORK/yca-acme" eab list --state "$WORK/acme.db" | grep -q "$EAB_KID" &&
+# -F --: the kid is random base64url and can start with '-'.
+"$WORK/yca-acme" eab list --state "$WORK/acme.db" | grep -qF -- "$EAB_KID" &&
   ok "eab list shows the credential" || bad "eab list"
 
 # --- acme.sh: register + issue ---
