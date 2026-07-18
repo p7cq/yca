@@ -88,9 +88,6 @@ signing_ca_slug = "ca-e1"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-ocsp_cn = "CA E1 OCSP Responder"
-ocsp_slug = "ca-e1-ocsp-responder"
-ocsp_valid_days = 7
 root_arc_oid = "1.3.6.1.4.1.00000"
 )";
 
@@ -129,7 +126,6 @@ TEST_CASE("cfg::load parses values") {
   REQUIRE(c.has_value());
   CHECK(c->repository_host == "pki.example.ca");
   CHECK(c->ee_valid_days == 397);
-  CHECK(c->ocsp_valid_days == 7);
   CHECK(c->root_arc_oid == "1.3.6.1.4.1.00000");
   CHECK(c->ee_curve == "secp256r1");
   CHECK(c->root_ca_curve == "secp384r1");
@@ -152,17 +148,16 @@ TEST_CASE("cfg::load rejects invalid configs") {
   CHECK_FALSE(loads(with("1.3.6.1.4.1.00000", "1.a.b")));
   CHECK_FALSE(loads(with("country_code = \"CA\"", "country_code = \"CAN\"")));
   CHECK_FALSE(loads(with("ee_valid_days = 397", "ee_valid_days = 500")));
-  CHECK_FALSE(loads(with("ocsp_valid_days = 7", "ocsp_valid_days = 99")));
   CHECK_FALSE(loads(with("org_name = \"Example\"", "org_name = \"\"")));
-  CHECK_FALSE(loads(with("ocsp_cn = \"CA E1 OCSP Responder\"\n", "")));
+  CHECK_FALSE(loads(with("signing_ca_cn = \"CA E1\"\n", "")));
 
-  // ee and ocsp validities must both sit under the signing CA's lifetime.
+  // The EE validity must sit under the signing CA's lifetime.
   const std::string short_ca =
       with("ee_valid_days = 397", "ee_valid_days = 20",
            with("signing_ca_valid_days = 8112", "signing_ca_valid_days = 30"));
-  CHECK(loads(short_ca)); // ocsp 7 < 30: fine
-  CHECK_FALSE(loads(with("ocsp_valid_days = 7", "ocsp_valid_days = 35",
-                         short_ca))); // in [2,35] but outlives the signing CA
+  CHECK(loads(short_ca)); // ee 20 < 30: fine
+  CHECK_FALSE(loads(with("ee_valid_days = 20", "ee_valid_days = 30",
+                         short_ca))); // no longer under the signing CA
   CHECK_FALSE(loads(with("ee_valid_days = 397", "ee_valid_days = 8112")));
 }
 
@@ -171,8 +166,7 @@ TEST_CASE("cfg::load: names are free-form UTF-8, slugs are strict ASCII") {
   CHECK(loads(with("org_name = \"Example\"", "org_name = \"Компания 株\"")));
   CHECK(loads(
       with("root_ca_cn = \"ETS Root E1\"", "root_ca_cn = \"ETS 株 Root E1\"")));
-  CHECK(loads(
-      with("ocsp_cn = \"CA E1 OCSP Responder\"", "ocsp_cn = \"OCSP ﺵﺮﻛﺓ\"")));
+  CHECK(loads(with("signing_ca_cn = \"CA E1\"", "signing_ca_cn = \"CA ﺵﺮﻛﺓ\"")));
   // Declared slugs go verbatim into URLs/file names: lowercase ASCII only.
   CHECK_FALSE(loads(
       with("root_ca_slug = \"ets-root-e1\"", "root_ca_slug = \"ets-株\"")));
@@ -259,9 +253,6 @@ struct TempPki {
     config.ee_curve = "secp256r1";
     config.ee_digest = "SHA-256";
     config.ee_valid_days = 90;
-    config.ocsp_cn = "UT OCSP";
-    config.ocsp_slug = "ut-ocsp";
-    config.ocsp_valid_days = 7;
   }
   ~TempPki() { std::filesystem::remove_all(dir); }
 };
@@ -337,6 +328,27 @@ TEST_CASE("ca: CertificatePolicies present only when root_arc_oid is set") {
   }
 }
 
+TEST_CASE("ca: revocation is CRL-only - no OCSP pointers anywhere") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+
+  // AIA carries only caIssuers; the status channel is the CDP (root CRL
+  // for the signing CA, signing CRL for leaves).
+  Botan::X509_Certificate sign((t.dir / "ca" / "ut-ca-e1.pem").string());
+  CHECK(sign.ocsp_responders().empty());
+  CHECK(sign.ca_issuers().size() == 1);
+  CHECK_FALSE(sign.crl_distribution_points().empty());
+
+  REQUIRE(
+      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "aia.ut.ca", {}));
+  Botan::X509_Certificate ee((t.dir / "ee" / "aia.ut.ca.crt").string());
+  CHECK(ee.ocsp_responders().empty());
+  CHECK(ee.ca_issuers().size() == 1);
+  CHECK_FALSE(ee.crl_distribution_points().empty());
+}
+
 TEST_CASE("ca: init + issuance + revocation rules") {
   TempPki t;
   REQUIRE(ca::init(t.config, t.dir, kPass));
@@ -373,12 +385,6 @@ TEST_CASE("ca: init + issuance + revocation rules") {
       ca::revoke(*eff, t.dir, kPass, "server", "s.ut.ca", "superseded"));
   CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "s.ut.ca", {}));
 
-  // OCSP responder is a singleton per active cert.
-  CHECK(ca::issue_ocsp(*eff, t.dir, kPass));
-  CHECK_FALSE(ca::issue_ocsp(*eff, t.dir, kPass));
-  CHECK(ca::revoke(*eff, t.dir, kPass, "ocsp", "", "superseded"));
-  CHECK(ca::issue_ocsp(*eff, t.dir, kPass));
-
   // ASCII rules at issuance: server CN feeds a dNSName SAN (IA5), so it must
   // be a hostname; dns/email SANs likewise. A client CN is DN-only: UTF-8 ok.
   CHECK_FALSE(
@@ -408,22 +414,22 @@ TEST_CASE("ca::reconcile syncs tunables and ignores locked/invalid fields") {
   REQUIRE(eff.has_value());
 
   cfg::Config file = t.config;
-  file.ee_valid_days = 45;   // valid tunable: synced
-  file.ocsp_valid_days = 99; // invalid tunable: ignored
-  file.org_name = "Other";   // locked field: ignored
+  file.ee_valid_days = 45; // valid tunable: synced
+  file.org_name = "Other"; // locked field: ignored
   ca::reconcile(file, *eff, t.dir);
   CHECK(eff->ee_valid_days == 45);
-  CHECK(eff->ocsp_valid_days == 7);
   CHECK(eff->org_name == "Example");
 
-  // The valid tunable was persisted to the DB.
+  // The valid tunable was persisted to the DB; an invalid one is ignored.
   auto reloaded = ca::load_config(t.dir);
   REQUIRE(reloaded.has_value());
   CHECK(reloaded->ee_valid_days == 45);
-  CHECK(reloaded->ocsp_valid_days == 7);
+  file.ee_valid_days = 999; // above max_ee_valid_days: ignored
+  ca::reconcile(file, *eff, t.dir);
+  CHECK(eff->ee_valid_days == 45);
 }
 
-TEST_CASE("ca::reconcile: tunables must fit under the signing CA") {
+TEST_CASE("ca::reconcile: the tunable must fit under the signing CA") {
   TempPki t;
   t.config.signing_ca_valid_days = 20; // short-lived test CA
   t.config.ee_valid_days = 10;
@@ -432,15 +438,13 @@ TEST_CASE("ca::reconcile: tunables must fit under the signing CA") {
   REQUIRE(eff.has_value());
 
   cfg::Config file = *eff;
-  file.ocsp_valid_days = 25; // in [2,35] but not under the signing CA: ignored
-  file.ee_valid_days = 21;   // likewise
+  file.ee_valid_days = 21; // valid range but not under the signing CA: ignored
   ca::reconcile(file, *eff, t.dir);
-  CHECK(eff->ocsp_valid_days == 7);
   CHECK(eff->ee_valid_days == 10);
 
-  file.ocsp_valid_days = 15; // fits: synced
+  file.ee_valid_days = 15; // fits: synced
   ca::reconcile(file, *eff, t.dir);
-  CHECK(eff->ocsp_valid_days == 15);
+  CHECK(eff->ee_valid_days == 15);
 }
 
 TEST_CASE("a leaf may not outlive its issuer") {

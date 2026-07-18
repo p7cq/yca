@@ -86,7 +86,7 @@ bool write_file(const std::filesystem::path &path, std::string_view bytes) {
 // check-then-insert sequences atomic. Error paths simply return with the
 // transaction open - closing the connection rolls it back.
 void begin_write(Botan::SQL_Database &db) {
-  // WAL: a long-running reader (the OCSP responder) never blocks a CA write
+  // WAL: a long-running reader never blocks a CA write
   // and vice versa.
   db.new_statement("PRAGMA journal_mode=WAL")->spin();
   db.new_statement("BEGIN IMMEDIATE")->spin();
@@ -181,7 +181,7 @@ bool outlives_issuer(const Botan::X509_Certificate &issuer,
   if (now_epoch() + static_cast<std::size_t>(validity.count()) <=
       issuer.not_after().time_since_epoch())
     return false;
-  // Two ways here: the signing CA aged past (signing - ee|ocsp) days, or an
+  // Two ways here: the signing CA aged past (signing - ee) days, or an
   // unlocked *_valid_days was raised too close to the signing CA's lifetime.
   log::error("requested validity ends after the signing CA expires ({}); "
              "lower the configured validity or renew the signing CA",
@@ -251,9 +251,11 @@ Botan::X509_Cert_Options ca_options(const cfg::Config &config,
   return o;
 }
 
-// AIA (OCSP + caIssuers -> root), CDP (root CRL), and CertificatePolicies for
+// AIA (caIssuers -> root), CDP (root CRL), and CertificatePolicies for
 // the signing CA. Pointers reference the root (issuer of this cert). URLs are
 // flat under repository_host; cert/CRL file names come from the root CA slug.
+// Revocation is CRL-only in this PKI (no OCSP), so AIA carries no OCSP URI;
+// the signing CA's status channel is the root CRL (CDP).
 // Policies only when root_arc_oid is configured (it is optional).
 void add_signing_pointer_extensions(Botan::X509_Cert_Options &o,
                                     const cfg::Config &config) {
@@ -262,7 +264,7 @@ void add_signing_pointer_extensions(Botan::X509_Cert_Options &o,
 
   o.extensions.add_new(
       std::make_unique<Botan::Cert_Extension::Authority_Information_Access>(
-          std::vector<std::string>{base + "/ocsp"},
+          std::vector<std::string>{},
           std::vector<std::string>{base + "/" + root + ".crt"}));
 
   Botan::AlternativeName cdp;
@@ -282,6 +284,8 @@ void add_signing_pointer_extensions(Botan::X509_Cert_Options &o,
 // EE pointers reference the signing CA (issuer of the leaf). Single policy per
 // profile: server -> <arc>.1.1, client -> <arc>.1.2. Works on Extensions
 // directly so the CSR path (no X509_Cert_Options) can use it too.
+// Revocation is CRL-only in this PKI (no OCSP), so AIA carries only
+// caIssuers; the leaf's status channel is the signing CRL (CDP).
 void add_ee_pointer_extensions(Botan::Extensions &ext,
                                const cfg::Config &config, Profile profile) {
   const std::string base = "http://" + config.repository_host;
@@ -289,7 +293,7 @@ void add_ee_pointer_extensions(Botan::Extensions &ext,
 
   ext.add_new(
       std::make_unique<Botan::Cert_Extension::Authority_Information_Access>(
-          std::vector<std::string>{base + "/ocsp"},
+          std::vector<std::string>{},
           std::vector<std::string>{base + "/" + ca + ".crt"}));
 
   Botan::AlternativeName cdp;
@@ -418,7 +422,7 @@ std::optional<Botan::X509_Certificate> load_cert(Botan::SQL_Database &db,
 }
 
 // Immutable config fields recorded at init and enforced on every later run.
-// Excludes ee_valid_days / ocsp_valid_days, which are tunable issuance policy.
+// Excludes ee_valid_days, which is tunable issuance policy.
 std::vector<std::pair<std::string, std::string>>
 locked_config(const cfg::Config &c) {
   return {
@@ -441,18 +445,15 @@ locked_config(const cfg::Config &c) {
       {"key_backend", c.key_backend},
       {"pkcs11_module", c.pkcs11_module},
       {"pkcs11_token_label", c.pkcs11_token_label},
-      {"ocsp_cn", c.ocsp_cn},
-      {"ocsp_slug", c.ocsp_slug},
   };
 }
 
-// Full config snapshot (locked + the two tunable validities). Written to
+// Full config snapshot (locked + the tunable validity). Written to
 // the config table at init; the DB becomes the source of truth after that.
 std::vector<std::pair<std::string, std::string>>
 full_config(const cfg::Config &c) {
   auto v = locked_config(c);
   v.push_back({"ee_valid_days", std::to_string(c.ee_valid_days)});
-  v.push_back({"ocsp_valid_days", std::to_string(c.ocsp_valid_days)});
   return v;
 }
 
@@ -735,9 +736,6 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
   c.key_backend = S("key_backend");
   c.pkcs11_module = S("pkcs11_module");
   c.pkcs11_token_label = S("pkcs11_token_label");
-  c.ocsp_cn = S("ocsp_cn");
-  c.ocsp_slug = S("ocsp_slug");
-  c.ocsp_valid_days = I("ocsp_valid_days");
   return c;
 }
 
@@ -778,10 +776,6 @@ void reconcile(const cfg::Config &file, cfg::Config &eff,
   sync("ee_valid_days", file.ee_valid_days, eff.ee_valid_days,
        file.ee_valid_days > 0 && file.ee_valid_days <= app::max_ee_valid_days &&
            file.ee_valid_days < eff.signing_ca_valid_days);
-  sync("ocsp_valid_days", file.ocsp_valid_days, eff.ocsp_valid_days,
-       file.ocsp_valid_days >= app::min_ocsp_valid_days &&
-           file.ocsp_valid_days <= app::max_ocsp_valid_days &&
-           file.ocsp_valid_days < eff.signing_ca_valid_days);
 }
 
 bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
@@ -1302,114 +1296,6 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   return true;
 }
 
-bool issue_ocsp(const cfg::Config &config, const fs::path &store_dir,
-                std::string_view secret) {
-  const fs::path db = store_path(store_dir);
-  if (!fs::exists(db)) {
-    log::error("not initialized; run '{} init'", app::name);
-    return false;
-  }
-  if (secret.empty()) {
-    log::error("{} not set (required to sign with the CA)", secret_env(config));
-    return false;
-  }
-
-  Botan::AutoSeeded_RNG rng;
-  auto dbh = open_store(db);
-  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
-
-  auto sign_cert = load_signing_cert(config, store_dir);
-  if (!sign_cert) {
-    log::error("signing CA cert not found under {}",
-               (store_dir / "ca").string());
-    return false;
-  }
-  if (outlives_issuer(*sign_cert, std::chrono::seconds(std::chrono::days(
-                                      config.ocsp_valid_days))))
-    return false;
-
-  // Fail fast before the signing key lookup (seconds on NK HSM): the
-  // singleton rule is answerable from cert_index alone. The write lock
-  // below repeats the check authoritatively.
-  // Same renewal-aware singleton rule as the EE paths, keyed on kind only
-  // (ocsp_cn is locked config). The overlap also opens the door to a future
-  // issue-first responder rotation.
-  auto duplicate = [&] {
-    auto q = dbh->new_statement(
-        "SELECT COUNT(*) FROM cert_index WHERE kind='ocsp' AND "
-        "status='active' AND not_after>?1 AND "
-        "(not_after - ?1) * 100 > (not_after - not_before) * ?2");
-    q->bind(1, now_epoch());
-    q->bind(2, static_cast<std::size_t>(app::renew_window_pct));
-    q->step();
-    if (q->get_size_t(0) == 0)
-      return false;
-    log::error("an active OCSP responder certificate already exists (not "
-               "yet within the {}% renewal window)",
-               app::renew_window_pct);
-    return true;
-  };
-  if (duplicate())
-    return false;
-
-  std::optional<p11::Token> token; // owns the session; must outlive sign_key
-  std::shared_ptr<const Botan::Private_Key> sign_key;
-  try {
-    sign_key = signing_key(config, store, *sign_cert, secret, token);
-  } catch (const std::exception &e) {
-    log::error("cannot load signing key (wrong {}?): {}",
-               config.key_backend == "internal" ? "passphrase" : "user PIN",
-               e.what());
-    return false;
-  }
-  if (!sign_key) {
-    log::error("signing key missing from store");
-    return false;
-  }
-
-  // Write lock spans the singleton check + insert (see issue_ee).
-  begin_write(*dbh);
-  ensure_cert_index(*dbh);
-  if (duplicate())
-    return false;
-
-  Botan::EC_Group grp = Botan::EC_Group::from_name(config.ee_curve);
-  Botan::ECDSA_PrivateKey key(rng, grp);
-
-  Botan::X509_Cert_Options o("", util::days_to_seconds(config.ocsp_valid_days));
-  o.common_name = config.ocsp_cn;
-  o.add_constraints(Botan::Key_Constraints(
-      static_cast<uint32_t>(Botan::Key_Constraints::DigitalSignature)));
-  o.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.9")); // id-kp-OCSPSigning
-  o.extensions.add_new(std::make_unique<Botan::Cert_Extension::OCSP_NoCheck>());
-
-  // The responder cert is EE-class (key from ee_curve, signed by the signing
-  // CA), so it uses the EE signature digest like server/client certs.
-  auto req = Botan::X509::create_cert_req(o, key, config.ee_digest, rng);
-  Botan::X509_CA issuer(*sign_cert, *sign_key, config.ee_digest, rng);
-  const auto tp = Clock::now();
-  auto cert = issuer.sign_request(
-      req, rng, Botan::X509_Time(tp),
-      Botan::X509_Time(tp + std::chrono::days(config.ocsp_valid_days)));
-
-  store.insert_cert(cert);
-  index_cert(*dbh, cert, "ocsp");
-  commit_write(*dbh);
-
-  const fs::path ocsp_dir = store_dir / "ocsp";
-  fs::create_directories(ocsp_dir);
-  set_perms(ocsp_dir, fs::perms::owner_all);
-  const std::string &name = config.ocsp_slug;
-  bool ok = write_pem(ocsp_dir / (name + ".crt"), cert);
-  if (!write_file(ocsp_dir / (name + ".key"), Botan::PKCS8::PEM_encode(key)))
-    ok = false;
-  if (!ok)
-    log::warn("could not write OCSP artifacts under {}", ocsp_dir.string());
-
-  log::info("issued OCSP responder certificate for CN '{}'", config.ocsp_cn);
-  return true;
-}
-
 bool revoke(const cfg::Config &config, const fs::path &store_dir,
             std::string_view secret, const std::string &target,
             const std::string &cn, const std::string &reason_str,
@@ -1451,7 +1337,7 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   // Fail fast before the signing key lookup (seconds on NK HSM): whether an
   // active cert exists is answerable from cert_index alone. The write lock
   // below repeats the lookup authoritatively.
-  const std::string subject_cn = (target == "ocsp") ? config.ocsp_cn : cn;
+  const std::string &subject_cn = cn;
   const std::string sel = normalize_serial(serial);
   auto lookup = [&](Botan::SQL_Database &d) {
     return sel.empty() ? active_fp(d, subject_cn, target)
@@ -1663,9 +1549,6 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
     std::print("ee_curve = \"{}\"\n", config.ee_curve);
     std::print("ee_digest = \"{}\"\n", config.ee_digest);
     std::print("ee_valid_days = {}\n", config.ee_valid_days);
-    std::print("ocsp_cn = \"{}\"\n", config.ocsp_cn);
-    std::print("ocsp_valid_days = {}\n", config.ocsp_valid_days);
-    std::print("ocsp_slug = \"{}\"\n", config.ocsp_slug);
     if (!config.root_arc_oid.empty())
       std::print("root_arc_oid = \"{}\"\n", config.root_arc_oid);
     std::print("key_backend = \"{}\"\n", config.key_backend);
@@ -1721,14 +1604,12 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
     if (q->step())
       fp = q->get_str(0);
   } else {
-    const std::string cn = (target == "ocsp") ? config.ocsp_cn : selector;
-    fp = active_fp(*dbh, cn, target);
+    fp = active_fp(*dbh, selector, target);
   }
 
   auto found = fp ? load_cert(*dbh, *fp) : std::nullopt;
   if (!found) {
-    log::error("no matching {} certificate for '{}'", target,
-               target == "ocsp" ? config.ocsp_cn : selector);
+    log::error("no matching {} certificate for '{}'", target, selector);
     return false;
   }
 

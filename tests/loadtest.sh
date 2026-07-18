@@ -32,9 +32,6 @@ signing_ca_slug = "ca-load-test"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-ocsp_cn = "CA Load Test OCSP Responder"
-ocsp_slug = "ca-load-test-ocsp-responder"
-ocsp_valid_days = 7
 root_arc_oid = "1.3.6.1.4.1.00000"
 EOF
 

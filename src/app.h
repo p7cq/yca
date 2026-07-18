@@ -29,12 +29,6 @@ inline constexpr std::string_view config_table = "ca_config";
 // issuance starts refusing (a leaf may not outlive its issuer).
 inline constexpr int max_ee_valid_days = 398;
 
-// ocsp_valid_days bounds: the responder cert is meant to rotate (see
-// yca-ocsp-rotate.timer) - 2 days is the tightest sane rotation margin,
-// 35 days (~a month) the loosest.
-inline constexpr int min_ocsp_valid_days = 2;
-inline constexpr int max_ocsp_valid_days = 35;
-
 // Default window for the `list` time filters, in days.
 inline constexpr int default_list_window_days = 30;
 

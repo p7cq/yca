@@ -45,13 +45,6 @@ struct Config {
   std::string ee_digest;
   // The end entity certificate's validity in days.
   int ee_valid_days;
-  // The OCSP certificate Common Name.
-  std::string ocsp_cn;
-  // The OCSP certificate's validity in days.
-  int ocsp_valid_days;
-  // The OCSP certificate ASCII identifier used for file names, AIA/CDP URLs,
-  // key labels on the token.
-  std::string ocsp_slug;
   // The OID of the root arc, e.g. 1.3.6.1.4.1.00000
   std::string root_arc_oid;
   // Key backend: "internal" for CA keys encrypted in the SQLite store

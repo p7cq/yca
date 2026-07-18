@@ -1,8 +1,7 @@
 # systemd timer driving yca-publish.service.
 #
-# Publication lag = CRL staleness at the CDP URL (OCSP is unaffected: the
-# responder reads the store live). The 're-publish after revoke' window
-# aligned with share/nginx/yca.conf.
+# Publication lag = CRL staleness at the CDP URL. The 're-publish after
+# revoke' window aligned with share/nginx/yca.conf.
 
 [Unit]
 Description=Periodic publication of yca CA certificates and CRLs

@@ -59,10 +59,10 @@ int main(int argc, char **argv) {
       app.add_subcommand("create", "issue an end-entity certificate");
   std::string c_target, c_cn, c_valid;
   std::vector<std::string> c_sans;
-  create->add_option("target", c_target, "server|client|ocsp")
+  create->add_option("target", c_target, "server|client")
       ->required()
-      ->check(CLI::IsMember({"server", "client", "ocsp"}));
-  create->add_option("--cn", c_cn, "common name (not used for ocsp)");
+      ->check(CLI::IsMember({"server", "client"}));
+  create->add_option("--cn", c_cn, "common name");
   create->add_option("--san", c_sans,
                      "SAN as type:name (dns|email|ip), repeatable");
   create->add_option("--valid", c_valid,
@@ -90,10 +90,10 @@ int main(int argc, char **argv) {
 
   auto *revoke = app.add_subcommand("revoke", "revoke a certificate");
   std::string rev_target, r_cn, r_reason = "unspecified", r_serial;
-  revoke->add_option("target", rev_target, "server|client|ocsp")
+  revoke->add_option("target", rev_target, "server|client")
       ->required()
-      ->check(CLI::IsMember({"server", "client", "ocsp"}));
-  revoke->add_option("--cn", r_cn, "common name (not used for ocsp)");
+      ->check(CLI::IsMember({"server", "client"}));
+  revoke->add_option("--cn", r_cn, "common name");
   revoke->add_option("--serial", r_serial,
                      "serial (hex) - selects the exact certificate; by CN "
                      "the newest active one is revoked");
@@ -112,14 +112,14 @@ int main(int argc, char **argv) {
   auto *get = app.add_subcommand(
       "get", "export a certificate, CRL, nonce or the config to stdout");
   std::string g_target, g_cn, g_id, g_encoding = "pem";
-  get->add_option("target", g_target, "server|client|ca|crl|ocsp|config|nonce")
+  get->add_option("target", g_target, "server|client|ca|crl|config|nonce")
       ->required()
       ->check(CLI::IsMember(
-          {"server", "client", "ca", "crl", "ocsp", "config", "nonce"}));
+          {"server", "client", "ca", "crl", "config", "nonce"}));
   get->add_option(
       "--cn", g_cn,
       "CN ('-' reads it from stdin); root-ca|signing-ca for ca/crl; "
-      "unused for ocsp/config/nonce");
+      "unused for config/nonce");
   get->add_option("--id", g_id, "enrolled identity (nonce only)");
   get->add_option("--encoding", g_encoding, "pem|der (default pem)")
       ->check(CLI::IsMember({"pem", "der"}));
@@ -209,13 +209,6 @@ int main(int argc, char **argv) {
 
     if (*create) {
       ca::reconcile(*config, *eff, store_dir);
-      if (c_target == "ocsp") {
-        if (!c_cn.empty() || !c_sans.empty() || !c_valid.empty())
-          log::info("create ocsp takes no --cn/--san/--valid; using configured "
-                    "CN '{}'",
-                    eff->ocsp_cn);
-        return ca::issue_ocsp(*eff, store_dir, secret(*eff)) ? 0 : 1;
-      }
       if (c_cn.empty()) {
         log::error("--cn is required for create {}", c_target);
         return 1;
@@ -260,7 +253,7 @@ int main(int argc, char **argv) {
     }
 
     if (*revoke) {
-      if (rev_target != "ocsp" && r_cn.empty() == r_serial.empty()) {
+      if (r_cn.empty() == r_serial.empty()) {
         log::error("revoke {} needs exactly one of --cn or --serial",
                    rev_target);
         return 1;
@@ -286,7 +279,7 @@ int main(int argc, char **argv) {
         }
         return ca::get_nonce(store_dir, g_id) ? 0 : 1;
       }
-      if (g_target != "ocsp" && g_target != "config" && g_cn.empty()) {
+      if (g_target != "config" && g_cn.empty()) {
         log::error("--cn is required for get {}", g_target);
         return 1;
       }

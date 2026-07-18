@@ -128,10 +128,6 @@ add_test(NAME e2e COMMAND bash ${CMAKE_SOURCE_DIR}/tests/e2e.sh
 add_test(NAME e2e-hsm COMMAND bash ${CMAKE_SOURCE_DIR}/tests/e2e-hsm.sh
                               $<TARGET_FILE:${PROJECT_NAME}>)
 set_tests_properties(e2e-hsm PROPERTIES SKIP_RETURN_CODE 77)
-# Go OCSP responder (responder/) against a temp PKI
-add_test(NAME e2e-ocsp COMMAND bash ${CMAKE_SOURCE_DIR}/tests/e2e-ocsp.sh
-                               $<TARGET_FILE:${PROJECT_NAME}>)
-set_tests_properties(e2e-ocsp PROPERTIES SKIP_RETURN_CODE 77)
 # Go ACME frontend (acme/) driven by a real client
 add_test(NAME e2e-acme COMMAND bash ${CMAKE_SOURCE_DIR}/tests/e2e-acme.sh
                                $<TARGET_FILE:${PROJECT_NAME}>)

@@ -11,7 +11,7 @@ _yca() {
 
   local -a commands=(
     'init:initialize the PKI (create root + signing CA)'
-    'create:issue a certificate (server|client|ocsp)'
+    'create:issue a certificate (server|client)'
     'enroll:enroll an identity for CSR signing'
     'sign:issue a certificate from a PKCS#10 CSR (server|client)'
     'revoke:revoke a certificate'
@@ -42,8 +42,8 @@ _yca() {
     case $words[1] in
     create)
       _arguments \
-        '1:target:(server client ocsp)' \
-        '--cn[common name (not used for ocsp)]:common name:' \
+        '1:target:(server client)' \
+        '--cn[common name]:common name:' \
         '*--san[SAN as type\:name (dns|email|ip), repeatable]:san:' \
         '--valid[sub-day validity override, 5m..1d]:duration (e.g. 1h):'
       ;;
@@ -60,8 +60,8 @@ _yca() {
       ;;
     revoke)
       _arguments \
-        '1:target:(server client ocsp)' \
-        '(--serial)--cn[common name (not used for ocsp)]:common name:' \
+        '1:target:(server client)' \
+        '(--serial)--cn[common name]:common name:' \
         '(--cn)--serial[serial (hex) - selects the exact certificate]:serial:' \
         "--reason[CRLReason name (default unspecified)]:reason:(${reasons[*]})"
       ;;
@@ -72,7 +72,7 @@ _yca() {
       ;;
     get)
       _arguments \
-        '1:target:(server client ca crl ocsp config nonce)' \
+        '1:target:(server client ca crl config nonce)' \
         '--cn[CN (- reads stdin), or CA alias for ca/crl]:cn:(root-ca signing-ca -)' \
         '--id[enrolled identity (nonce only)]:id:' \
         '--encoding[output encoding (default pem)]:encoding:(pem der)'

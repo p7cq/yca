@@ -67,9 +67,6 @@ signing_ca_slug = "ca-e1"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-ocsp_cn = "CA E1 OCSP Responder"
-ocsp_slug = "ca-e1-ocsp-responder"
-ocsp_valid_days = 7
 root_arc_oid = "1.3.6.1.4.1.00000"
 key_backend = "pkcs11"
 pkcs11_module = "$MODULE"
@@ -116,7 +113,6 @@ w create server --cn server.ca >/dev/null 2>&1 && ok "create server" || bad "cre
 openssl verify -CAfile "$PKI/ca/ets-root-e1.pem" \
   -untrusted "$PKI/ca/ca-e1.pem" "$PKI/ee/server.ca.crt" >/dev/null 2>&1 &&
   ok "EE chain verifies to root" || bad "chain verify failed"
-w create ocsp >/dev/null 2>&1 && ok "create ocsp" || bad "create ocsp"
 
 # --- wrong PIN rejected (no retry loop; softhsm has no lockout) ---
 (export CA_HSM_PIN=9999; w create server --cn wp.ca >/dev/null 2>&1) &&

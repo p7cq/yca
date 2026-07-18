@@ -45,7 +45,7 @@ std::optional<cfg::Config> load_config(const std::filesystem::path &store_dir);
 
 // Reconciles yca.toml (`file`) against the effective DB config (`eff`, from
 // load_config), called before issuance: readonly-field changes are warned and
-// ignored; valid ee/ocsp validity changes are written to the DB and applied to
+// ignored; a valid ee_valid_days change is written to the DB and applied to
 // `eff`.
 void reconcile(const cfg::Config &file, cfg::Config &eff,
                const std::filesystem::path &store_dir);
@@ -98,17 +98,9 @@ bool sign_csr(const cfg::Config &config, const std::filesystem::path &store_dir,
               std::string_view secret, Profile profile, const std::string &id,
               const std::string &nonce, const std::string &csr_src);
 
-// Issues the OCSP responder certificate (CN = config.ocsp_cn, EKU
-// id-kp-OCSPSigning + id-pkix-ocsp-nocheck), signed by the signing CA, and
-// delivers cert+key under <store>/ocsp/. Fails if an active OCSP cert already
-// exists, unless it is inside the renewal window (see issue_ee).
-bool issue_ocsp(const cfg::Config &config,
-                const std::filesystem::path &store_dir,
-                std::string_view secret);
-
-// Revokes the active `target` certificate (server|client|ocsp) for `cn` by
-// adding it to the signing CA's CRL (<store>/ca/<signing-slug>.crl). For ocsp,
-// `cn` is ignored (config.ocsp_cn is used). `reason` is a CRLReason name.
+// Revokes the active `target` certificate (server|client) for `cn` by
+// adding it to the signing CA's CRL (<store>/ca/<signing-slug>.crl).
+// `reason` is a CRLReason name.
 // A non-empty `serial` (hex, ':' separators tolerated) selects the exact
 // certificate instead - during a renewal overlap, by-CN means "the newest
 // active" while by-serial is unambiguous (what ACME revokeCert needs).

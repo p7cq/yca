@@ -173,13 +173,10 @@ load(const std::filesystem::path &path) {
         c.repository_host));
   get_str("root_ca_cn", c.root_ca_cn);       // DN-only
   get_str("signing_ca_cn", c.signing_ca_cn); // DN-only
-  get_str("ocsp_cn", c.ocsp_cn);             // DN-only
   if (get_str("root_ca_slug", c.root_ca_slug))
     check_slug("root_ca_slug", c.root_ca_slug);
   if (get_str("signing_ca_slug", c.signing_ca_slug))
     check_slug("signing_ca_slug", c.signing_ca_slug);
-  if (get_str("ocsp_slug", c.ocsp_slug))
-    check_slug("ocsp_slug", c.ocsp_slug);
   if (!c.root_ca_slug.empty() && c.root_ca_slug == c.signing_ca_slug)
     errs.push_back("root_ca_slug and signing_ca_slug must differ (their "
                    "files share pki/ca/)");
@@ -232,13 +229,6 @@ load(const std::filesystem::path &path) {
   bool rd = get_int("root_ca_valid_days", c.root_ca_valid_days);
   bool sd = get_int("signing_ca_valid_days", c.signing_ca_valid_days);
   bool ed = get_int("ee_valid_days", c.ee_valid_days);
-  bool od = get_int("ocsp_valid_days", c.ocsp_valid_days);
-
-  if (od && (c.ocsp_valid_days < app::min_ocsp_valid_days ||
-             c.ocsp_valid_days > app::max_ocsp_valid_days))
-    errs.push_back(std::format("ocsp_valid_days must be between {} and {}",
-                               app::min_ocsp_valid_days,
-                               app::max_ocsp_valid_days));
 
   if (rd && c.root_ca_valid_days <= 0)
     errs.push_back("root_ca_valid_days must be > 0");
@@ -254,8 +244,6 @@ load(const std::filesystem::path &path) {
   // guard is detail::outlives_issuer at each issuance.
   if (ed && sd && !(c.ee_valid_days < c.signing_ca_valid_days))
     errs.push_back("ee_valid_days must be < signing_ca_valid_days");
-  if (od && sd && !(c.ocsp_valid_days < c.signing_ca_valid_days))
-    errs.push_back("ocsp_valid_days must be < signing_ca_valid_days");
   if (sd && rd && !(c.signing_ca_valid_days < c.root_ca_valid_days))
     errs.push_back("signing_ca_valid_days must be < root_ca_valid_days");
 

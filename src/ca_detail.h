@@ -58,7 +58,7 @@ std::size_t now_epoch();
 // issuer does - and says so on the error channel. Past the issuer's notAfter
 // the whole chain fails validation (RFC 5280), so the leaf's tail would be
 // dead weight: issuance must stop. The locked config only guarantees
-// ee|ocsp_valid_days < signing_ca_valid_days at init time; this is the
+// ee_valid_days < signing_ca_valid_days at init time; this is the
 // runtime guard against the signing CA aging past the difference.
 bool outlives_issuer(const Botan::X509_Certificate &issuer,
                      std::chrono::seconds validity);

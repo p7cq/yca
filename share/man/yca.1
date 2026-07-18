@@ -18,7 +18,7 @@ At
 .B yca init
 the configuration is snapshotted into the store database, which becomes the
 source of truth; later edits to locked fields in the file are ignored with a
-warning. Only \fBee_valid_days\fR and \fBocsp_valid_days\fR remain tunable.
+warning. Only \fBee_valid_days\fR remains tunable.
 .SH OPTIONS
 .TP
 .BI \-\-config " path"
@@ -53,11 +53,6 @@ overrides validity for this one issuance, sub-day range
 less than 33% of its lifetime left, an overlapping successor may be issued
 (renewal window) and the old certificate simply expires.
 .TP
-.B create ocsp
-Issue the delegated OCSP responder certificate (CN and validity from
-\fBocsp_name\fR/\fBocsp_valid_days\fR; EKU OCSPSigning plus
-id-pkix-ocsp-nocheck). Takes no \fB\-\-cn\fR.
-.TP
 \fBenroll\fR \fB\-\-id\fR \fIid\fR
 Enroll an identity (e.g. an email address) so it can request nonces and CSR
 signatures. Fails if already enrolled.
@@ -73,7 +68,7 @@ or DN attribute is ignored and the CA dictates the profile. Prints the CN on
 standard output for piping into \fBget\fR \fB\-\-cn \-\fR; writes nothing
 under \fBee/\fR (the private key stays with the requester).
 .TP
-\fBrevoke\fR \fIserver\fR|\fIclient\fR|\fIocsp\fR [\fB\-\-cn\fR \fIcn\fR | \fB\-\-serial\fR \fIhex\fR] [\fB\-\-reason\fR \fIname\fR]
+\fBrevoke\fR \fIserver\fR|\fIclient\fR [\fB\-\-cn\fR \fIcn\fR | \fB\-\-serial\fR \fIhex\fR] [\fB\-\-reason\fR \fIname\fR]
 Revoke a certificate and rewrite the signed CRL. By \fB\-\-cn\fR the newest
 active certificate for that name is revoked; \fB\-\-serial\fR (hex,
 \fB:\fR separators and leading zeros tolerated) selects the exact
@@ -96,11 +91,11 @@ horizon: after revoking the signing CA, run \fBrefresh\fR \fIcrl\fR
 \fBroot\fR by hand - relying parties may otherwise trust their cached
 root CRL for up to 6 months.
 .TP
-\fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIocsp\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR]
+\fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR]
 Write a certificate, CRL, the effective (database) configuration, or an
 enrollment nonce to standard output (default \fBpem\fR). For
 \fIca\fR/\fIcrl\fR, \fB\-\-cn\fR takes \fBroot-ca\fR, \fBsigning-ca\fR, or
-the CA common name; \fIocsp\fR/\fIconfig\fR take no \fB\-\-cn\fR;
+the CA common name; \fIconfig\fR takes no \fB\-\-cn\fR;
 \fInonce\fR takes \fB\-\-id\fR instead and returns the pending nonce while
 most of its 5-minute validity remains, rotating it otherwise. \fB\-\-cn\fR
 \fB\-\fR reads the CN from standard input (piping from \fBsign\fR). Needs no
@@ -134,8 +129,8 @@ revocations, configuration snapshot, query index.
 Published CA certificates (PEM and DER) and signed CRLs, named for the
 AIA/CDP URLs.
 .TP
-.B <store>/ee/<cn-slug>.{crt,key} <store>/ocsp/<slug>.{crt,key}
-Delivered end-entity and OCSP responder credentials.
+.B <store>/ee/<cn-slug>.{crt,key}
+Delivered end-entity credentials.
 .TP
 .B yca.log
 Diagnostic log, next to the store directory (\fB\-\-log\fR overrides).
@@ -155,4 +150,4 @@ yca get crl \-\-cn signing\-ca > signing.crl
 yca list \-\-expiring 7
 .fi
 .SH SEE ALSO
-.BR yca\-ocsp (1)
+.BR yca\-acme (1)

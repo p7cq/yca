@@ -34,9 +34,6 @@ signing_ca_slug = "ca-e1"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-ocsp_cn = "CA E1 OCSP Responder"
-ocsp_slug = "ca-e1-ocsp-responder"
-ocsp_valid_days = 7
 root_arc_oid = "1.3.6.1.4.1.00000"
 EOF
 
@@ -157,30 +154,27 @@ openssl crl -inform DER -in "$PKI/ca/ca-e1.crl" -CAfile "$PKI/ca/ca-e1.pem" -noo
   grep -c 'Serial Number')" -ge 1 ] &&
   ok "CRL lists a revoked serial" || bad "CRL has no entries"
 
-# --- ocsp + crl ---
-w create ocsp >/dev/null 2>&1 && ok "create ocsp" || bad "create ocsp"
-{ [ -f "$PKI/ocsp/ca-e1-ocsp-responder.crt" ] &&
-  [ -f "$PKI/ocsp/ca-e1-ocsp-responder.key" ]; } &&
-  ok "ocsp cert+key delivered" || bad "ocsp artifacts missing"
-w get ocsp 2>/dev/null | openssl x509 -noout -ext extendedKeyUsage 2>/dev/null |
-  grep -q "OCSP Signing" && ok "get ocsp -> OCSPSigning EKU" || bad "get ocsp EKU"
-w get ocsp 2>/dev/null | openssl x509 -noout -text 2>/dev/null |
-  grep -qi "OCSP No Check" && ok "ocsp cert has nocheck" || bad "ocsp nocheck missing"
-# EE-class cert: signed with ee_digest (SHA-256 here), not signing_ca_digest
-w get ocsp 2>/dev/null | openssl x509 -noout -text 2>/dev/null |
-  grep -q "Signature Algorithm: ecdsa-with-SHA256" &&
-  ok "ocsp cert signed with ee_digest" || bad "ocsp cert digest"
-w create ocsp >/dev/null 2>&1 &&
-  bad "duplicate ocsp accepted" || ok "duplicate ocsp rejected"
-w revoke ocsp --reason superseded >/dev/null 2>&1 &&
-  ok "revoke ocsp" || bad "revoke ocsp"
-w get ocsp >/dev/null 2>&1 && bad "revoked ocsp still active" || ok "revoked ocsp gone"
-w create ocsp >/dev/null 2>&1 &&
-  ok "re-issue ocsp after revoke" || bad "re-issue ocsp"
+# --- crl exports + CRL-only pointer extensions ---
 w get crl --cn signing-ca 2>/dev/null | openssl crl -noout -issuer 2>/dev/null |
   grep -q "CA E1" && ok "get crl signing-ca" || bad "get crl signing-ca"
 w get crl --cn root-ca 2>/dev/null | openssl crl -noout -issuer 2>/dev/null |
   grep -q "ETS Root E1" && ok "get crl root-ca" || bad "get crl root-ca"
+# Revocation is CRL-only: no certificate advertises an OCSP URI; AIA keeps
+# caIssuers and the CDP points at the issuer's CRL.
+SIGN_TEXT="$(w get ca --cn signing-ca 2>/dev/null | openssl x509 -noout -text 2>/dev/null)"
+printf '%s' "$SIGN_TEXT" | grep -q "OCSP - URI" &&
+  bad "signing CA advertises OCSP" || ok "signing CA carries no OCSP pointer"
+printf '%s' "$SIGN_TEXT" | grep -q "CA Issuers - URI:.*ets-root-e1.crt" &&
+  ok "signing CA caIssuers points at the root" || bad "signing CA caIssuers"
+printf '%s' "$SIGN_TEXT" | grep -q "ets-root-e1.crl" &&
+  ok "signing CA CDP points at the root CRL" || bad "signing CA CDP"
+EE_TEXT="$(w get server --cn foo.ca 2>/dev/null | openssl x509 -noout -text 2>/dev/null)"
+printf '%s' "$EE_TEXT" | grep -q "OCSP - URI" &&
+  bad "EE advertises OCSP" || ok "EE carries no OCSP pointer"
+printf '%s' "$EE_TEXT" | grep -q "CA Issuers - URI:.*ca-e1.crt" &&
+  ok "EE caIssuers points at the signing CA" || bad "EE caIssuers"
+printf '%s' "$EE_TEXT" | grep -q "ca-e1.crl" &&
+  ok "EE CDP points at the signing CRL" || bad "EE CDP"
 
 # --- refresh crl: same entries, crlNumber+1, fresh nextUpdate ---
 # crlnum emits "0x01"-style hex; bash arithmetic evaluates it natively.
@@ -274,7 +268,7 @@ sed 's/pki.example.ca/pki.drift.ca/' "$CFG" >"$WORK/ro.toml"
 grep -q "ignoring readonly" "$LOG" &&
   ok "readonly drift warned (log)" || bad "readonly drift not warned"
 w get server --cn ro.ca 2>/dev/null | openssl x509 -noout -text 2>/dev/null |
-  grep -q "pki.example.ca/ocsp" &&
+  grep -q "pki.example.ca/ca-e1.crt" &&
   ok "readonly drift ignored (DB value used)" || bad "readonly drift applied"
 # tunable change on create -> synced into DB
 sed 's/ee_valid_days = 397/ee_valid_days = 90/' "$CFG" >"$WORK/tune.toml"
@@ -339,15 +333,15 @@ diff -q "$WORK/dump1.toml" "$WORK/dump2.toml" >/dev/null &&
   ok "get config round-trips" || bad "get config round-trip mismatch"
 
 # --- 3. reconcile is create-only ---
-DB_OCSP="$(w get config 2>/dev/null | grep '^ocsp_valid_days')"
-sed 's/^ocsp_valid_days = .*/ocsp_valid_days = 20/' "$CFG" >"$WORK/o20.toml"
-GOT="$("$BIN" --config "$WORK/o20.toml" --store "$PKI" get config 2>/dev/null |
-  grep '^ocsp_valid_days')"
-[ "$GOT" = "$DB_OCSP" ] &&
+DB_EE="$(w get config 2>/dev/null | grep '^ee_valid_days')"
+sed 's/^ee_valid_days = .*/ee_valid_days = 120/' "$CFG" >"$WORK/e120.toml"
+GOT="$("$BIN" --config "$WORK/e120.toml" --store "$PKI" get config 2>/dev/null |
+  grep '^ee_valid_days')"
+[ "$GOT" = "$DB_EE" ] &&
   ok "get does not reconcile (create-only)" || bad "get reconciled tunable"
-"$BIN" --config "$WORK/o20.toml" --store "$PKI" create server --cn sync20.ca \
+"$BIN" --config "$WORK/e120.toml" --store "$PKI" create server --cn sync120.ca \
   >/dev/null 2>&1
-w get config 2>/dev/null | grep -q "ocsp_valid_days = 20" &&
+w get config 2>/dev/null | grep -q "ee_valid_days = 120" &&
   ok "create reconciles tunable to DB" || bad "create did not sync"
 
 # --- --valid override (server/client only, shrink-only) ---
@@ -365,9 +359,8 @@ w create server --cn vfast.ca --valid 4m >/dev/null 2>&1 &&
   bad "--valid < 5m accepted" || ok "--valid < 5m rejected"
 w create server --cn vbad.ca --valid 90x >/dev/null 2>&1 &&
   bad "malformed --valid accepted" || ok "malformed --valid rejected"
-w create ocsp --valid 1h >/dev/null 2>&1
-grep -q "takes no --cn/--san/--valid" "$LOG" &&
-  ok "create ocsp ignores --valid (info)" || bad "ocsp --valid info missing"
+w create ocsp --cn x >/dev/null 2>&1 &&
+  bad "create ocsp accepted" || ok "create ocsp rejected (target removed)"
 
 # --- 4. create ca / revoke ca rejected ---
 w create ca --cn x >/dev/null 2>&1 && bad "create ca accepted" || ok "create ca rejected"
