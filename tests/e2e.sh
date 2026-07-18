@@ -208,6 +208,33 @@ NU_AFTER="$(openssl crl -inform DER -in "$PKI/ca/ca-e1.crl" -noout -nextupdate |
 (unset CA_STORE_PASSPHRASE && w refresh crl >/dev/null 2>&1) &&
   bad "refresh without secret accepted" || ok "refresh without secret rejected"
 
+# --- refresh crl scopes: signing and root run on separate cadences ---
+SN_SCOPED="$(crlnum "$PKI/ca/ca-e1.crl")"
+RN_SCOPED="$(crlnum "$PKI/ca/ets-root-e1.crl")"
+w refresh crl signing >/dev/null 2>&1 &&
+  ok "refresh crl signing" || bad "refresh crl signing"
+[ "$(($(crlnum "$PKI/ca/ca-e1.crl")))" -eq "$((SN_SCOPED + 1))" ] &&
+  [ "$(($(crlnum "$PKI/ca/ets-root-e1.crl")))" -eq "$((RN_SCOPED))" ] &&
+  ok "signing scope leaves the root CRL untouched" ||
+  bad "signing scope touched the root CRL"
+w refresh crl root >/dev/null 2>&1 &&
+  ok "refresh crl root" || bad "refresh crl root"
+[ "$(($(crlnum "$PKI/ca/ets-root-e1.crl")))" -eq "$((RN_SCOPED + 1))" ] &&
+  [ "$(($(crlnum "$PKI/ca/ca-e1.crl")))" -eq "$((SN_SCOPED + 1))" ] &&
+  ok "root scope leaves the signing CRL untouched" ||
+  bad "root scope touched the signing CRL"
+# 183-day root horizon vs 7-day signing horizon (no clamping: both CAs
+# have years of life left in this config).
+RNU="$(openssl crl -inform DER -in "$PKI/ca/ets-root-e1.crl" -noout -nextupdate | cut -d= -f2)"
+SNU="$(openssl crl -inform DER -in "$PKI/ca/ca-e1.crl" -noout -nextupdate | cut -d= -f2)"
+NOW="$(date +%s)"
+[ "$(epoch "$RNU")" -gt "$((NOW + 180 * 86400))" ] &&
+  ok "root CRL carries the 6-month horizon" || bad "root CRL horizon"
+[ "$(epoch "$SNU")" -lt "$((NOW + 8 * 86400))" ] &&
+  ok "signing CRL keeps the 7-day horizon" || bad "signing CRL horizon"
+w refresh crl bogus >/dev/null 2>&1 &&
+  bad "bogus refresh scope accepted" || ok "bogus refresh scope rejected"
+
 # --- config validation ---
 sed 's/SHA-384/SHA-999/' "$CFG" >"$WORK/bad.toml"
 "$BIN" --config "$WORK/bad.toml" --store "$WORK/pki2" init >/dev/null 2>&1 &&

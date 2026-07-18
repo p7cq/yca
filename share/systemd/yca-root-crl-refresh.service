@@ -1,0 +1,45 @@
+# systemd service re-signing the published yca root CRL.
+# Started by yca-root-crl-refresh.timer.
+#
+# `yca refresh crl root` re-signs the root CRL from its current entry set:
+# same revocations, crlNumber+1, fresh thisUpdate/nextUpdate. The root CRL
+# promises re-publication within root_crl_next_update_days (183): the root
+# only certifies the signing CA, so it follows offline-root practice with
+# a 6-month horizon. Trade-off: a signing CA revocation reaches relying
+# parties only after `yca refresh crl root` is also run by hand - do that
+# immediately after revoking the signing CA.
+
+[Unit]
+Description=Re-sign the published yca root CRL
+
+[Service]
+Type=oneshot
+User=yca
+Group=yca
+EnvironmentFile=/etc/yca/yca.env
+ExecStart=/usr/local/bin/yca --config /var/lib/yca/yca.toml --store /var/lib/yca/store refresh crl root
+
+# State dir: rw; pkcs11 backend: AF_UNIX (pcscd); no network.
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/yca
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

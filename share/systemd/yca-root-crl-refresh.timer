@@ -1,0 +1,18 @@
+# systemd timer driving yca-root-crl-refresh.service.
+#
+# Cadence vs nextUpdate: the root CRL promises re-publication within
+# root_crl_next_update_days (183). Quarterly leaves about 3 months of
+# margin; keep the interval comfortably below the horizon if you change
+# either. Persistent=true matters at this cadence: a machine that is off
+# at the scheduled moment still runs the job on the next boot.
+
+[Unit]
+Description=Periodic re-signing of the published yca root CRL
+
+[Timer]
+OnCalendar=*-01,04,07,10-01 03:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

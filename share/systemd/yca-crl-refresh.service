@@ -1,21 +1,21 @@
-# systemd service re-signing the published yca CRLs.
+# systemd service re-signing the published yca signing CRL.
 # Started by yca-crl-refresh.timer.
 #
-# `yca refresh crl` re-signs both CRLs (root + signing) from their current
-# entry sets: same revocations, crlNumber+1, fresh thisUpdate/nextUpdate.
+# `yca refresh crl signing` re-signs the signing CRL from its current
+# entry set: same revocations, crlNumber+1, fresh thisUpdate/nextUpdate.
 # Without it a strict CRL checker considers the signing CRL stale
-# crl_next_update_days (7) after the last revocation, and the root CRL 7
-# days after init.
+# crl_next_update_days (7) after the last revocation. The root CRL runs
+# on its own, much slower cadence - see yca-root-crl-refresh.{service,timer}.
 
 [Unit]
-Description=Re-sign the published yca CRLs
+Description=Re-sign the published yca signing CRL
 
 [Service]
 Type=oneshot
 User=yca
 Group=yca
 EnvironmentFile=/etc/yca/yca.env
-ExecStart=/usr/local/bin/yca --config /var/lib/yca/yca.toml --store /var/lib/yca/store refresh crl
+ExecStart=/usr/local/bin/yca --config /var/lib/yca/yca.toml --store /var/lib/yca/store refresh crl signing
 
 # State dir: rw; pkcs11 backend: AF_UNIX (pcscd); no network.
 UMask=0077

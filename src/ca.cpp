@@ -189,8 +189,9 @@ bool outlives_issuer(const Botan::X509_Certificate &issuer,
   return true;
 }
 
-uint32_t crl_next_update(const Botan::X509_Certificate &issuer) {
-  const std::size_t want = util::days_to_seconds(app::crl_next_update_days);
+uint32_t crl_next_update(const Botan::X509_Certificate &issuer,
+                         int horizon_days) {
+  const std::size_t want = util::days_to_seconds(horizon_days);
   const std::size_t na = issuer.not_after().time_since_epoch();
   const std::size_t now = now_epoch();
   return static_cast<uint32_t>(std::max<std::size_t>(
@@ -585,8 +586,14 @@ bool create(const cfg::Config &config, const fs::path &db_path,
   Botan::X509_CA sign_ca(sign_cert, *sign_key, config.signing_ca_digest, rng);
   const fs::path root_crl = ca_dir / (root_s + ".crl");
   const fs::path sign_crl = ca_dir / (sign_s + ".crl");
-  if (!write_der(root_crl, issuer.new_crl(rng, crl_next_update(root_cert))) ||
-      !write_der(sign_crl, sign_ca.new_crl(rng, crl_next_update(sign_cert))))
+  if (!write_der(root_crl,
+                 issuer.new_crl(rng, crl_next_update(
+                                         root_cert,
+                                         app::root_crl_next_update_days))) ||
+      !write_der(sign_crl,
+                 sign_ca.new_crl(rng, crl_next_update(
+                                          sign_cert,
+                                          app::crl_next_update_days))))
     log::warn("could not write CRLs under {}", ca_dir.string());
 
   log::info("created 2-tier CA: root '{}' + signing '{}'", config.root_ca_cn,
@@ -1492,8 +1499,9 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   Botan::X509_CA ca(*sign_cert, *sign_key, config.signing_ca_digest, rng);
   const std::vector<Botan::CRL_Entry> entries{
       Botan::CRL_Entry(*target_cert, *reason)};
-  const auto updated =
-      ca.update_crl(prev, entries, rng, crl_next_update(*sign_cert));
+  const auto updated = ca.update_crl(
+      prev, entries, rng,
+      crl_next_update(*sign_cert, app::crl_next_update_days));
   if (!write_der(crl_path, updated)) {
     log::error("could not write CRL {}", crl_path.string());
     return false;
@@ -1518,7 +1526,7 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
 }
 
 bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
-                 std::string_view secret) {
+                 std::string_view secret, CrlScope scope) {
   const fs::path db = store_path(store_dir);
   if (!fs::exists(db)) {
     log::error("not initialized; run '{} init'", app::name);
@@ -1529,11 +1537,21 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
+  const bool do_root = scope != CrlScope::Signing;
+  const bool do_sign = scope != CrlScope::Root;
+
   const fs::path ca_dir = store_dir / "ca";
   const fs::path root_pem = ca_dir / (config.root_ca_slug + ".pem");
   const fs::path root_crl_path = ca_dir / (config.root_ca_slug + ".crl");
   const fs::path sign_crl_path = ca_dir / (config.signing_ca_slug + ".crl");
-  for (const fs::path &p : {root_pem, root_crl_path, sign_crl_path}) {
+  std::vector<fs::path> needed;
+  if (do_root) {
+    needed.push_back(root_pem);
+    needed.push_back(root_crl_path);
+  }
+  if (do_sign)
+    needed.push_back(sign_crl_path);
+  for (const fs::path &p : needed) {
     if (!fs::exists(p)) {
       log::error("{} not found", p.string());
       return false;
@@ -1544,57 +1562,76 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
 
-  auto sign_cert = load_signing_cert(config, store_dir);
-  if (!sign_cert) {
-    log::error("signing CA cert not found under {}", ca_dir.string());
-    return false;
+  std::optional<Botan::X509_Certificate> sign_cert;
+  if (do_sign) {
+    sign_cert = load_signing_cert(config, store_dir);
+    if (!sign_cert) {
+      log::error("signing CA cert not found under {}", ca_dir.string());
+      return false;
+    }
   }
-  Botan::X509_Certificate root_cert(root_pem.string());
+  std::optional<Botan::X509_Certificate> root_cert;
+  if (do_root)
+    root_cert.emplace(root_pem.string());
 
-  // Both CA keys through one token session (backend pkcs11), loaded before
-  // the write lock: a HSM lookup takes seconds and other writers wait at
-  // most busy_timeout. In a real deployment the root key would be offline
-  // with its own CRL cadence; yca keeps both in one store.
+  // Only the keys the scope needs, through one token session (backend
+  // pkcs11), loaded before the write lock: a HSM lookup takes seconds and
+  // other writers wait at most busy_timeout. The signing scope never
+  // touches the root key - that is the point of the separate root cadence
+  // (root_crl_next_update_days vs crl_next_update_days).
   std::optional<p11::Token> token;
   std::shared_ptr<const Botan::Private_Key> root_key, sign_key;
   try {
-    root_key = ca_key(config, store, root_cert, config.root_ca_slug,
-                      config.root_ca_curve, secret, token);
-    sign_key = signing_key(config, store, *sign_cert, secret, token);
+    if (do_root)
+      root_key = ca_key(config, store, *root_cert, config.root_ca_slug,
+                        config.root_ca_curve, secret, token);
+    if (do_sign)
+      sign_key = signing_key(config, store, *sign_cert, secret, token);
   } catch (const std::exception &e) {
     log::error("cannot load CA key (wrong {}?): {}",
                config.key_backend == "internal" ? "passphrase" : "user PIN",
                e.what());
     return false;
   }
-  if (!root_key || !sign_key) {
+  if ((do_root && !root_key) || (do_sign && !sign_key)) {
     log::error("CA key missing from store");
     return false;
   }
 
   // Same lock discipline as revoke: read-CRL -> write-CRL under the write
   // lock, so a refresh cannot lose a concurrent revocation's entry.
-  begin_write(*dbh);
-  Botan::X509_CRL root_prev(root_crl_path.string());
-  Botan::X509_CRL sign_prev(sign_crl_path.string());
-  Botan::X509_CA root_ca(root_cert, *root_key, config.root_ca_digest, rng);
-  Botan::X509_CA sign_ca(*sign_cert, *sign_key, config.signing_ca_digest, rng);
   // update_crl with no new entries IS the refresh: same revocation set,
   // crlNumber+1, fresh thisUpdate/nextUpdate.
-  const auto root_new =
-      root_ca.update_crl(root_prev, {}, rng, crl_next_update(root_cert));
-  const auto sign_new =
-      sign_ca.update_crl(sign_prev, {}, rng, crl_next_update(*sign_cert));
-  const bool ok =
-      write_der(root_crl_path, root_new) && write_der(sign_crl_path, sign_new);
+  begin_write(*dbh);
+  bool ok = true;
+  std::string refreshed;
+  if (do_root) {
+    Botan::X509_CRL prev(root_crl_path.string());
+    Botan::X509_CA root_ca(*root_cert, *root_key, config.root_ca_digest, rng);
+    const auto next = root_ca.update_crl(
+        prev, {}, rng,
+        crl_next_update(*root_cert, app::root_crl_next_update_days));
+    ok = write_der(root_crl_path, next) && ok;
+    refreshed = std::format("root #{}", next.crl_number());
+  }
+  if (do_sign) {
+    Botan::X509_CRL prev(sign_crl_path.string());
+    Botan::X509_CA sign_ca(*sign_cert, *sign_key, config.signing_ca_digest,
+                           rng);
+    const auto next = sign_ca.update_crl(
+        prev, {}, rng,
+        crl_next_update(*sign_cert, app::crl_next_update_days));
+    ok = write_der(sign_crl_path, next) && ok;
+    refreshed += std::format("{}signing #{}", refreshed.empty() ? "" : ", ",
+                             next.crl_number());
+  }
   commit_write(*dbh);
   if (!ok) {
     log::error("could not write CRLs under {}", ca_dir.string());
     return false;
   }
 
-  log::info("refreshed CRLs (root #{}, signing #{})", root_new.crl_number(),
-            sign_new.crl_number());
+  log::info("refreshed CRLs ({})", refreshed);
   return true;
 }
 

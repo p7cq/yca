@@ -523,7 +523,7 @@ TEST_CASE("renewal window: a near-expiry active cert may be superseded") {
       ca::revoke(*eff, t.dir, kPass, "server", "rw.ut.ca", "superseded"));
 }
 
-TEST_CASE("ca::refresh_crl re-signs both CRLs in place") {
+TEST_CASE("ca::refresh_crl re-signs the scoped CRLs in place") {
   TempPki t;
   REQUIRE(ca::init(t.config, t.dir, kPass));
   auto eff = ca::load_config(t.dir);
@@ -536,7 +536,7 @@ TEST_CASE("ca::refresh_crl re-signs both CRLs in place") {
   const Botan::X509_CRL root_before(root_path), sign_before(sign_path);
 
   CHECK_FALSE(ca::refresh_crl(*eff, t.dir, "wrong")); // bad passphrase
-  REQUIRE(ca::refresh_crl(*eff, t.dir, kPass));
+  REQUIRE(ca::refresh_crl(*eff, t.dir, kPass));       // default scope: all
 
   const Botan::X509_CRL root_after(root_path), sign_after(sign_path);
   CHECK(root_after.crl_number() == root_before.crl_number() + 1);
@@ -546,6 +546,27 @@ TEST_CASE("ca::refresh_crl re-signs both CRLs in place") {
   CHECK(root_after.get_revoked().empty());
   CHECK(sign_after.next_update().time_since_epoch() >=
         sign_before.next_update().time_since_epoch());
+
+  // Separate cadences: each CRL promises its own horizon (neither CA is
+  // near notAfter here, so no clamping).
+  CHECK(sign_after.next_update().time_since_epoch() -
+            sign_after.this_update().time_since_epoch() ==
+        static_cast<uint64_t>(app::crl_next_update_days) * 24 * 60 * 60);
+  CHECK(root_after.next_update().time_since_epoch() -
+            root_after.this_update().time_since_epoch() ==
+        static_cast<uint64_t>(app::root_crl_next_update_days) * 24 * 60 * 60);
+
+  // Signing scope: signing CRL advances, root CRL stays byte-identical.
+  REQUIRE(ca::refresh_crl(*eff, t.dir, kPass, ca::CrlScope::Signing));
+  const Botan::X509_CRL root_s(root_path), sign_s(sign_path);
+  CHECK(sign_s.crl_number() == sign_after.crl_number() + 1);
+  CHECK(root_s.crl_number() == root_after.crl_number());
+
+  // Root scope: the mirror image.
+  REQUIRE(ca::refresh_crl(*eff, t.dir, kPass, ca::CrlScope::Root));
+  const Botan::X509_CRL root_r(root_path), sign_r(sign_path);
+  CHECK(root_r.crl_number() == root_s.crl_number() + 1);
+  CHECK(sign_r.crl_number() == sign_s.crl_number());
 }
 
 TEST_CASE("CRL nextUpdate is clamped to the issuer's notAfter") {
@@ -556,14 +577,20 @@ TEST_CASE("CRL nextUpdate is clamped to the issuer's notAfter") {
   o.CA_key();
   const auto short_ca =
       Botan::X509::create_self_signed_cert(o, key, "SHA-256", rng);
-  const uint32_t nu = ca::detail::crl_next_update(short_ca);
+  const uint32_t nu =
+      ca::detail::crl_next_update(short_ca, app::crl_next_update_days);
   CHECK(nu <= 24u * 60 * 60); // clamped to the issuer's remaining life...
   CHECK(nu > 23u * 60 * 60);  // ...not floored away
+  // The clamp also caps the root horizon on a short-lived issuer.
+  CHECK(ca::detail::crl_next_update(short_ca, app::root_crl_next_update_days) <=
+        24u * 60 * 60);
 
   Botan::X509_Cert_Options o2("UT Long CA", 3650 * 24 * 60 * 60);
   o2.CA_key();
   const auto long_ca =
       Botan::X509::create_self_signed_cert(o2, key, "SHA-256", rng);
-  CHECK(ca::detail::crl_next_update(long_ca) == // full horizon
+  CHECK(ca::detail::crl_next_update(long_ca, app::crl_next_update_days) ==
         static_cast<uint32_t>(app::crl_next_update_days) * 24u * 60 * 60);
+  CHECK(ca::detail::crl_next_update(long_ca, app::root_crl_next_update_days) ==
+        static_cast<uint32_t>(app::root_crl_next_update_days) * 24u * 60 * 60);
 }

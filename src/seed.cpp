@@ -121,8 +121,10 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
   Botan::X509_CRL prev(crl_path.string());
   Botan::X509_CA crl_issuer(*sign_cert, *sign_key, config.signing_ca_digest,
                             rng);
-  if (!write_der(crl_path, crl_issuer.update_crl(prev, revoked, rng,
-                                                 crl_next_update(*sign_cert))))
+  if (!write_der(crl_path,
+                 crl_issuer.update_crl(
+                     prev, revoked, rng,
+                     crl_next_update(*sign_cert, app::crl_next_update_days))))
     // ERROR, not WARN: warns are file-only and the operator should see this.
     log::error("could not write CRL {}", crl_path.string());
 

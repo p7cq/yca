@@ -118,13 +118,20 @@ bool revoke(const cfg::Config &config, const std::filesystem::path &store_dir,
             const std::string &cn, const std::string &reason,
             const std::string &serial = "");
 
-// Re-signs both published CRLs (root + signing) from their current entry
-// sets: same revocations, crlNumber+1, fresh thisUpdate/nextUpdate. Run it
-// on a schedule shorter than app::crl_next_update_days (see
-// share/systemd/yca-crl-refresh.*) so relying parties never see a stale CRL.
+// Which published CRLs refresh_crl re-signs. Root and Signing exist so the
+// two CRLs can run on separate cadences (app::root_crl_next_update_days vs
+// app::crl_next_update_days) - a signing-scope run never loads the root key.
+enum class CrlScope { Root, Signing, All };
+
+// Re-signs the published CRLs selected by `scope` from their current entry
+// sets: same revocations, crlNumber+1, fresh thisUpdate/nextUpdate. Run
+// each scope on a schedule shorter than its nextUpdate horizon (see
+// share/systemd/yca-crl-refresh.* for signing, daily, and
+// share/systemd/yca-root-crl-refresh.* for root, quarterly) so relying
+// parties never see a stale CRL.
 bool refresh_crl(const cfg::Config &config,
                  const std::filesystem::path &store_dir,
-                 std::string_view secret);
+                 std::string_view secret, CrlScope scope = CrlScope::All);
 
 // Writes a certificate to stdout. `profile` is "ca", "server", or "client".
 // For "ca", `selector` is an alias ("root-ca"/"signing-ca") or the CA CN; for

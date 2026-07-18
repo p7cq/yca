@@ -1,11 +1,12 @@
-# systemd timer driving yca-crl-refresh.service.
+# systemd timer driving yca-crl-refresh.service (signing CRL only).
 #
-# Cadence vs nextUpdate: the CRLs re-publication is within
+# Cadence vs nextUpdate: the signing CRL promises re-publication within
 # crl_next_update_days (7). Daily leaves 6 days of margin; keep the
-# interval comfortably below the horizon if you change either.
+# interval comfortably below the horizon if you change either. The root
+# CRL has its own timer - see yca-root-crl-refresh.timer.
 
 [Unit]
-Description=Periodic re-signing of the published yca CRLs
+Description=Periodic re-signing of the published yca signing CRL
 
 [Timer]
 OnCalendar=*-*-* 03:00

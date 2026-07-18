@@ -67,7 +67,8 @@ _yca() {
       ;;
     refresh)
       _arguments \
-        '1:target:(crl)'
+        '1:target:(crl)' \
+        '2:scope:(root signing all)'
       ;;
     get)
       _arguments \

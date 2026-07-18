@@ -102,10 +102,12 @@ int main(int argc, char **argv) {
 
   auto *refresh =
       app.add_subcommand("refresh", "re-sign the CRLs with a fresh nextUpdate");
-  std::string f_target;
+  std::string f_target, f_scope = "all";
   refresh->add_option("target", f_target, "crl")
       ->required()
       ->check(CLI::IsMember({"crl"}));
+  refresh->add_option("scope", f_scope, "root|signing|all (default all)")
+      ->check(CLI::IsMember({"root", "signing", "all"}));
 
   auto *get = app.add_subcommand(
       "get", "export a certificate, CRL, nonce or the config to stdout");
@@ -269,8 +271,12 @@ int main(int argc, char **argv) {
                  : 1;
     }
 
-    if (*refresh)
-      return ca::refresh_crl(*eff, store_dir, secret(*eff)) ? 0 : 1;
+    if (*refresh) {
+      const ca::CrlScope scope = f_scope == "root"      ? ca::CrlScope::Root
+                                 : f_scope == "signing" ? ca::CrlScope::Signing
+                                                        : ca::CrlScope::All;
+      return ca::refresh_crl(*eff, store_dir, secret(*eff), scope) ? 0 : 1;
+    }
 
     if (*get) {
       if (g_target == "nonce") {

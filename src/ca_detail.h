@@ -63,10 +63,13 @@ std::size_t now_epoch();
 bool outlives_issuer(const Botan::X509_Certificate &issuer,
                      std::chrono::seconds validity);
 
-// CRL nextUpdate offset from now, in seconds: app::crl_next_update_days,
-// clamped so the promise never extends past the issuer's own notAfter (a CA
-// cannot promise a publication after its own expiry). One-hour floor keeps
-// the field sane even on an already-expired issuer - revocation stays legal.
-uint32_t crl_next_update(const Botan::X509_Certificate &issuer);
+// CRL nextUpdate offset from now, in seconds: `horizon_days`
+// (app::crl_next_update_days for the signing CRL,
+// app::root_crl_next_update_days for the root CRL), clamped so the promise
+// never extends past the issuer's own notAfter (a CA cannot promise a
+// publication after its own expiry). One-hour floor keeps the field sane
+// even on an already-expired issuer - revocation stays legal.
+uint32_t crl_next_update(const Botan::X509_Certificate &issuer,
+                         int horizon_days);
 
 } // namespace ca::detail

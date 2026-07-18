@@ -83,12 +83,18 @@ case-insensitive CRLReason: \fBunspecified\fR (default),
 \fBsuperseded\fR, \fBcessationOfOperation\fR, \fBcertificateHold\fR,
 \fBremoveFromCRL\fR, \fBprivilegeWithdrawn\fR, \fBaACompromise\fR.
 .TP
-\fBrefresh\fR \fIcrl\fR
-Re-sign both published CRLs (root and signing) from their current entry
-sets: same revocations, crlNumber+1, fresh thisUpdate/nextUpdate (7 days,
-clamped to the issuing CA's notAfter). Run it on a schedule shorter than
-that horizon (see \fByca-crl-refresh.timer\fR) so relying parties never see
-a stale CRL.
+\fBrefresh\fR \fIcrl\fR [\fBroot\fR|\fBsigning\fR|\fBall\fR]
+Re-sign the published CRLs selected by the scope (default \fBall\fR) from
+their current entry sets: same revocations, crlNumber+1, fresh
+thisUpdate/nextUpdate. The signing CRL promises re-publication within 7
+days, the root CRL within 183 days (both clamped to the issuing CA's
+notAfter); the \fBsigning\fR scope never loads the root key. Run each
+scope on a schedule shorter than its horizon (daily
+\fByca-crl-refresh.timer\fR, quarterly \fByca-root-crl-refresh.timer\fR)
+so relying parties never see a stale CRL. Trade-off of the long root
+horizon: after revoking the signing CA, run \fBrefresh\fR \fIcrl\fR
+\fBroot\fR by hand - relying parties may otherwise trust their cached
+root CRL for up to 6 months.
 .TP
 \fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIocsp\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR]
 Write a certificate, CRL, the effective (database) configuration, or an

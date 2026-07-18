@@ -61,12 +61,22 @@ inline constexpr int renew_window_pct = 33;
 inline constexpr std::size_t passphrase_bytes = 32;
 inline constexpr std::size_t nonce_bytes = 32;
 
-// CRL nextUpdate horizon, in days: the re-publication promise made to
-// relying parties (previously Botan's implicit 604800-second default).
-// Clamped at signing time to the issuing CA's own notAfter - see
+// CRL nextUpdate horizons, in days: the re-publication promise made to
+// relying parties (previously Botan's implicit 604800-second default for
+// both). Clamped at signing time to the issuing CA's own notAfter - see
 // ca::detail::crl_next_update - with a floor that keeps the field sane
 // even on an already-expired issuer.
+//
+// The root CRL gets its own, much longer horizon: the root only certifies
+// the signing CA (routine revocations land on the signing CRL), so it
+// follows offline-root practice - 6 months, within the industry-standard
+// 6-12 month band. Trade-off: revoking the signing CA propagates to
+// relying parties only after `yca refresh crl root` is run by hand.
+// Each horizon has its own timer; keep the timer interval comfortably
+// below the horizon (see share/systemd/yca-crl-refresh.timer and
+// yca-root-crl-refresh.timer).
 inline constexpr int crl_next_update_days = 7;
+inline constexpr int root_crl_next_update_days = 183;
 inline constexpr int crl_next_update_floor_secs = 60 * 60;
 
 // SQLite busy_timeout set on EVERY store connection, in ms - the bounded
