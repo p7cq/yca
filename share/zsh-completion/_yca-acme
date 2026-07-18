@@ -1,0 +1,37 @@
+#compdef yca-acme
+# zsh completion for the yca ACME frontend.
+#
+# Install: copy (or symlink) into a directory on $fpath, e.g.
+#   cp share/zsh-completion/_yca-acme /usr/local/share/zsh/site-functions/
+# then restart zsh (or run: autoload -U compinit && compinit).
+
+_yca-acme() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  if [[ $words[2] == eab ]]; then
+    _arguments \
+      '2:verb:(new list delete)' \
+      '--state[protocol state database (default ./acme.db)]:state db:_files' \
+      '--allow[identifier patterns, comma-separated (exact or *.suffix; empty = any)]:patterns:' \
+      '*:kid (for delete):'
+    return
+  fi
+
+  _arguments \
+    '1:command:(eab)' \
+    '--state[protocol state database (default ./acme.db)]:state db:_files' \
+    '--listen[listen address (default 127.0.0.1:8555)]:address:' \
+    '--url[external base URL clients use (JWS url binding)]:url:' \
+    '--yca[path to the yca binary]:yca binary:_files' \
+    '--config[yca --config (passed through)]:config file:_files -g "*.toml"' \
+    '--store[yca --store (passed through)]:store directory:_files -/' \
+    '--id[enrolled identity used for signing (default acme)]:id:' \
+    '--http01-port[port http-01 validation connects to (default 80)]:port:' \
+    '--dns[resolver for dns-01 TXT lookups, host(:53)]:resolver:' \
+    '--tls-cert[serve TLS with this certificate (may hold the chain)]:cert file:_files' \
+    '--tls-key[TLS private key]:key file:_files' \
+    '--version[print version and exit]'
+}
+
+_yca-acme "$@"

@@ -1,0 +1,108 @@
+.TH YCA-ACME 1 "July 2026" "yca" "User Commands"
+.SH NAME
+yca\-acme \- ACME (RFC 8555) issuance frontend for a yca certificate authority
+.SH SYNOPSIS
+.B yca\-acme
+[\fIflags\fR]
+.br
+.B yca\-acme eab new
+[\fB\-\-state\fR \fIdb\fR] [\fB\-\-allow\fR \fIpatterns\fR]
+.br
+.B yca\-acme eab list
+[\fB\-\-state\fR \fIdb\fR]
+.br
+.B yca\-acme eab delete
+[\fB\-\-state\fR \fIdb\fR] \fIkid\fR
+.SH DESCRIPTION
+.B yca\-acme
+exposes RFC 8555 (ACME) issuance for the server profile of a
+.BR yca (1)
+CA: standard clients (acme.sh, certbot, Caddy, ...) enroll, validate
+control of their names via http\-01 or dns\-01 (wildcards included), and
+receive certificates. The daemon owns only protocol state, kept in its own
+database; every issuance and revocation execs the \fByca\fR CLI, the
+single owner of the CA store, so policy, locking and the audit log apply
+unchanged.
+.PP
+Registration is gated by External Account Binding: credentials are
+provisioned with \fByca\-acme eab new\fR, shown once, and carry an
+identifier allow\-list. The suggested renewal window (ARI, RFC 9773)
+mirrors the CA's renewal\-window policy.
+.SH OPTIONS
+.TP
+.BI \-\-state " db"
+Protocol state database (default: \fB./acme.db\fR). Accounts, EAB
+credentials, orders and issued chains; never the CA store.
+.TP
+.BI \-\-listen " addr"
+Listen address (default: \fB127.0.0.1:8555\fR).
+.TP
+.BI \-\-url " base"
+EXTERNAL base URL, exactly what clients use (e.g.
+\fBhttps://pki.example.ca\fR). Every JWS binds the request URL; a
+mismatch fails all requests with 401.
+.TP
+.BI \-\-yca " path"
+The yca binary (default: \fByca\fR on PATH).
+.TP
+.BI \-\-config " path\fR, \fP\-\-store " dir
+Passed through to the yca CLI.
+.TP
+.BI \-\-id " id"
+Enrolled identity used for signing (default: \fBacme\fR; one\-time
+\fByca enroll \-\-id acme\fR).
+.TP
+.BI \-\-http01\-port " port"
+Port http\-01 validation connects to on identifiers (default: 80).
+.TP
+.BI \-\-dns " host[:53]"
+Resolver for dns\-01 TXT lookups, e.g. the bind serving the identifier
+zones (default: the system resolver).
+.TP
+.BI \-\-tls\-cert " file\fR, \fP\-\-tls\-key " file
+Serve TLS directly (the cert file may hold the full chain). Normally
+unset: nginx terminates TLS (see share/nginx/yca.conf).
+.TP
+.B \-\-version
+Print version and exit.
+.SH COMMANDS
+.TP
+\fBeab new\fR [\fB\-\-allow\fR \fIpatterns\fR]
+Provision an External Account Binding credential; the kid and HMAC key
+are printed ONCE. \fIpatterns\fR is a comma\-separated identifier policy:
+exact names or \fB*.\fIsuffix\fR wildcards (empty = any name).
+.TP
+.B eab list
+List provisioned credentials (kids and policies, never keys).
+.TP
+.BI "eab delete " kid
+Revoke a credential. Accounts registered with it keep existing but can
+no longer order anything (their identifier policy is gone) \- this is
+the containment step for a leaked credential or a decommissioned
+operator.
+.SH ENVIRONMENT
+.TP
+.B CA_STORE_PASSPHRASE / CA_HSM_PIN
+The CA secret for the exec'd \fByca sign\fR/\fByca revoke\fR, per the
+store's key backend. Under systemd it comes from
+\fB/etc/yca/yca.env\fR (see share/systemd/yca\-acme.service).
+.SH FILES
+.TP
+.B acme.db
+Protocol state (0600). Losing it does not affect the CA: issued
+certificates live in the store; clients re\-register.
+.SH EXIT STATUS
+0 on success; the daemon logs to standard error (the journal under
+systemd).
+.SH EXAMPLES
+.nf
+yca enroll \-\-id acme
+yca\-acme eab new \-\-state /var/lib/yca/acme.db \-\-allow '*.example.ca'
+yca\-acme \-\-state /var/lib/yca/acme.db \-\-url https://pki.example.ca \\
+    \-\-yca /usr/local/bin/yca \-\-config /var/lib/yca/yca.toml \\
+    \-\-store /var/lib/yca/store
+.fi
+.SH SEE ALSO
+.BR yca (1),
+.BR yca\-ocsp (1);
+RFC 8555 (ACME), RFC 9773 (ARI).

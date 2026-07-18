@@ -1,0 +1,43 @@
+# systemd service rotating the yca-ocsp responder credential.
+#
+# Rotation = revoke the active responder cert (superseded) + issue a fresh
+# one. The running responder picks the new files up on its own (mtime-based
+# reload) - no restart, no downtime.
+
+[Unit]
+Description=Rotate the yca OCSP responder certificate
+
+[Service]
+Type=oneshot
+User=yca
+Group=yca
+EnvironmentFile=/etc/yca/yca.env
+# The revoke may fail benignly (first rotation, or the old cert already
+# expired) - the '-' prefix ignores that; the create must succeed.
+ExecStart=-/usr/local/bin/yca --config /var/lib/yca/yca.toml --store /var/lib/yca/store revoke ocsp --reason superseded
+ExecStart=/usr/local/bin/yca --config /var/lib/yca/yca.toml --store /var/lib/yca/store create ocsp
+
+# State dir: rw; pkcs11 backend: AF_UNIX (pcscd); no network.
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/yca
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

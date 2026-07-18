@@ -1,0 +1,21 @@
+# openssl req config for a yca client CSR. Only the fields yca honors are
+# requested: a CN-only subject (free-form for the client profile - a person
+# name) and at least one supported SAN (dns, email, IP), which the client
+# profile requires. Anything else in a CSR is ignored - the CA dictates the
+# certificate profile.
+#
+# Usage:
+#   openssl ecparam -genkey -name prime256v1 -noout -out client.key
+#   openssl req -new -key client.key -config client.cnf -out client.csr
+
+[req]
+prompt             = no
+utf8               = yes   # client CN is DN-only: any script is legal
+distinguished_name = dn
+req_extensions     = ext
+
+[dn]
+CN = Client Name
+
+[ext]
+subjectAltName = DNS:server.example.ca

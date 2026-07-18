@@ -1,0 +1,40 @@
+# systemd service publishing the yca repository artifacts (CA certs + CRLs)
+
+[Unit]
+Description=Publish yca CA certificates and CRLs to /srv/yca
+
+[Service]
+Type=oneshot
+User=yca
+Group=yca
+# --max-delete: a misconfigured/empty source triggers job failure instead
+# of wiping the repository.
+ExecStart=/usr/bin/rsync -rt --chmod=F644 --delete --max-delete=8 \
+    --include='*.crt' --include='*.crl' --exclude='*' \
+    /var/lib/yca/store/ca/ /srv/yca/
+
+# Artifacts dir: rw; no network.
+UMask=0022
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/yca
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+RestrictAddressFamilies=
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM

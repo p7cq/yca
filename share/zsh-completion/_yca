@@ -1,0 +1,93 @@
+#compdef yca
+# zsh completion for the yca CA CLI.
+#
+# Copy into a directory on $fpath
+#   cp share/zsh-completion/_yca /usr/local/share/zsh/site-functions/
+# then restart zsh (or: autoload -U compinit && compinit).
+
+_yca() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  local -a commands=(
+    'init:initialize the PKI (create root + signing CA)'
+    'create:issue a certificate (server|client|ocsp)'
+    'enroll:enroll an identity for CSR signing'
+    'sign:issue a certificate from a PKCS#10 CSR (server|client)'
+    'revoke:revoke a certificate'
+    'refresh:re-sign the CRLs with a fresh nextUpdate'
+    'get:export a certificate, CRL, nonce or the config to stdout'
+    'list:list certificates by filter'
+  )
+  local -a reasons=(
+    unspecified keyCompromise cACompromise affiliationChanged superseded
+    cessationOfOperation certificateHold removeFromCRL privilegeWithdrawn
+    aACompromise
+  )
+
+  _arguments -C \
+    '--config[config file (default yca.toml)]:config file:_files -g "*.toml"' \
+    '--store[store/artifacts directory (default ./store)]:store directory:_files -/' \
+    '--log[log file (default yca.log next to the store)]:log file:_files' \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '--version[print version and exit]' \
+    '1: :->cmds' \
+    '*::arg:->args'
+
+  case $state in
+  cmds)
+    _describe -t commands 'yca command' commands
+    ;;
+  args)
+    case $words[1] in
+    create)
+      _arguments \
+        '1:target:(server client ocsp)' \
+        '--cn[common name (not used for ocsp)]:common name:' \
+        '*--san[SAN as type\:name (dns|email|ip), repeatable]:san:' \
+        '--valid[sub-day validity override, 5m..1d]:duration (e.g. 1h):'
+      ;;
+    enroll)
+      _arguments \
+        '--id[identity to enroll (e.g. an email)]:id:'
+      ;;
+    sign)
+      _arguments \
+        '1:target:(server client)' \
+        '--id[enrolled identity]:id:' \
+        '--nonce[nonce from get nonce --id]:nonce:' \
+        '--csr[CSR\: inline PEM, - for stdin, or a file (PEM/DER)]:csr:_files'
+      ;;
+    revoke)
+      _arguments \
+        '1:target:(server client ocsp)' \
+        '(--serial)--cn[common name (not used for ocsp)]:common name:' \
+        '(--cn)--serial[serial (hex) - selects the exact certificate]:serial:' \
+        "--reason[CRLReason name (default unspecified)]:reason:(${reasons[*]})"
+      ;;
+    refresh)
+      _arguments \
+        '1:target:(crl)'
+      ;;
+    get)
+      _arguments \
+        '1:target:(server client ca crl ocsp config nonce)' \
+        '--cn[CN (- reads stdin), or CA alias for ca/crl]:cn:(root-ca signing-ca -)' \
+        '--id[enrolled identity (nonce only)]:id:' \
+        '--encoding[output encoding (default pem)]:encoding:(pem der)'
+      ;;
+    list)
+      _arguments \
+        '(--expired --revoked --last --cn)--expiring=-[expiring within N days (default 30)]::days:' \
+        '(--expiring --revoked --last --cn)--expired=-[expired within last N days]::days:' \
+        '(--expiring --expired --last --cn)--revoked=-[revoked within last N days]::days:' \
+        '(--expiring --expired --revoked --cn)--last=-[issued within last N days]::days:' \
+        '(--expiring --expired --revoked --last)--cn[by CN or CA alias]:cn:(root-ca signing-ca)' \
+        '--tsv[tab-separated output]'
+      ;;
+    esac
+    ;;
+  esac
+}
+
+_yca "$@"

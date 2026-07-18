@@ -1,0 +1,51 @@
+# systemd service for the yca ACME issuance frontend (RFC 8555).
+#
+# Issuance execs the yca CLI, so the CA secret must be available
+# unattended.
+# JWS URL binding: --url below must be exactly what clients use.
+
+[Unit]
+Description=yca ACME issuance frontend (RFC 8555)
+After=network.target
+
+[Service]
+User=yca
+Group=yca
+EnvironmentFile=/etc/yca/yca.env
+ExecStart=/usr/local/bin/yca-acme \
+  --state /var/lib/yca/acme.db \
+  --listen 127.0.0.1:8555 \
+  --url https://pki.example.ca \
+  --yca /usr/local/bin/yca \
+  --config /var/lib/yca/yca.toml \
+  --store /var/lib/yca/store
+Restart=on-failure
+
+# State dir: rw; pkcs11 backend: AF_UNIX (pcscd); AF_INET/AF_INET5 (listener);
+# no network
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/yca
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,152 @@
+.TH YCA 1 "July 2026" "yca" "User Commands"
+.SH NAME
+yca \- a 2-tier ECDSA certificate authority
+.SH SYNOPSIS
+.B yca
+[\fB\-\-config\fR \fIpath\fR] [\fB\-\-store\fR \fIdir\fR] \fIcommand\fR [\fIargs\fR]
+.SH DESCRIPTION
+.B yca
+operates a simple two-tier X.509 CA (offline-style root plus
+signing CA): it initializes the hierarchy, issues and revokes end-entity
+certificates, maintains signed CRLs, and exports artifacts. Storage is a
+single SQLite database plus delivered PEM/DER files under the store
+directory. CA keys live either software-encrypted in the store
+(\fBinternal\fR backend) or on a PKCS#11 token/HSM (\fBpkcs11\fR backend);
+see the configuration file.
+.PP
+At
+.B yca init
+the configuration is snapshotted into the store database, which becomes the
+source of truth; later edits to locked fields in the file are ignored with a
+warning. Only \fBee_valid_days\fR and \fBocsp_valid_days\fR remain tunable.
+.SH OPTIONS
+.TP
+.BI \-\-config " path"
+Configuration file (default: \fByca.toml\fR in the current directory).
+.TP
+.BI \-\-store " dir"
+Store/artifacts directory (default: \fB./store\fR). Created only by
+\fBinit\fR.
+.TP
+.BI \-\-log " path"
+Log file (default: \fByca.log\fR next to the store directory). File
+logging cannot be disabled: an empty \fIpath\fR is ignored with a warning,
+an unwritable one aborts.
+.TP
+.B \-\-version
+Print the release version and exit.
+.SH COMMANDS
+.TP
+.B init
+Initialize the PKI: create the root and signing CA (and empty signed CRLs).
+With the \fBinternal\fR backend a store passphrase is generated and shown
+once if \fBCA_STORE_PASSPHRASE\fR is unset. With \fBpkcs11\fR, existing
+token keypairs labeled with the CA slugs are adopted (curve-checked) or
+generated on the token. Fails if the store is already initialized.
+.TP
+\fBcreate\fR \fIserver\fR|\fIclient\fR \fB\-\-cn\fR \fIcn\fR [\fB\-\-san\fR \fItype:name\fR ...] [\fB\-\-valid\fR \fIN\fR{s|m|h}]
+Issue an end-entity certificate. \fB\-\-san\fR is repeatable with
+\fItype\fR one of \fBdns\fR, \fBemail\fR, \fBip\fR; servers always get
+DNS:\fIcn\fR added, clients require at least one SAN. \fB\-\-valid\fR
+overrides validity for this one issuance, sub-day range
+[5m, 1d). One active certificate per (CN, profile); once the active one has
+less than 33% of its lifetime left, an overlapping successor may be issued
+(renewal window) and the old certificate simply expires.
+.TP
+.B create ocsp
+Issue the delegated OCSP responder certificate (CN and validity from
+\fBocsp_name\fR/\fBocsp_valid_days\fR; EKU OCSPSigning plus
+id-pkix-ocsp-nocheck). Takes no \fB\-\-cn\fR.
+.TP
+\fBenroll\fR \fB\-\-id\fR \fIid\fR
+Enroll an identity (e.g. an email address) so it can request nonces and CSR
+signatures. Fails if already enrolled.
+.TP
+\fBsign\fR \fIserver\fR|\fIclient\fR \fB\-\-id\fR \fIid\fR \fB\-\-nonce\fR \fInonce\fR \fB\-\-csr\fR \fIcsr\fR
+Issue an end-entity certificate from an external PKCS#10 CSR, gated by a
+valid (\fIid\fR, \fInonce\fR) pair from \fBget nonce\fR; the nonce is
+consumed on success (single use). \fIcsr\fR is inline PEM, \fB\-\fR for
+standard input, or a file path (PEM/DER auto-detected). Only the public key
+(ECDSA on the \fBee_curve\fR curve), the subject CN and the supported SANs
+(dns, email, IPv4) are taken from the CSR; every other requested extension
+or DN attribute is ignored and the CA dictates the profile. Prints the CN on
+standard output for piping into \fBget\fR \fB\-\-cn \-\fR; writes nothing
+under \fBee/\fR (the private key stays with the requester).
+.TP
+\fBrevoke\fR \fIserver\fR|\fIclient\fR|\fIocsp\fR [\fB\-\-cn\fR \fIcn\fR | \fB\-\-serial\fR \fIhex\fR] [\fB\-\-reason\fR \fIname\fR]
+Revoke a certificate and rewrite the signed CRL. By \fB\-\-cn\fR the newest
+active certificate for that name is revoked; \fB\-\-serial\fR (hex,
+\fB:\fR separators and leading zeros tolerated) selects the exact
+certificate (during a renewal overlap two can be active). \fIname\fR is a
+case-insensitive CRLReason: \fBunspecified\fR (default),
+\fBkeyCompromise\fR, \fBcACompromise\fR, \fBaffiliationChanged\fR,
+\fBsuperseded\fR, \fBcessationOfOperation\fR, \fBcertificateHold\fR,
+\fBremoveFromCRL\fR, \fBprivilegeWithdrawn\fR, \fBaACompromise\fR.
+.TP
+\fBrefresh\fR \fIcrl\fR
+Re-sign both published CRLs (root and signing) from their current entry
+sets: same revocations, crlNumber+1, fresh thisUpdate/nextUpdate (7 days,
+clamped to the issuing CA's notAfter). Run it on a schedule shorter than
+that horizon (see \fByca-crl-refresh.timer\fR) so relying parties never see
+a stale CRL.
+.TP
+\fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIocsp\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR]
+Write a certificate, CRL, the effective (database) configuration, or an
+enrollment nonce to standard output (default \fBpem\fR). For
+\fIca\fR/\fIcrl\fR, \fB\-\-cn\fR takes \fBroot-ca\fR, \fBsigning-ca\fR, or
+the CA common name; \fIocsp\fR/\fIconfig\fR take no \fB\-\-cn\fR;
+\fInonce\fR takes \fB\-\-id\fR instead and returns the pending nonce while
+most of its 5-minute validity remains, rotating it otherwise. \fB\-\-cn\fR
+\fB\-\fR reads the CN from standard input (piping from \fBsign\fR). Needs no
+secret.
+.TP
+\fBlist\fR \fIfilter\fR [\fB\-\-tsv\fR]
+List certificates matching exactly one filter: \fB\-\-expiring\fR [\fIN\fR],
+\fB\-\-expired\fR [\fIN\fR], \fB\-\-revoked\fR [\fIN\fR], \fB\-\-last\fR
+[\fIN\fR] (window in days, 1\-398, default 30), or \fB\-\-cn\fR
+\fIcn\fR|\fBroot-ca\fR|\fBsigning-ca\fR. Columns: CN, kind, serial
+(truncated), expiry, status. \fB\-\-tsv\fR emits tab-separated output.
+.SH ENVIRONMENT
+.TP
+.B CA_STORE_PASSPHRASE
+Store passphrase (\fBinternal\fR key backend). Generated and shown once at
+init when unset.
+.TP
+.B CA_HSM_PIN
+PKCS#11 user PIN (\fBpkcs11\fR key backend). Exactly one login attempt per
+run: hardware tokens decrement a PIN retry counter.
+.SH FILES
+.TP
+.B yca.toml
+Declarative configuration; locked into the store at init.
+.TP
+.B <store>/ca-store.db
+SQLite store: certificates, encrypted CA keys (internal backend),
+revocations, configuration snapshot, query index.
+.TP
+.B <store>/ca/<slug>.{pem,crt,crl}
+Published CA certificates (PEM and DER) and signed CRLs, named for the
+AIA/CDP URLs.
+.TP
+.B <store>/ee/<cn-slug>.{crt,key} <store>/ocsp/<slug>.{crt,key}
+Delivered end-entity and OCSP responder credentials.
+.TP
+.B yca.log
+Diagnostic log, next to the store directory (\fB\-\-log\fR overrides).
+Errors are also mirrored to standard error.
+.SH EXIT STATUS
+0 on success, 1 on any error (details on stderr and in the log).
+.SH EXAMPLES
+.nf
+yca init
+yca create server \-\-cn server.example.ca \-\-san dns:example.ca
+yca enroll \-\-id user@example.ca
+yca sign server \-\-id user@example.ca \e
+    \-\-nonce $(yca get nonce \-\-id user@example.ca) \e
+    \-\-csr server.csr | yca get server \-\-cn \-
+yca revoke server \-\-cn server.example.ca \-\-reason keyCompromise
+yca get crl \-\-cn signing\-ca > signing.crl
+yca list \-\-expiring 7
+.fi
+.SH SEE ALSO
+.BR yca\-ocsp (1)

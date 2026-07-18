@@ -1,0 +1,41 @@
+# On 'create', yca.toml is reconciled against the DB: changes to
+# locked fields are warned and IGNORED; only these two
+# may actually change (validated, then written back to the DB):
+#   - ee_valid_days   (EE certificate validity)
+#   - ocsp_valid_days (OCSP responder certificate validity)
+# See the current effective config with 'yca get config'. Re-initialize to
+# change anything else.
+
+org_name = "Example 会社"
+country_code = "CA"
+repository_host = "pki.example.ca"
+
+root_ca_cn = "ETS Root E1"
+root_ca_curve = "secp384r1"
+root_ca_digest = "SHA-384"
+root_ca_valid_days = 8192
+# pkcs11: also the key label
+root_ca_slug = "root-e1"
+signing_ca_cn = "CA E1"
+signing_ca_curve = "secp384r1"
+signing_ca_digest = "SHA-384"
+signing_ca_valid_days = 8112
+# pkcs11: also the key label
+signing_ca_slug = "ca-e1"
+ee_curve = "secp256r1"
+ee_digest = "SHA-256"
+ee_valid_days = 397
+ocsp_cn = "CA E1 OCSP Responder"
+ocsp_valid_days = 7
+ocsp_slug = "ca-e1-ocsp-responder"
+# Optional: omit to skip the CP extension entirely
+#           or replace the placeholder OID below.
+root_arc_oid = "1.3.6.1.4.1.00000"
+
+# Optional: HSM-held CA keys (default internal).
+key_backend = "pkcs11"
+# pkcs11_module = "/usr/lib/opensc-pkcs11.so"
+# pkcs11_module = "/usr/lib/softhsm/libsofthsm2.so"
+# pkcs11_module = "/usr/local/lib/softhsm/libsofthsm2.so"
+pkcs11_module = "/opt/homebrew/Cellar/softhsm/2.7.0/lib/softhsm/libsofthsm2.so"
+pkcs11_token_label = "yts"

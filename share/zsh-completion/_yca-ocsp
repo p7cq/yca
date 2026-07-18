@@ -1,0 +1,18 @@
+#compdef yca-ocsp
+# zsh completion for the yca OCSP responder.
+#
+# Install: copy (or symlink) into a directory on $fpath, e.g.
+#   cp share/zsh-completion/_yca-ocsp /usr/local/share/zsh/site-functions/
+# then restart zsh (or run: autoload -U compinit && compinit).
+# Go flags accept -flag and --flag alike; the single-dash form is offered.
+
+_yca-ocsp() {
+  _arguments \
+    '-store[yca store directory (default ./store)]:store directory:_files -/' \
+    '-listen[listen address (default 127.0.0.1:23509)]:address:' \
+    '-path[base HTTP path, the AIA URL path (default /ocsp)]:path:' \
+    '-validity[response window, nextUpdate offset (default 1h)]:duration (e.g. 1h):' \
+    '-version[print version and exit]'
+}
+
+_yca-ocsp "$@"

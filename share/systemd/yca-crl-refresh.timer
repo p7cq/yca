@@ -1,0 +1,16 @@
+# systemd timer driving yca-crl-refresh.service.
+#
+# Cadence vs nextUpdate: the CRLs re-publication is within
+# crl_next_update_days (7). Daily leaves 6 days of margin; keep the
+# interval comfortably below the horizon if you change either.
+
+[Unit]
+Description=Periodic re-signing of the published yca CRLs
+
+[Timer]
+OnCalendar=*-*-* 03:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

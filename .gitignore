@@ -1,0 +1,28 @@
+# Build trees and outputs
+/build/
+/bin/
+/compile_commands.json
+/CMakePresets.json
+
+# Tooling caches
+/.cache/
+
+# Coverage / profiling artifacts
+*.profraw
+*.profdata
+
+# Local CA stores and logs
+/store*/
+*.log
+
+# Go workspace files
+go.work
+go.work.sum
+
+# macOS
+.DS_Store
+
+# Filtered
+/build.sh
+/install.sh
+/tools/

@@ -1,0 +1,65 @@
+.TH YCA-OCSP 1 "July 2026" "yca" "User Commands"
+.SH NAME
+yca\-ocsp \- delegated OCSP responder for a yca certificate authority
+.SH SYNOPSIS
+.B yca\-ocsp
+[\fB\-store\fR \fIdir\fR] [\fB\-listen\fR \fIaddr\fR] [\fB\-path\fR \fIpath\fR] [\fB\-validity\fR \fIdur\fR]
+.SH DESCRIPTION
+.B yca\-ocsp
+answers RFC 6960 OCSP requests for certificates issued by a
+.BR yca (1)
+signing CA. It runs in the delegated model: responses are signed with the
+short-lived responder credential issued by \fByca create ocsp\fR; the CA
+key (possibly on an HSM) is never touched. Certificate status is read
+directly from the store database (read-only); the responder serves the AIA
+URL baked into every issued certificate
+(http://<repository_host>/ocsp, normally behind a reverse proxy).
+.SH OPTIONS
+.TP
+.BI \-store " dir"
+The yca store directory (default: \fB./store\fR).
+.TP
+.BI \-listen " addr"
+Listen address (default: \fB127.0.0.1:23509\fR).
+.TP
+.BI \-path " path"
+Base HTTP path, matching the AIA URL path (default: \fB/ocsp\fR).
+.TP
+.BI \-validity " dur"
+Response window: nextUpdate = thisUpdate + \fIdur\fR; also drives
+Cache-Control max-age (default: \fB1h\fR).
+.TP
+.B \-version
+Print the release version and exit (\fBdev\fR when built without the
+release wrapper scripts).
+.SH ENDPOINTS
+.TP
+.B POST /ocsp
+Body is a DER OCSPRequest (application/ocsp-request).
+.TP
+.B GET /ocsp/<base64>
+RFC 6960 A.1 form: URL-escaped standard base64 of the DER request;
+cacheable.
+.TP
+.B GET /healthz
+Returns 200 when the database and responder credentials are readable.
+.SH OPERATION
+Run as the store owner: the database is mode 0600 and reading a WAL
+database needs write access to its \-wal/\-shm siblings. The responder
+answers only for its store's signing CA (anything else gets
+\fBunauthorized\fR). Credential rotation needs no restart: after
+\fByca revoke ocsp\fR and \fByca create ocsp\fR the new files are picked up
+automatically (mtime-based reload). A hardened systemd unit and an nginx
+reverse-proxy configuration ship in \fBshare/systemd/\fR and
+\fBshare/nginx/\fR.
+.SH EXIT STATUS
+0 on clean shutdown; nonzero when startup fails (bad store, bind failure).
+.SH EXAMPLES
+.nf
+yca\-ocsp \-store /var/lib/yca/store \-listen 127.0.0.1:23509
+curl \-i http://127.0.0.1:23509/healthz
+openssl ocsp \-issuer store/ca/ca\-e1.pem \-cert store/ee/www.crt \\
+  \-url http://127.0.0.1:23509/ocsp \-CAfile store/ca/ets\-root\-e1.pem
+.fi
+.SH SEE ALSO
+.BR yca (1)
