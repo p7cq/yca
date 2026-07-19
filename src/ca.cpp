@@ -436,11 +436,13 @@ locked_config(const cfg::Config &c) {
       {"root_ca_curve", c.root_ca_curve},
       {"root_ca_digest", c.root_ca_digest},
       {"root_ca_valid_days", std::to_string(c.root_ca_valid_days)},
+      {"root_ca_slug_prefix", c.root_ca_slug_prefix},
       {"root_ca_slug", c.root_ca_slug},
       {"signing_ca_cn", c.signing_ca_cn},
       {"signing_ca_curve", c.signing_ca_curve},
       {"signing_ca_digest", c.signing_ca_digest},
       {"signing_ca_valid_days", std::to_string(c.signing_ca_valid_days)},
+      {"signing_ca_slug_prefix", c.signing_ca_slug_prefix},
       {"signing_ca_slug", c.signing_ca_slug},
       {"ee_curve", c.ee_curve},
       {"ee_digest", c.ee_digest},
@@ -582,13 +584,12 @@ bool create(const cfg::Config &config, const fs::path &db_path,
   const fs::path root_crl = ca_dir / (root_s + ".crl");
   const fs::path sign_crl = ca_dir / (sign_s + ".crl");
   if (!write_der(root_crl,
-                 issuer.new_crl(rng, crl_next_update(
-                                         root_cert,
-                                         app::root_crl_next_update_days))) ||
-      !write_der(sign_crl,
-                 sign_ca.new_crl(rng, crl_next_update(
-                                          sign_cert,
-                                          app::crl_next_update_days))))
+                 issuer.new_crl(
+                     rng, crl_next_update(root_cert,
+                                          app::root_crl_next_update_days))) ||
+      !write_der(sign_crl, sign_ca.new_crl(
+                               rng, crl_next_update(
+                                        sign_cert, app::crl_next_update_days))))
     log::warn("could not write CRLs under {}", ca_dir.string());
 
   log::info("created 2-tier CA: root '{}' + signing '{}'", config.root_ca_cn,
@@ -718,11 +719,16 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
   c.root_ca_curve = S("root_ca_curve");
   c.root_ca_digest = S("root_ca_digest");
   c.root_ca_valid_days = I("root_ca_valid_days");
+  // The prefix is the rotation baseline; the
+  // derived slug is the operative identity for files, URLs and key
+  // labels. Both are snapshotted at init and read back here.
+  c.root_ca_slug_prefix = S("root_ca_slug_prefix");
   c.root_ca_slug = S("root_ca_slug");
   c.signing_ca_cn = S("signing_ca_cn");
   c.signing_ca_curve = S("signing_ca_curve");
   c.signing_ca_digest = S("signing_ca_digest");
   c.signing_ca_valid_days = I("signing_ca_valid_days");
+  c.signing_ca_slug_prefix = S("signing_ca_slug_prefix");
   c.signing_ca_slug = S("signing_ca_slug");
   c.ee_curve = S("ee_curve");
   c.ee_digest = S("ee_digest");
@@ -850,7 +856,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   // Uniqueness via cert_index: the write lock spans check + insert so a
   // concurrent create for the same (cn, profile) cannot slip between them.
   begin_write(*dbh);
-  ensure_cert_index(*dbh); // schema self-heal (adds `reason` on old stores)
+  ensure_cert_index(*dbh); // idempotent: guarantees the full schema
   if (duplicate())
     return false;
 
@@ -1363,9 +1369,9 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   Botan::X509_CA ca(*sign_cert, *sign_key, config.signing_ca_digest, rng);
   const std::vector<Botan::CRL_Entry> entries{
       Botan::CRL_Entry(*target_cert, *reason)};
-  const auto updated = ca.update_crl(
-      prev, entries, rng,
-      crl_next_update(*sign_cert, app::crl_next_update_days));
+  const auto updated =
+      ca.update_crl(prev, entries, rng,
+                    crl_next_update(*sign_cert, app::crl_next_update_days));
   if (!write_der(crl_path, updated)) {
     log::error("could not write CRL {}", crl_path.string());
     return false;
@@ -1483,8 +1489,7 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
     Botan::X509_CA sign_ca(*sign_cert, *sign_key, config.signing_ca_digest,
                            rng);
     const auto next = sign_ca.update_crl(
-        prev, {}, rng,
-        crl_next_update(*sign_cert, app::crl_next_update_days));
+        prev, {}, rng, crl_next_update(*sign_cert, app::crl_next_update_days));
     ok = write_der(sign_crl_path, next) && ok;
     refreshed += std::format("{}signing #{}", refreshed.empty() ? "" : ", ",
                              next.crl_number());
@@ -1518,11 +1523,14 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
     std::print("root_ca_curve = \"{}\"\n", config.root_ca_curve);
     std::print("root_ca_digest = \"{}\"\n", config.root_ca_digest);
     std::print("root_ca_valid_days = {}\n", config.root_ca_valid_days);
+    std::print("root_ca_slug_prefix = \"{}\"\n", config.root_ca_slug_prefix);
     std::print("root_ca_slug = \"{}\"\n", config.root_ca_slug);
     std::print("signing_ca_cn = \"{}\"\n", config.signing_ca_cn);
     std::print("signing_ca_curve = \"{}\"\n", config.signing_ca_curve);
     std::print("signing_ca_digest = \"{}\"\n", config.signing_ca_digest);
     std::print("signing_ca_valid_days = {}\n", config.signing_ca_valid_days);
+    std::print("signing_ca_slug_prefix = \"{}\"\n",
+               config.signing_ca_slug_prefix);
     std::print("signing_ca_slug = \"{}\"\n", config.signing_ca_slug);
     std::print("ee_curve = \"{}\"\n", config.ee_curve);
     std::print("ee_digest = \"{}\"\n", config.ee_digest);

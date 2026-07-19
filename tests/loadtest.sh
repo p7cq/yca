@@ -23,12 +23,12 @@ root_ca_cn = "TTS Root Load Test"
 root_ca_curve = "secp384r1"
 root_ca_digest = "SHA-384"
 root_ca_valid_days = 8192
-root_ca_slug = "tts-root-load-test"
+root_ca_slug_prefix = "tts-root-load-e"
 signing_ca_cn = "CA Load Test"
 signing_ca_curve = "secp384r1"
 signing_ca_digest = "SHA-384"
 signing_ca_valid_days = 8112
-signing_ca_slug = "ca-load-test"
+signing_ca_slug_prefix = "ca-load-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
@@ -59,7 +59,7 @@ for N in "${SIZES[@]}"; do
   get_ms=$(ms W get server --cn s0.test.ca)
   revoke_ms=$(ms W revoke server --cn s0.test.ca --reason superseded)
   db_mb=$(du -m "$PKI/ca-store.db" | cut -f1)
-  crl_mb=$(du -m "$PKI/ca/ca-load-test.crl" 2>/dev/null | cut -f1)
+  crl_mb=$(du -m "$PKI/ca/ca-load-e1.crl" 2>/dev/null | cut -f1)
 
   printf "%-10s %-9s %-9s %-9s %-11s %-7s %-8s\n" \
     "$N" "$seed_s" "$list_ms" "$get_ms" "$revoke_ms" "${db_mb:-?}" "${crl_mb:-?}"

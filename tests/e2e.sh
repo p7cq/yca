@@ -25,12 +25,12 @@ root_ca_cn = "ETS Root E1"
 root_ca_curve = "secp384r1"
 root_ca_digest = "SHA-384"
 root_ca_valid_days = 8192
-root_ca_slug = "ets-root-e1"
+root_ca_slug_prefix = "ets-root-e"
 signing_ca_cn = "CA E1"
 signing_ca_curve = "secp384r1"
 signing_ca_digest = "SHA-384"
 signing_ca_valid_days = 8112
-signing_ca_slug = "ca-e1"
+signing_ca_slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
@@ -249,10 +249,10 @@ openssl x509 -in "$WORK/pki_uni/ca/ets-root-e1.pem" -noout -subject -nameopt utf
 openssl x509 -in "$WORK/pki_uni/ca/ets-root-e1.pem" -noout -subject -nameopt utf8 2>/dev/null |
   grep -q "ETS 株 Root E1" && ok "unicode CN= present, file named by slug" ||
   bad "unicode CN missing"
-sed 's/root_ca_slug = "ets-root-e1"/root_ca_slug = "ets-株"/' "$CFG" \
+sed 's/root_ca_slug_prefix = "ets-root-e"/root_ca_slug_prefix = "ets-株"/' "$CFG" \
   >"$WORK/uni_slug.toml"
 "$BIN" --config "$WORK/uni_slug.toml" --store "$WORK/pki_uni2" init >/dev/null 2>&1 &&
-  bad "unicode root_ca_slug accepted" || ok "unicode root_ca_slug rejected (feeds URLs)"
+  bad "unicode slug prefix accepted" || ok "unicode slug prefix rejected (feeds URLs)"
 w create server --cn "srv★.ca" >/dev/null 2>&1 &&
   bad "unicode server CN accepted" || ok "unicode server CN rejected (DNS SAN)"
 w create client --cn "Иван Петров" --san=email:ivan@example.ca >/dev/null 2>&1 &&

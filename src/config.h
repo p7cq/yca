@@ -25,8 +25,13 @@ struct Config {
   std::string root_ca_digest;
   // The root certificate validity in days.
   int root_ca_valid_days;
+  // Configured stable part of the root CA slug; the full slug is
+  // <prefix><generation> (generation 1 at init, incremented by CA
+  // rotation).
+  std::string root_ca_slug_prefix;
   // The root certificate ASCII identifier used for file names, AIA/CDP URLs,
-  // key labels on the token.
+  // key labels on the token. Derived (prefix + generation), never parsed;
+  // an initialized store reads it from ca_config.
   std::string root_ca_slug;
   // The signing CA certificate Common Name.
   std::string signing_ca_cn;
@@ -36,8 +41,10 @@ struct Config {
   std::string signing_ca_digest;
   // The signing certificate's validity in days.
   int signing_ca_valid_days;
-  // The signing certificate ASCII identifier used for file names, AIA/CDP URLs,
-  // key labels on the token.
+  // Configured stable part of the signing CA slug (see root_ca_slug_prefix).
+  std::string signing_ca_slug_prefix;
+  // The signing certificate ASCII identifier used for file names, AIA/CDP
+  // URLs, key labels on the token. Derived like root_ca_slug.
   std::string signing_ca_slug;
   // The end-entity keys' ECDSA curve.
   std::string ee_curve;

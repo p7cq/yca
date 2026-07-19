@@ -141,10 +141,10 @@ load(const std::filesystem::path &path) {
   // OpenSSL's name for secp256r1 and is rejected).
   auto check_curve = [&](std::string_view key, const std::string &v) {
     if (!one_of(kCurves, v))
-      errs.push_back(std::format(
-          "{}: invalid curve '{}' (allowed: secp256r1, secp384r1, "
-          "secp521r1)",
-          key, v));
+      errs.push_back(
+          std::format("{}: invalid curve '{}' (allowed: secp256r1, secp384r1, "
+                      "secp521r1)",
+                      key, v));
   };
   auto check_digest = [&](std::string_view key, const std::string &v) {
     if (!one_of(kDigests, v))
@@ -173,13 +173,33 @@ load(const std::filesystem::path &path) {
         c.repository_host));
   get_str("root_ca_cn", c.root_ca_cn);       // DN-only
   get_str("signing_ca_cn", c.signing_ca_cn); // DN-only
-  if (get_str("root_ca_slug", c.root_ca_slug))
-    check_slug("root_ca_slug", c.root_ca_slug);
-  if (get_str("signing_ca_slug", c.signing_ca_slug))
-    check_slug("signing_ca_slug", c.signing_ca_slug);
-  if (!c.root_ca_slug.empty() && c.root_ca_slug == c.signing_ca_slug)
-    errs.push_back("root_ca_slug and signing_ca_slug must differ (their "
-                   "files share pki/ca/)");
+  // Slug prefixes: the branded, stable part of the CA slugs. The full
+  // slug is <prefix><generation> - generation 1 at init, incremented by
+  // CA rotation. Prefixes end up verbatim in file
+  // names, AIA/CDP URLs and HSM key labels, so the slug charset applies.
+  if (get_str("root_ca_slug_prefix", c.root_ca_slug_prefix))
+    check_slug("root_ca_slug_prefix", c.root_ca_slug_prefix);
+  if (get_str("signing_ca_slug_prefix", c.signing_ca_slug_prefix))
+    check_slug("signing_ca_slug_prefix", c.signing_ca_slug_prefix);
+  // Distinct prefixes must stay distinct across generations: one being
+  // the other plus digits would collide later (root "ca-e" would meet
+  // signing "ca-e1" at generation 11).
+  auto digits_apart = [](const std::string &a, const std::string &b) {
+    if (a.size() > b.size() || b.compare(0, a.size(), a) != 0)
+      return false;
+    for (std::size_t i = a.size(); i < b.size(); ++i)
+      if (b[i] < '0' || b[i] > '9')
+        return false;
+    return true;
+  };
+  if (!c.root_ca_slug_prefix.empty() &&
+      (digits_apart(c.root_ca_slug_prefix, c.signing_ca_slug_prefix) ||
+       digits_apart(c.signing_ca_slug_prefix, c.root_ca_slug_prefix)))
+    errs.push_back("root_ca_slug_prefix and signing_ca_slug_prefix must "
+                   "differ (and not only by digits): their generation-"
+                   "numbered files share pki/ca/");
+  c.root_ca_slug = c.root_ca_slug_prefix + "1";
+  c.signing_ca_slug = c.signing_ca_slug_prefix + "1";
 
   // key_backend is optional (default "internal"). With "pkcs11" both pkcs11_*
   // fields are required; with "internal" they must be absent - a set-but-
@@ -237,8 +257,8 @@ load(const std::filesystem::path &path) {
   if (ed && c.ee_valid_days <= 0)
     errs.push_back("ee_valid_days must be > 0");
   if (ed && c.ee_valid_days > app::max_ee_valid_days)
-    errs.push_back(std::format("ee_valid_days cannot exceed {}",
-                               app::max_ee_valid_days));
+    errs.push_back(
+        std::format("ee_valid_days cannot exceed {}", app::max_ee_valid_days));
   // These duration comparisons match the certificate lifetimes only at init
   // (everything is issued at t=0); once the signing CA ages, the runtime
   // guard is detail::outlives_issuer at each issuance.

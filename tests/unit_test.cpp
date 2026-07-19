@@ -79,12 +79,12 @@ root_ca_cn = "ETS Root E1"
 root_ca_curve = "secp384r1"
 root_ca_digest = "SHA-384"
 root_ca_valid_days = 8192
-root_ca_slug = "ets-root-e1"
+root_ca_slug_prefix = "ets-root-e"
 signing_ca_cn = "CA E1"
 signing_ca_curve = "secp384r1"
 signing_ca_digest = "SHA-384"
 signing_ca_valid_days = 8112
-signing_ca_slug = "ca-e1"
+signing_ca_slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
@@ -129,6 +129,9 @@ TEST_CASE("cfg::load parses values") {
   CHECK(c->root_arc_oid == "1.3.6.1.4.1.00000");
   CHECK(c->ee_curve == "secp256r1");
   CHECK(c->root_ca_curve == "secp384r1");
+  // Slugs derive from the prefixes at generation 1; never parsed.
+  CHECK(c->root_ca_slug == "ets-root-e1");
+  CHECK(c->signing_ca_slug == "ca-e1");
 }
 
 TEST_CASE("cfg::load: only Botan curve names, no prime256v1 alias") {
@@ -167,16 +170,24 @@ TEST_CASE("cfg::load: names are free-form UTF-8, slugs are strict ASCII") {
   CHECK(loads(
       with("root_ca_cn = \"ETS Root E1\"", "root_ca_cn = \"ETS 株 Root E1\"")));
   CHECK(loads(with("signing_ca_cn = \"CA E1\"", "signing_ca_cn = \"CA ﺵﺮﻛﺓ\"")));
-  // Declared slugs go verbatim into URLs/file names: lowercase ASCII only.
+  // Declared slug prefixes go verbatim into URLs/file names (as
+  // <prefix><generation>): lowercase ASCII only.
+  CHECK_FALSE(loads(with("root_ca_slug_prefix = \"ets-root-e\"",
+                         "root_ca_slug_prefix = \"ets-株\"")));
   CHECK_FALSE(loads(
-      with("root_ca_slug = \"ets-root-e1\"", "root_ca_slug = \"ets-株\"")));
-  CHECK_FALSE(loads(with("root_ca_slug = \"ets-root-e1\"",
-                         "root_ca_slug = \"ETS Root E1\""))); // case + spaces
-  CHECK_FALSE(loads(with("root_ca_slug = \"ets-root-e1\"",
-                         "root_ca_slug = \"ets_root_e1\""))); // kebab-case only
-  CHECK_FALSE(loads(with("signing_ca_slug = \"ca-e1\"",
-                         "signing_ca_slug = \"ets-root-e1\""))); // collision
-  CHECK_FALSE(loads(with("signing_ca_slug = \"ca-e1\"\n", ""))); // required
+      with("root_ca_slug_prefix = \"ets-root-e\"",
+           "root_ca_slug_prefix = \"ETS Root E\""))); // case + spaces
+  CHECK_FALSE(loads(
+      with("root_ca_slug_prefix = \"ets-root-e\"",
+           "root_ca_slug_prefix = \"ets_root_e\""))); // kebab-case only
+  CHECK_FALSE(loads(
+      with("signing_ca_slug_prefix = \"ca-e\"",
+           "signing_ca_slug_prefix = \"ets-root-e\""))); // collision
+  CHECK_FALSE(loads(
+      with("signing_ca_slug_prefix = \"ca-e\"",
+           "signing_ca_slug_prefix = \"ets-root-e1\""))); // digits apart
+  CHECK_FALSE(
+      loads(with("signing_ca_slug_prefix = \"ca-e\"\n", ""))); // required
 }
 
 TEST_CASE("cfg::load: key_backend defaults to internal") {
@@ -244,11 +255,13 @@ struct TempPki {
     config.root_ca_curve = "secp256r1"; // canonical (Config built by hand,
     config.root_ca_digest = "SHA-256";  // no cfg::load validation here)
     config.root_ca_valid_days = 3650;
+    config.root_ca_slug_prefix = "ut-root-e";
     config.root_ca_slug = "ut-root-e1";
     config.signing_ca_cn = "UT CA E1";
     config.signing_ca_curve = "secp256r1";
     config.signing_ca_digest = "SHA-256";
     config.signing_ca_valid_days = 3000;
+    config.signing_ca_slug_prefix = "ut-ca-e";
     config.signing_ca_slug = "ut-ca-e1";
     config.ee_curve = "secp256r1";
     config.ee_digest = "SHA-256";

@@ -42,9 +42,11 @@ Print the release version and exit.
 .B init
 Initialize the PKI: create the root and signing CA (and empty signed CRLs).
 With the \fBinternal\fR backend a store passphrase is generated and shown
-once if \fBCA_STORE_PASSPHRASE\fR is unset. With \fBpkcs11\fR, existing
-token keypairs labeled with the CA slugs are adopted (curve-checked) or
-generated on the token. Fails if the store is already initialized.
+once if \fBCA_STORE_PASSPHRASE\fR is unset. With \fBpkcs11\fR, an existing
+token keypair must already be labeled with the derived CA slug
+(\fB<slug_prefix>1\fR at init) to be adopted (curve-checked); a missing
+one is generated on the token under exactly that label. Fails if the
+store is already initialized.
 .TP
 \fBcreate\fR \fIserver\fR|\fIclient\fR \fB\-\-cn\fR \fIcn\fR [\fB\-\-san\fR \fItype:name\fR ...] [\fB\-\-valid\fR \fIN\fR{s|m|h|d}]
 Issue an end-entity certificate. \fB\-\-san\fR is repeatable with
