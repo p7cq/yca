@@ -85,9 +85,11 @@ cat "$PKI/ee/acme-daemon.crt" "$PKI/ca/ca-e1.pem" >"$WORK/tls-chain.pem"
 PORT=$((20000 + RANDOM % 20000))
 VAPORT=$((PORT + 1))
 DIR_URL="https://localhost:$PORT/acme/directory"
+# --valid 90d: the daemon requests a shorter validity than the CA's
+# ee_valid_days ceiling (397) - asserted on the issued leaf below.
 "$WORK/yca-acme" --state "$WORK/acme.db" --listen "127.0.0.1:$PORT" \
   --url "https://localhost:$PORT" --yca "$BIN" --config "$CFG" \
-  --store "$PKI" --id acme --http01-port "$VAPORT" \
+  --store "$PKI" --id acme --http01-port "$VAPORT" --valid 90d \
   --tls-cert "$WORK/tls-chain.pem" --tls-key "$PKI/ee/acme-daemon.key" \
   >"$WORK/daemon.log" 2>&1 &
 DAEMON_PID=$!
@@ -147,6 +149,18 @@ FULL="$AH/localhost_ecc/fullchain.cer"
 openssl verify -CAfile "$WORK/root.pem" -untrusted "$PKI/ca/ca-e1.pem" \
   "$LEAF" >/dev/null 2>&1 &&
   ok "issued cert chains to the root" || bad "chain verify failed"
+# The daemon's --valid 90d reached the CA (397-day policy is the ceiling).
+# openssl date -> epoch: GNU date takes -d, BSD (macOS) needs -j -f.
+epoch() {
+  date -u -d "$1" +%s 2>/dev/null ||
+    date -j -u -f "%b %e %H:%M:%S %Y %Z" "$1" +%s
+}
+LNB=$(openssl x509 -in "$LEAF" -noout -startdate 2>/dev/null | cut -d= -f2)
+LNA=$(openssl x509 -in "$LEAF" -noout -enddate 2>/dev/null | cut -d= -f2)
+LDAYS=$(( ($(epoch "$LNA") - $(epoch "$LNB")) / 86400 ))
+[ "$LDAYS" -eq 90 ] &&
+  ok "ACME leaf validity 90d (daemon --valid)" ||
+  bad "ACME leaf validity ${LDAYS}d, want 90"
 openssl x509 -in "$LEAF" -noout -ext subjectAltName 2>/dev/null |
   grep -q "DNS:localhost" && ok "SAN DNS:localhost" || bad "SAN missing"
 # The CA dictates the profile, whatever the client asked for.

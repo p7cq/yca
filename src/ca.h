@@ -43,12 +43,10 @@ bool init(const cfg::Config &config, const std::filesystem::path &store_dir,
 // truth after init. Returns nullopt if not initialized.
 std::optional<cfg::Config> load_config(const std::filesystem::path &store_dir);
 
-// Reconciles yca.toml (`file`) against the effective DB config (`eff`, from
-// load_config), called before issuance: readonly-field changes are warned and
-// ignored; a valid ee_valid_days change is written to the DB and applied to
-// `eff`.
-void reconcile(const cfg::Config &file, cfg::Config &eff,
-               const std::filesystem::path &store_dir);
+// Compares yca.toml (`file`) against the effective DB config (`eff`, from
+// load_config), called before issuance: the config is fully locked, so any
+// changed field is warned and ignored (re-init to change anything).
+void reconcile(const cfg::Config &file, const cfg::Config &eff);
 
 // Issues an end-entity certificate (server/client) signed by the signing CA.
 // Server always includes DNS:CN plus any extra SANs; client requires at least
@@ -59,8 +57,8 @@ void reconcile(const cfg::Config &file, cfg::Config &eff,
 // (unencrypted) key, written under <store>/ee/.
 //
 // `valid_override` (CLI --valid) replaces the ee_valid_days validity
-// for this one issuance; sub-day only, [5m, 1d), and not persisted
-// anywhere. Day-scale validity always comes from ee_valid_days.
+// for this one issuance; range [5m, ee_valid_days] - the policy is the
+// ceiling, shorter is always allowed - and not persisted anywhere.
 bool issue_ee(
     const cfg::Config &config, const std::filesystem::path &store_dir,
     std::string_view secret, Profile profile, const std::string &cn,
@@ -93,10 +91,12 @@ bool get_nonce(const std::filesystem::path &store_dir, const std::string &id);
 // On success the nonce is consumed (same transaction as the insert), the cert
 // is stored/indexed like issue_ee - but nothing is written under <store>/ee/
 // (the CA never sees the private key) - and the CN is printed to stdout for
-// retrieval via `get <profile> --cn`.
+// retrieval via `get <profile> --cn`. `valid_override` behaves exactly as in
+// issue_ee ([5m, ee_valid_days], one-shot).
 bool sign_csr(const cfg::Config &config, const std::filesystem::path &store_dir,
               std::string_view secret, Profile profile, const std::string &id,
-              const std::string &nonce, const std::string &csr_src);
+              const std::string &nonce, const std::string &csr_src,
+              std::optional<std::chrono::seconds> valid_override = std::nullopt);
 
 // Revokes the active `target` certificate (server|client) for `cn` by
 // adding it to the signing CA's CRL (<store>/ca/<signing-slug>.crl).

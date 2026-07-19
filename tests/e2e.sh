@@ -270,12 +270,13 @@ grep -q "ignoring readonly" "$LOG" &&
 w get server --cn ro.ca 2>/dev/null | openssl x509 -noout -text 2>/dev/null |
   grep -q "pki.example.ca/ca-e1.crt" &&
   ok "readonly drift ignored (DB value used)" || bad "readonly drift applied"
-# tunable change on create -> synced into DB
+# ee_valid_days is locked like everything else: changed in the file ->
+# warned, ignored, and never written to the DB
 sed 's/ee_valid_days = 397/ee_valid_days = 90/' "$CFG" >"$WORK/tune.toml"
 "$BIN" --config "$WORK/tune.toml" --store "$PKI" create server --cn tuned.ca \
   >/dev/null 2>&1
-w get config 2>/dev/null | grep -q "ee_valid_days = 90" &&
-  ok "tunable change synced to DB" || bad "tunable not synced"
+w get config 2>/dev/null | grep -q "ee_valid_days = 397" &&
+  ok "ee_valid_days change ignored (locked)" || bad "ee_valid_days synced"
 
 # --- list (filter-based on cert_index) ---
 w create server --cn l1.ca >/dev/null 2>&1
@@ -309,7 +310,7 @@ cp "$WORK/crl.bak" "$PKI/ca/ca-e1.crl"
 w revoke server --cn l1.ca --reason superseded >/dev/null 2>&1 &&
   ok "revoke works after CRL restore" || bad "revoke after restore"
 
-# --- 1. tunable reconcile applied to a new cert ---
+# --- 1. the locked policy applies to a new cert (the DB value, not the file) ---
 sed 's/ee_valid_days = 397/ee_valid_days = 90/' "$CFG" >"$WORK/ee90.toml"
 "$BIN" --config "$WORK/ee90.toml" --store "$PKI" create server --cn ee90.ca \
   >/dev/null 2>&1
@@ -318,8 +319,9 @@ NB=$(w get server --cn ee90.ca 2>/dev/null |
 NA=$(w get server --cn ee90.ca 2>/dev/null |
   openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
 DAYS=$((($(epoch "$NA") - $(epoch "$NB")) / 86400))
-[ "$DAYS" -ge 89 ] && [ "$DAYS" -le 91 ] &&
-  ok "tunable applied to new cert ($DAYS days)" || bad "ee validity not applied ($DAYS)"
+[ "$DAYS" -ge 396 ] && [ "$DAYS" -le 398 ] &&
+  ok "locked policy applied to new cert ($DAYS days)" ||
+  bad "ee validity not from DB ($DAYS)"
 
 # --- 2. get config round-trips as valid TOML ---
 w get config 2>/dev/null >"$WORK/dump1.toml"
@@ -332,19 +334,16 @@ head -1 "$WORK/dump1.toml" | grep -q "^# showing configuration stored in databas
 diff -q "$WORK/dump1.toml" "$WORK/dump2.toml" >/dev/null &&
   ok "get config round-trips" || bad "get config round-trip mismatch"
 
-# --- 3. reconcile is create-only ---
-DB_EE="$(w get config 2>/dev/null | grep '^ee_valid_days')"
+# --- 3. no field reconciles into the DB, on any command ---
 sed 's/^ee_valid_days = .*/ee_valid_days = 120/' "$CFG" >"$WORK/e120.toml"
-GOT="$("$BIN" --config "$WORK/e120.toml" --store "$PKI" get config 2>/dev/null |
-  grep '^ee_valid_days')"
-[ "$GOT" = "$DB_EE" ] &&
-  ok "get does not reconcile (create-only)" || bad "get reconciled tunable"
-"$BIN" --config "$WORK/e120.toml" --store "$PKI" create server --cn sync120.ca \
+"$BIN" --config "$WORK/e120.toml" --store "$PKI" create server --cn lock120.ca \
   >/dev/null 2>&1
-w get config 2>/dev/null | grep -q "ee_valid_days = 120" &&
-  ok "create reconciles tunable to DB" || bad "create did not sync"
+w get config 2>/dev/null | grep -q "ee_valid_days = 397" &&
+  ok "config fully locked (create did not sync)" || bad "create synced a field"
 
-# --- --valid override (server/client only, shrink-only) ---
+# --- --valid override: [5m, ee_valid_days], the policy is the ceiling ---
+# ee_valid_days is locked at init to $CFG's 397, so the ceiling here is
+# 397 days.
 w create server --cn v1h.ca --valid 1h >/dev/null 2>&1 &&
   ok "create --valid 1h" || bad "create --valid 1h"
 NB=$(w get server --cn v1h.ca 2>/dev/null |
@@ -353,8 +352,17 @@ NA=$(w get server --cn v1h.ca 2>/dev/null |
   openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
 SPAN=$(($(epoch "$NA") - $(epoch "$NB")))
 [ "$SPAN" -eq 3600 ] && ok "--valid 1h applied (3600s)" || bad "--valid span ${SPAN}s"
-w create server --cn vlong.ca --valid 1d >/dev/null 2>&1 &&
-  bad "--valid >= 1d accepted" || ok "--valid >= 1d rejected"
+w create server --cn v2d.ca --valid 2d >/dev/null 2>&1 &&
+  ok "create --valid 2d (day-scale)" || bad "create --valid 2d"
+DNB=$(w get server --cn v2d.ca 2>/dev/null |
+  openssl x509 -noout -startdate 2>/dev/null | cut -d= -f2)
+DNA=$(w get server --cn v2d.ca 2>/dev/null |
+  openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+[ "$(($(epoch "$DNA") - $(epoch "$DNB")))" -eq 172800 ] &&
+  ok "--valid 2d applied (172800s)" || bad "--valid 2d span"
+w create server --cn vlong.ca --valid 398d >/dev/null 2>&1 &&
+  bad "--valid above ee_valid_days accepted" ||
+  ok "--valid above ee_valid_days rejected"
 w create server --cn vfast.ca --valid 4m >/dev/null 2>&1 &&
   bad "--valid < 5m accepted" || ok "--valid < 5m rejected"
 w create server --cn vbad.ca --valid 90x >/dev/null 2>&1 &&
@@ -444,6 +452,25 @@ NONCE3="$(w get nonce --id user@example.ca 2>/dev/null)"
 w sign server --id user@example.ca --nonce "$NONCE3" --csr - <"$WORK/der.csr" |
   w get server --cn - 2>/dev/null | openssl x509 -noout -subject 2>/dev/null |
   grep -q "der.example.ca" && ok "DER via stdin + piped get --cn -" || bad "stdin/pipe flow"
+
+# --valid on the CSR path: same [5m, ee_valid_days] policy as create
+openssl req -new -key "$WORK/ee.key" -out "$WORK/sv.csr" \
+  -subj "/CN=sv.example.ca" 2>/dev/null
+NONCE_SV="$(w get nonce --id user@example.ca 2>/dev/null)"
+w sign server --id user@example.ca --nonce "$NONCE_SV" \
+  --csr "$WORK/sv.csr" --valid 10m >/dev/null 2>&1 &&
+  ok "sign --valid 10m" || bad "sign --valid 10m"
+SNB=$(w get server --cn sv.example.ca 2>/dev/null |
+  openssl x509 -noout -startdate 2>/dev/null | cut -d= -f2)
+SNA=$(w get server --cn sv.example.ca 2>/dev/null |
+  openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
+[ "$(($(epoch "$SNA") - $(epoch "$SNB")))" -eq 600 ] &&
+  ok "sign --valid 10m applied (600s)" || bad "sign --valid span"
+NONCE_SV2="$(w get nonce --id user@example.ca 2>/dev/null)"
+w sign server --id user@example.ca --nonce "$NONCE_SV2" \
+  --csr "$WORK/sv.csr" --valid 398d >/dev/null 2>&1 &&
+  bad "sign --valid above ee_valid_days accepted" ||
+  ok "sign --valid above ee_valid_days rejected"
 
 # CN-less (SAN-only) CSR, the certbot shape: CN derived from the dns SAN
 openssl req -new -key "$WORK/ee.key" -out "$WORK/nocn.csr" -subj "/" \

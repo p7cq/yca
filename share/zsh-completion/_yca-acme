@@ -27,6 +27,7 @@ _yca-acme() {
     '--config[yca --config (passed through)]:config file:_files -g "*.toml"' \
     '--store[yca --store (passed through)]:store directory:_files -/' \
     '--id[enrolled identity used for signing (default acme)]:id:' \
+    '--valid[validity requested per issuance, 5m..ee_valid_days]:duration (e.g. 90d):' \
     '--http01-port[port http-01 validation connects to (default 80)]:port:' \
     '--dns[resolver for dns-01 TXT lookups, host(:53)]:resolver:' \
     '--tls-cert[serve TLS with this certificate (may hold the chain)]:cert file:_files' \

@@ -3,6 +3,10 @@
 # Issuance execs the yca CLI, so the CA secret must be available
 # unattended.
 # JWS URL binding: --url below must be exactly what clients use.
+# Leaf lifetime: add `--valid <N>d` (e.g. --valid 90d) to ExecStart to
+# request shorter ACME certificates; the CA caps it at its locked
+# ee_valid_days policy. Change it here (drop-in + restart), not in the CA
+# config - yca.toml is fully locked after init.
 
 [Unit]
 Description=yca ACME issuance frontend (RFC 8555)

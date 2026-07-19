@@ -45,7 +45,7 @@ _yca() {
         '1:target:(server client)' \
         '--cn[common name]:common name:' \
         '*--san[SAN as type\:name (dns|email|ip), repeatable]:san:' \
-        '--valid[sub-day validity override, 5m..1d]:duration (e.g. 1h):'
+        '--valid[validity override, 5m..ee_valid_days]:duration (e.g. 1h, 30d):'
       ;;
     enroll)
       _arguments \
@@ -56,7 +56,8 @@ _yca() {
         '1:target:(server client)' \
         '--id[enrolled identity]:id:' \
         '--nonce[nonce from get nonce --id]:nonce:' \
-        '--csr[CSR\: inline PEM, - for stdin, or a file (PEM/DER)]:csr:_files'
+        '--csr[CSR\: inline PEM, - for stdin, or a file (PEM/DER)]:csr:_files' \
+        '--valid[validity override, 5m..ee_valid_days]:duration (e.g. 1h, 30d):'
       ;;
     revoke)
       _arguments \

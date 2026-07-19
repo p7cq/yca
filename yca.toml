@@ -1,9 +1,8 @@
-# On 'create', yca.toml is reconciled against the DB: changes to
-# locked fields are warned and IGNORED; only this one
-# may actually change (validated, then written back to the DB):
-#   - ee_valid_days   (EE certificate validity)
-# See the current effective config with 'yca get config'. Re-initialize to
-# change anything else.
+# The whole config is locked into the store at 'yca init'; later edits
+# here are warned and IGNORED (the DB is the source of truth - see it
+# with 'yca get config'). Re-initialize to change anything.
+# ee_valid_days is the issuance ceiling: --valid may request any shorter
+# validity per issuance, down to 5 minutes.
 
 org_name = "Example 会社"
 country_code = "CA"

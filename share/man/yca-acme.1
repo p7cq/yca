@@ -52,6 +52,12 @@ Passed through to the yca CLI.
 Enrolled identity used for signing (default: \fBacme\fR; one\-time
 \fByca enroll \-\-id acme\fR).
 .TP
+.BI \-\-valid " N" {s|m|h|d}
+Validity requested per issuance, passed through to \fByca sign
+\-\-valid\fR. The CA validates it ([5m, \fBee_valid_days\fR]; the locked
+policy is the ceiling, shorter is always allowed). Empty (default): the
+CA issues at its \fBee_valid_days\fR policy.
+.TP
 .BI \-\-http01\-port " port"
 Port http\-01 validation connects to on identifiers (default: 80).
 .TP

@@ -15,7 +15,7 @@ import (
 func issueViaStub(t *testing.T, e *testEnv) *stub {
 	t.Helper()
 	st := newStub(t, "localhost")
-	e.s.yca = newYcaRunner(st.bin, "", "", "acme")
+	e.s.yca = newYcaRunner(st.bin, "", "", "acme", "")
 	orderPath := runChallenge(t, e, false)
 	_, order := e.post(orderPath, nil, e.kid, "")
 	fin := e.path(order["finalize"].(string))

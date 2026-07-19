@@ -22,13 +22,16 @@ import (
 	"time"
 )
 
+// valid is passed to `yca sign --valid` verbatim when non-empty; the CA
+// validates it ([5m, ee_valid_days]) - the daemon only requests.
 type ycaRunner struct {
-	bin, config, store, id string
-	mu                     sync.Mutex
+	bin, config, store, id, valid string
+	mu                            sync.Mutex
 }
 
-func newYcaRunner(bin, config, store, id string) *ycaRunner {
-	return &ycaRunner{bin: bin, config: config, store: store, id: id}
+func newYcaRunner(bin, config, store, id, valid string) *ycaRunner {
+	return &ycaRunner{bin: bin, config: config, store: store, id: id,
+		valid: valid}
 }
 
 // run execs one yca command; stderr goes to our log on failure.
@@ -74,8 +77,12 @@ func (y *ycaRunner) issue(csrDER []byte) (chain, cn string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	cn, err = y.run(csrDER, "sign", "server", "--id", y.id,
-		"--nonce", nonce, "--csr", "-")
+	args := []string{"sign", "server", "--id", y.id,
+		"--nonce", nonce, "--csr", "-"}
+	if y.valid != "" {
+		args = append(args, "--valid", y.valid)
+	}
+	cn, err = y.run(csrDER, args...)
 	if err != nil {
 		return "", "", err
 	}

@@ -113,7 +113,7 @@ func TestDNS01WrongRecord(t *testing.T) {
 func TestWildcardFinalize(t *testing.T) {
 	e := newTestEnv(t)
 	e.register()
-	e.s.yca = newYcaRunner(stubYca(t), "", "", "acme")
+	e.s.yca = newYcaRunner(stubYca(t), "", "", "acme", "")
 	order, loc := e.order("*.test.ca")
 	challURL, token := dnsChallenge(t, e, order)
 	keyAuth := token + "." + e.thumbprint()

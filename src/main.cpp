@@ -66,8 +66,8 @@ int main(int argc, char **argv) {
   create->add_option("--san", c_sans,
                      "SAN as type:name (dns|email|ip), repeatable");
   create->add_option("--valid", c_valid,
-                     "sub-day validity override as <N><s|m|h>, in [5m, 1d) "
-                     "(server/client only)");
+                     "validity override as <N><s|m|h|d>, in [5m, "
+                     "ee_valid_days] (policy is the ceiling)");
 
   auto *enroll =
       app.add_subcommand("enroll", "enroll an identity for CSR signing");
@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
 
   auto *sign = app.add_subcommand(
       "sign", "issue an end-entity certificate from a PKCS#10 CSR");
-  std::string s_target, s_id, s_nonce, s_csr;
+  std::string s_target, s_id, s_nonce, s_csr, s_valid;
   sign->add_option("target", s_target, "server|client")
       ->required()
       ->check(CLI::IsMember({"server", "client"}));
@@ -87,6 +87,9 @@ int main(int argc, char **argv) {
   sign->add_option("--csr", s_csr,
                    "CSR: inline PEM, '-' for stdin, or a file path (PEM/DER)")
       ->required();
+  sign->add_option("--valid", s_valid,
+                   "validity override as <N><s|m|h|d>, in [5m, "
+                   "ee_valid_days] (policy is the ceiling)");
 
   auto *revoke = app.add_subcommand("revoke", "revoke a certificate");
   std::string rev_target, r_cn, r_reason = "unspecified", r_serial;
@@ -208,7 +211,7 @@ int main(int argc, char **argv) {
     }
 
     if (*create) {
-      ca::reconcile(*config, *eff, store_dir);
+      ca::reconcile(*config, *eff);
       if (c_cn.empty()) {
         log::error("--cn is required for create {}", c_target);
         return 1;
@@ -243,11 +246,20 @@ int main(int argc, char **argv) {
       return ca::enroll(store_dir, e_id) ? 0 : 1;
 
     if (*sign) {
-      ca::reconcile(*config, *eff, store_dir);
+      ca::reconcile(*config, *eff);
       const ca::Profile profile =
           (s_target == "server") ? ca::Profile::Server : ca::Profile::Client;
+      std::optional<std::chrono::seconds> valid;
+      if (!s_valid.empty()) {
+        valid = util::parse_duration(s_valid);
+        if (!valid) {
+          log::error("invalid --valid '{}' (use <N><s|m|h|d>, e.g. 1h)",
+                     s_valid);
+          return 1;
+        }
+      }
       return ca::sign_csr(*eff, store_dir, secret(*eff), profile, s_id, s_nonce,
-                          s_csr)
+                          s_csr, valid)
                  ? 0
                  : 1;
     }

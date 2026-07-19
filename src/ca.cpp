@@ -421,8 +421,10 @@ std::optional<Botan::X509_Certificate> load_cert(Botan::SQL_Database &db,
   return Botan::X509_Certificate(std::vector<uint8_t>(blob, blob + len));
 }
 
-// Immutable config fields recorded at init and enforced on every later run.
-// Excludes ee_valid_days, which is tunable issuance policy.
+// The full config, recorded at init and enforced on every later run: every
+// field is locked, re-init to change anything. ee_valid_days is issuance
+// policy but locked too - per-issuance flexibility is --valid, which may
+// request anything up to it (the policy is the ceiling).
 std::vector<std::pair<std::string, std::string>>
 locked_config(const cfg::Config &c) {
   return {
@@ -445,16 +447,8 @@ locked_config(const cfg::Config &c) {
       {"key_backend", c.key_backend},
       {"pkcs11_module", c.pkcs11_module},
       {"pkcs11_token_label", c.pkcs11_token_label},
+      {"ee_valid_days", std::to_string(c.ee_valid_days)},
   };
-}
-
-// Full config snapshot (locked + the tunable validity). Written to
-// the config table at init; the DB becomes the source of truth after that.
-std::vector<std::pair<std::string, std::string>>
-full_config(const cfg::Config &c) {
-  auto v = locked_config(c);
-  v.push_back({"ee_valid_days", std::to_string(c.ee_valid_days)});
-  return v;
 }
 
 // Env var naming the CA secret for this backend (for error messages).
@@ -560,7 +554,7 @@ bool create(const cfg::Config &config, const fs::path &db_path,
   db->create_table(std::format("CREATE TABLE IF NOT EXISTS {} ("
                                "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
                                app::config_table));
-  for (const auto &[k, v] : full_config(config)) {
+  for (const auto &[k, v] : locked_config(config)) {
     auto cins = db->new_statement(std::format(
         "INSERT INTO {} (key, value) VALUES (?1, ?2)", app::config_table));
     cins->bind(1, k);
@@ -739,10 +733,9 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
   return c;
 }
 
-void reconcile(const cfg::Config &file, cfg::Config &eff,
-               const fs::path &store_dir) {
-  // Readonly (locked) fields: warn and ignore any change; DB stays
-  // authoritative.
+void reconcile(const cfg::Config &file, const cfg::Config &eff) {
+  // The whole config is locked: warn and ignore any change; DB stays
+  // authoritative. Re-init to change anything.
   const auto fk = locked_config(file);
   const auto ek = locked_config(eff);
   for (std::size_t i = 0; i < fk.size(); ++i)
@@ -750,33 +743,23 @@ void reconcile(const cfg::Config &file, cfg::Config &eff,
       log::warn("ignoring readonly params changed in {}.toml ({}), check "
                 "against 'get config'",
                 app::name, fk[i].first);
-
-  // Tunable validities: if changed and valid, update the DB and use the new
-  // value.
-  const fs::path db = store_path(store_dir);
-  auto dbh = open_store(db);
-  auto sync = [&](const char *key, int file_val, int &eff_val, bool valid) {
-    if (file_val == eff_val)
-      return;
-    if (!valid) {
-      log::warn("ignoring invalid {} = {} in {}.toml", key, file_val,
-                app::name);
-      return;
-    }
-    const std::string sval = std::to_string(file_val);
-    const std::string skey = key;
-    auto upd = dbh->new_statement(std::format(
-        "UPDATE {} SET value = ?1 WHERE key = ?2", app::config_table));
-    upd->bind(1, sval);
-    upd->bind(2, skey);
-    upd->spin();
-    eff_val = file_val;
-    log::info("validity changed for {}: now {}", key, file_val);
-  };
-  sync("ee_valid_days", file.ee_valid_days, eff.ee_valid_days,
-       file.ee_valid_days > 0 && file.ee_valid_days <= app::max_ee_valid_days &&
-           file.ee_valid_days < eff.signing_ca_valid_days);
 }
+
+namespace {
+
+// --valid must sit inside the policy: at least the 5-minute floor (below
+// it clock skew kills the certificate on arrival), at most the effective
+// ee_valid_days ceiling - shorter than policy is always allowed.
+bool check_valid_override(const cfg::Config &config, std::chrono::seconds v) {
+  if (v >= std::chrono::minutes(app::min_valid_override_minutes) &&
+      v <= std::chrono::days(config.ee_valid_days))
+    return true;
+  log::error("--valid must be in [{}m, {}d] (ee_valid_days is the ceiling)",
+             app::min_valid_override_minutes, config.ee_valid_days);
+  return false;
+}
+
+} // namespace
 
 bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
               std::string_view secret, Profile profile, const std::string &cn,
@@ -784,17 +767,8 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
               std::optional<std::chrono::seconds> valid_override) {
   const std::chrono::seconds validity = valid_override.value_or(
       std::chrono::seconds(std::chrono::days(config.ee_valid_days)));
-  // --valid is the sub-day knob: [5m, 1d). Day-scale validity comes
-  // from ee_valid_days (so the override can never exceed the policy).
-  if (valid_override &&
-      (*valid_override <
-           std::chrono::minutes(app::min_valid_override_minutes) ||
-       *valid_override >= std::chrono::days(1))) {
-    log::error("--valid must be in [{}m, 1d); day-scale validity is set via "
-               "ee_valid_days",
-               app::min_valid_override_minutes);
+  if (valid_override && !check_valid_override(config, *valid_override))
     return false;
-  }
 
   std::vector<San> sans;
   if (profile == Profile::Server) {
@@ -1077,7 +1051,10 @@ bool get_nonce(const fs::path &store_dir, const std::string &id) {
 
 bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
               std::string_view secret, Profile profile, const std::string &id,
-              const std::string &nonce, const std::string &csr_src) {
+              const std::string &nonce, const std::string &csr_src,
+              std::optional<std::chrono::seconds> valid_override) {
+  if (valid_override && !check_valid_override(config, *valid_override))
+    return false;
   // Parse and police the CSR first: cheap failures before any store or key
   // access. PKCS#10 decode already verifies the CSR's self-signature
   // (proof-of-possession); a tampered or unsigned request never parses.
@@ -1187,7 +1164,8 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
                (store_dir / "ca").string());
     return false;
   }
-  const std::chrono::seconds validity{std::chrono::days(config.ee_valid_days)};
+  const std::chrono::seconds validity = valid_override.value_or(
+      std::chrono::seconds(std::chrono::days(config.ee_valid_days)));
   if (outlives_issuer(*sign_cert, validity))
     return false;
 

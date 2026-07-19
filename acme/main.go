@@ -64,6 +64,9 @@ func main() {
 		config  = flag.String("config", "", "yca --config (passed through)")
 		store   = flag.String("store", "", "yca --store (passed through)")
 		id      = flag.String("id", "acme", "enrolled identity used for signing")
+		leafVal = flag.String("valid", "",
+			"validity requested per issuance, passed to 'yca sign --valid' "+
+				"(<N><s|m|h|d>; empty: the CA's ee_valid_days policy)")
 		vaPort  = flag.Int("http01-port", 80, "port http-01 validation connects to")
 		dnsAddr = flag.String("dns", "",
 			"resolver for dns-01 TXT lookups, host[:53] (default: system)")
@@ -86,7 +89,7 @@ func main() {
 	s := &server{
 		db:      db,
 		baseURL: strings.TrimSuffix(*baseURL, "/"),
-		yca:     newYcaRunner(*ycaBin, *config, *store, *id),
+		yca:     newYcaRunner(*ycaBin, *config, *store, *id, *leafVal),
 		http01:  &http01Validator{port: *vaPort},
 		dns01:   &dns01Validator{lookupTXT: resolverFor(*dnsAddr).LookupTXT},
 	}

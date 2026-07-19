@@ -396,55 +396,40 @@ TEST_CASE("ca: init + issuance + revocation rules") {
   CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "Иван Петров",
                      {{ca::San::Type::Email, "ivan@ut.ca"}}));
 
-  // --valid override: sub-day testing knob, accepted only in [5m, 1d).
+  // --valid override: [5m, ee_valid_days] - the policy is the ceiling,
+  // shorter is always allowed (ee_valid_days here: 90).
   CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "short.ut.ca", {},
                      std::chrono::hours(1)));
   CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "min.ut.ca", {},
                      std::chrono::minutes(5)));
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "month.ut.ca", {},
+                     std::chrono::days(30)));
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "cap.ut.ca", {},
+                     std::chrono::days(90))); // exactly the ceiling
   CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server,
                            "fast.ut.ca", {}, std::chrono::minutes(4)));
   CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server,
-                           "long.ut.ca", {}, std::chrono::days(1)));
+                           "over.ut.ca", {}, std::chrono::days(91)));
 }
 
-TEST_CASE("ca::reconcile syncs tunables and ignores locked/invalid fields") {
+TEST_CASE("ca::reconcile warns and ignores every changed field (locked)") {
   TempPki t;
   REQUIRE(ca::init(t.config, t.dir, kPass));
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
 
   cfg::Config file = t.config;
-  file.ee_valid_days = 45; // valid tunable: synced
-  file.org_name = "Other"; // locked field: ignored
-  ca::reconcile(file, *eff, t.dir);
-  CHECK(eff->ee_valid_days == 45);
+  file.ee_valid_days = 45; // locked like everything else: ignored
+  file.org_name = "Other"; // ignored
+  ca::reconcile(file, *eff);
+  CHECK(eff->ee_valid_days == 90);
   CHECK(eff->org_name == "Example");
 
-  // The valid tunable was persisted to the DB; an invalid one is ignored.
+  // Nothing was persisted either: the DB snapshot is untouched.
   auto reloaded = ca::load_config(t.dir);
   REQUIRE(reloaded.has_value());
-  CHECK(reloaded->ee_valid_days == 45);
-  file.ee_valid_days = 999; // above max_ee_valid_days: ignored
-  ca::reconcile(file, *eff, t.dir);
-  CHECK(eff->ee_valid_days == 45);
-}
-
-TEST_CASE("ca::reconcile: the tunable must fit under the signing CA") {
-  TempPki t;
-  t.config.signing_ca_valid_days = 20; // short-lived test CA
-  t.config.ee_valid_days = 10;
-  REQUIRE(ca::init(t.config, t.dir, kPass));
-  auto eff = ca::load_config(t.dir);
-  REQUIRE(eff.has_value());
-
-  cfg::Config file = *eff;
-  file.ee_valid_days = 21; // valid range but not under the signing CA: ignored
-  ca::reconcile(file, *eff, t.dir);
-  CHECK(eff->ee_valid_days == 10);
-
-  file.ee_valid_days = 15; // fits: synced
-  ca::reconcile(file, *eff, t.dir);
-  CHECK(eff->ee_valid_days == 15);
+  CHECK(reloaded->ee_valid_days == 90);
+  CHECK(reloaded->org_name == "Example");
 }
 
 TEST_CASE("a leaf may not outlive its issuer") {

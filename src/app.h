@@ -32,7 +32,9 @@ inline constexpr int max_ee_valid_days = 398;
 // Default window for the `list` time filters, in days.
 inline constexpr int default_list_window_days = 30;
 
-// The --valid flag is sub-day by definition: [5 minutes, 1 day).
+// The --valid floor: below 5 minutes clock skew makes a certificate dead
+// on arrival. The ceiling is the effective ee_valid_days policy (the
+// industry model: the CA sets a maximum, a request may always be shorter).
 inline constexpr int min_valid_override_minutes = 5;
 
 // Validity of an issued enrollment nonce (CSR signing), in minutes.

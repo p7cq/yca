@@ -18,7 +18,9 @@ At
 .B yca init
 the configuration is snapshotted into the store database, which becomes the
 source of truth; later edits to locked fields in the file are ignored with a
-warning. Only \fBee_valid_days\fR remains tunable.
+warning. The configuration is fully locked: re\-initialize to change
+anything. Per\-issuance flexibility is \fB\-\-valid\fR, capped by
+\fBee_valid_days\fR.
 .SH OPTIONS
 .TP
 .BI \-\-config " path"
@@ -44,12 +46,14 @@ once if \fBCA_STORE_PASSPHRASE\fR is unset. With \fBpkcs11\fR, existing
 token keypairs labeled with the CA slugs are adopted (curve-checked) or
 generated on the token. Fails if the store is already initialized.
 .TP
-\fBcreate\fR \fIserver\fR|\fIclient\fR \fB\-\-cn\fR \fIcn\fR [\fB\-\-san\fR \fItype:name\fR ...] [\fB\-\-valid\fR \fIN\fR{s|m|h}]
+\fBcreate\fR \fIserver\fR|\fIclient\fR \fB\-\-cn\fR \fIcn\fR [\fB\-\-san\fR \fItype:name\fR ...] [\fB\-\-valid\fR \fIN\fR{s|m|h|d}]
 Issue an end-entity certificate. \fB\-\-san\fR is repeatable with
 \fItype\fR one of \fBdns\fR, \fBemail\fR, \fBip\fR; servers always get
 DNS:\fIcn\fR added, clients require at least one SAN. \fB\-\-valid\fR
-overrides validity for this one issuance, sub-day range
-[5m, 1d). One active certificate per (CN, profile); once the active one has
+requests a shorter validity for this one issuance, range [5m,
+\fBee_valid_days\fR]: the configured policy is both the default and the
+ceiling, a request below it is always allowed; nothing is persisted. One
+active certificate per (CN, profile); once the active one has
 less than 33% of its lifetime left, an overlapping successor may be issued
 (renewal window) and the old certificate simply expires.
 .TP
@@ -57,14 +61,15 @@ less than 33% of its lifetime left, an overlapping successor may be issued
 Enroll an identity (e.g. an email address) so it can request nonces and CSR
 signatures. Fails if already enrolled.
 .TP
-\fBsign\fR \fIserver\fR|\fIclient\fR \fB\-\-id\fR \fIid\fR \fB\-\-nonce\fR \fInonce\fR \fB\-\-csr\fR \fIcsr\fR
+\fBsign\fR \fIserver\fR|\fIclient\fR \fB\-\-id\fR \fIid\fR \fB\-\-nonce\fR \fInonce\fR \fB\-\-csr\fR \fIcsr\fR [\fB\-\-valid\fR \fIN\fR{s|m|h|d}]
 Issue an end-entity certificate from an external PKCS#10 CSR, gated by a
 valid (\fIid\fR, \fInonce\fR) pair from \fBget nonce\fR; the nonce is
 consumed on success (single use). \fIcsr\fR is inline PEM, \fB\-\fR for
 standard input, or a file path (PEM/DER auto-detected). Only the public key
 (ECDSA on the \fBee_curve\fR curve), the subject CN and the supported SANs
 (dns, email, IPv4) are taken from the CSR; every other requested extension
-or DN attribute is ignored and the CA dictates the profile. Prints the CN on
+or DN attribute is ignored and the CA dictates the profile.
+\fB\-\-valid\fR behaves exactly as in \fBcreate\fR. Prints the CN on
 standard output for piping into \fBget\fR \fB\-\-cn \-\fR; writes nothing
 under \fBee/\fR (the private key stays with the requester).
 .TP

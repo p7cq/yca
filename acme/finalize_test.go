@@ -167,7 +167,7 @@ func TestFinalizeIssues(t *testing.T) {
 	e := newTestEnv(t)
 	e.register()
 	st := newStub(t, "localhost")
-	e.s.yca = newYcaRunner(st.bin, "", "", "acme")
+	e.s.yca = newYcaRunner(st.bin, "", "", "acme", "")
 	orderPath := runChallenge(t, e, false)
 
 	_, order := e.post(orderPath, nil, e.kid, "")
@@ -196,10 +196,38 @@ func TestFinalizeIssues(t *testing.T) {
 	}
 }
 
+// The --valid deployment flag is forwarded to `yca sign` verbatim; when
+// empty no flag is passed and the CA's own policy applies.
+func TestRunnerForwardsValid(t *testing.T) {
+	st := newStub(t, "localhost")
+	csr := csrFor(t, "", []string{"localhost"})
+
+	y := newYcaRunner(st.bin, "", "", "acme", "90d")
+	if _, _, err := y.issue(csr); err != nil {
+		t.Fatal(err)
+	}
+	y = newYcaRunner(st.bin, "", "", "acme", "")
+	if _, _, err := y.issue(csr); err != nil {
+		t.Fatal(err)
+	}
+
+	args, _ := os.ReadFile(st.args)
+	var signs []string
+	for _, l := range strings.Split(strings.TrimSpace(string(args)), "\n") {
+		if strings.Contains(l, "sign server") {
+			signs = append(signs, l)
+		}
+	}
+	if len(signs) != 2 || !strings.Contains(signs[0], "--valid 90d") ||
+		strings.Contains(signs[1], "--valid") {
+		t.Fatalf("sign invocations: %q", signs)
+	}
+}
+
 func TestFinalizeNameMismatch(t *testing.T) {
 	e := newTestEnv(t)
 	e.register()
-	e.s.yca = newYcaRunner(stubYca(t), "", "", "acme")
+	e.s.yca = newYcaRunner(stubYca(t), "", "", "acme", "")
 	orderPath := runChallenge(t, e, false)
 	_, order := e.post(orderPath, nil, e.kid, "")
 	fin := e.path(order["finalize"].(string))
@@ -225,7 +253,7 @@ func TestFinalizeNameMismatch(t *testing.T) {
 func TestFinalizeBeforeReady(t *testing.T) {
 	e := newTestEnv(t)
 	e.register()
-	e.s.yca = newYcaRunner(stubYca(t), "", "", "acme")
+	e.s.yca = newYcaRunner(stubYca(t), "", "", "acme", "")
 	order, _ := e.order("localhost") // pending, never validated
 	fin := e.path(order["finalize"].(string))
 	resp, v := e.post(fin, finalizeBody(t, csrFor(t, "", []string{"localhost"})),
@@ -238,7 +266,7 @@ func TestFinalizeBeforeReady(t *testing.T) {
 func TestFinalizeIssuanceFailure(t *testing.T) {
 	e := newTestEnv(t)
 	e.register()
-	e.s.yca = newYcaRunner(failingYca(t), "", "", "acme")
+	e.s.yca = newYcaRunner(failingYca(t), "", "", "acme", "")
 	orderPath := runChallenge(t, e, false)
 	_, order := e.post(orderPath, nil, e.kid, "")
 	fin := e.path(order["finalize"].(string))
