@@ -249,6 +249,13 @@ openssl x509 -in "$WORK/pki_uni/ca/ets-root-e1.pem" -noout -subject -nameopt utf
 openssl x509 -in "$WORK/pki_uni/ca/ets-root-e1.pem" -noout -subject -nameopt utf8 2>/dev/null |
   grep -q "ETS 株 Root E1" && ok "unicode CN= present, file named by slug" ||
   bad "unicode CN missing"
+# get crl resolves the FILE by the configured slug, never by slugifying
+# the CN - here they differ (the unicode CN cannot even name a file).
+"$BIN" --config "$WORK/uni.toml" --store "$WORK/pki_uni" get crl --cn root-ca 2>/dev/null |
+  openssl crl -noout -issuer -nameopt utf8 2>/dev/null |
+  grep -q "ETS 株 Root E1" &&
+  ok "get crl file named by slug (CN and slug decoupled)" ||
+  bad "get crl resolved by slugified CN"
 sed 's/root_ca_slug_prefix = "ets-root-e"/root_ca_slug_prefix = "ets-株"/' "$CFG" \
   >"$WORK/uni_slug.toml"
 "$BIN" --config "$WORK/uni_slug.toml" --store "$WORK/pki_uni2" init >/dev/null 2>&1 &&

@@ -1545,18 +1545,19 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
     return true;
   }
 
-  // A CRL is a file artifact; no store needed.
+  // A CRL is a file artifact; the file is named by the CA slug, guaranteed
+  // to be ASCII.
   if (target == "crl") {
-    std::string ca_cn;
+    std::string ca_slug;
     if (selector == "root-ca" || selector == config.root_ca_cn)
-      ca_cn = config.root_ca_cn;
+      ca_slug = config.root_ca_slug;
     else if (selector == "signing-ca" || selector == config.signing_ca_cn)
-      ca_cn = config.signing_ca_cn;
+      ca_slug = config.signing_ca_slug;
     else {
       log::error("crl --cn must be root-ca or signing-ca");
       return false;
     }
-    const fs::path crl_path = store_dir / "ca" / (slug(ca_cn) + ".crl");
+    const fs::path crl_path = store_dir / "ca" / (ca_slug + ".crl");
     if (!fs::exists(crl_path)) {
       log::error("CRL not found: {}", crl_path.string());
       return false;
