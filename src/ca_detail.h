@@ -27,11 +27,32 @@ std::filesystem::path store_path(const std::filesystem::path &store_dir);
 std::shared_ptr<Botan::Sqlite3_Database>
 open_store(const std::filesystem::path &db);
 
-// Loads the signing CA certificate from its published PEM (O(1)); avoids an
-// O(N) scan of the store to find it on every issuance/revocation.
+// One generation of a CA: the identity that names its artifacts
+// (<slug>.{pem,crt,crl}), its AIA/CDP URLs and its key label on the token.
+// Generation 1 is the one the init ceremony created and yca.toml describes;
+// later generations come from CA rotation (docs/ca-rotation.md).
+struct CaGen {
+  int gen = 1;
+  std::string cn;
+  std::string slug;
+};
+
+// ca_cert_index: the CA generations and their state, the answer to "who
+// signs today". `cert_index` covers every issued certificate including the
+// CAs; this table adds the generation axis and the lifecycle a CA has but a
+// leaf does not (active -> retiring -> revoked/expired).
+void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config);
+
+// The active generation of `kind` ("root" or "signing"). Until a rotation
+// records generations, the store holds exactly what the ceremony created,
+// so the locked config answers it: generation 1. Read-only.
+CaGen active_ca(Botan::SQL_Database &db, const cfg::Config &config,
+                const std::string &kind);
+
+// Loads a CA certificate from its published PEM (O(1)); avoids an O(N) scan
+// of the store to find it on every issuance/revocation.
 std::optional<Botan::X509_Certificate>
-load_signing_cert(const cfg::Config &config,
-                  const std::filesystem::path &store_dir);
+load_ca_cert(const std::filesystem::path &store_dir, const std::string &slug);
 
 // cert_index: queryable/indexed metadata table (Botan's store keeps the DER
 // blobs but is not indexed on the fields we filter/sort by).

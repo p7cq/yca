@@ -333,7 +333,7 @@ int main(int argc, char **argv) {
       }
       if (days < 1) // no value: CLI11 leaves 0, use the default
         days = app::default_list_window_days;
-      return ca::list_certs(*eff, store_dir, filter, days, l_cn, l_tsv) ? 0 : 1;
+      return ca::list_certs(store_dir, filter, days, l_cn, l_tsv) ? 0 : 1;
     }
 
     return 0;

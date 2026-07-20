@@ -46,7 +46,8 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, passphrase, rng);
 
-  auto sign_cert = load_signing_cert(config, store_dir);
+  const CaGen sign = active_ca(*dbh, config, "signing");
+  auto sign_cert = load_ca_cert(store_dir, sign.slug);
   if (!sign_cert) {
     log::error("signing CA cert not found under {}",
                (store_dir / "ca").string());
@@ -117,7 +118,7 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
   dbh->new_statement("COMMIT")->spin();
 
   const fs::path crl_path =
-      store_dir / "ca" / (config.signing_ca_slug + ".crl");
+      store_dir / "ca" / (sign.slug + ".crl");
   Botan::X509_CRL prev(crl_path.string());
   Botan::X509_CA crl_issuer(*sign_cert, *sign_key, config.signing_ca_digest,
                             rng);

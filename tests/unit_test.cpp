@@ -319,6 +319,50 @@ TEST_CASE("ca::load_config on an uninitialized dir returns nullopt") {
   CHECK_FALSE(ca::load_config(t.dir).has_value());
 }
 
+TEST_CASE("ca::detail::active_ca resolves the generation from the store") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+  const auto db = t.dir / "ca-store.db";
+
+  {
+    // init records generation 1 of both CAs.
+    auto h = ca::detail::open_store(db);
+    const auto root = ca::detail::active_ca(*h, *eff, "root");
+    const auto sign = ca::detail::active_ca(*h, *eff, "signing");
+    CHECK(root.gen == 1);
+    CHECK(root.slug == eff->root_ca_slug);
+    CHECK(root.cn == eff->root_ca_cn);
+    CHECK(sign.gen == 1);
+    CHECK(sign.slug == eff->signing_ca_slug);
+  }
+  {
+    // A later generation wins over the config: the store is the answer.
+    Botan::Sqlite3_Database h(db.string());
+    h.new_statement("UPDATE ca_cert_index SET status='retiring' "
+                    "WHERE kind='signing' AND gen=1")
+        ->spin();
+    h.new_statement("INSERT INTO ca_cert_index (kind,gen,cn,slug,status) "
+                    "VALUES ('signing',2,'UT CA E2','ut-ca-e2','active')")
+        ->spin();
+    const auto sign = ca::detail::active_ca(h, *eff, "signing");
+    CHECK(sign.gen == 2);
+    CHECK(sign.cn == "UT CA E2");
+    CHECK(sign.slug == "ut-ca-e2");
+    // The root is untouched by a signing rotation.
+    CHECK(ca::detail::active_ca(h, *eff, "root").gen == 1);
+  }
+  {
+    // Without the index the ceremony's own generation is the answer.
+    Botan::Sqlite3_Database h(db.string());
+    h.new_statement("DROP TABLE ca_cert_index")->spin();
+    const auto sign = ca::detail::active_ca(h, *eff, "signing");
+    CHECK(sign.gen == 1);
+    CHECK(sign.slug == eff->signing_ca_slug);
+  }
+}
+
 TEST_CASE("ca::is_initialized: active anchors must match the locked config") {
   TempPki t;
   CHECK_FALSE(ca::is_initialized(t.dir)); // absent store

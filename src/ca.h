@@ -137,8 +137,7 @@ bool get_cert(const cfg::Config &config, const std::filesystem::path &store_dir,
 // "revoked", "last" (windowed by `days`, ordered) or "cn" (by `cn`, which may
 // be a CA alias root-ca/signing-ca). Columns: CN, kind, truncated serial,
 // expiry, status. `tsv` for tab-separated output. Read-only; no passphrase.
-bool list_certs(const cfg::Config &config,
-                const std::filesystem::path &store_dir,
+bool list_certs(const std::filesystem::path &store_dir,
                 const std::string &filter, int days, const std::string &cn,
                 bool tsv);
 
