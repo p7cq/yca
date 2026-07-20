@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -247,6 +249,38 @@ func TestFinalizeNameMismatch(t *testing.T) {
 	resp, v := e.post(fin, finalizeBody(t, csrFor(t, "localhost", nil)), e.kid, "")
 	if resp.StatusCode != http.StatusOK || v["status"] != "valid" {
 		t.Fatalf("CN-only CSR: %d %v", resp.StatusCode, v)
+	}
+}
+
+// SANs other than dNSName never passed a challenge; the CA honors email
+// and IP SANs from CSRs, so finalize must refuse them outright.
+func TestFinalizeRejectsNonDNSSANs(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	e.s.yca = newYcaRunner(stubYca(t), "", "", "acme", "")
+	orderPath := runChallenge(t, e, false)
+	_, order := e.post(orderPath, nil, e.kid, "")
+	fin := e.path(order["finalize"].(string))
+
+	key, err := generateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]x509.CertificateRequest{
+		"ip":    {DNSNames: []string{"localhost"}, IPAddresses: []net.IP{net.IPv4(10, 0, 0, 1)}},
+		"email": {DNSNames: []string{"localhost"}, EmailAddresses: []string{"a@test.ca"}},
+		"uri": {DNSNames: []string{"localhost"},
+			URIs: []*url.URL{{Scheme: "spiffe", Host: "td", Path: "/wl"}}},
+	}
+	for name, tmpl := range cases {
+		der, err := x509.CreateCertificateRequest(rand.Reader, &tmpl, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, v := e.post(fin, finalizeBody(t, der), e.kid, "")
+		if problemType(v) != "badCSR" {
+			t.Errorf("%s SAN: got %d %v, want badCSR", name, resp.StatusCode, v)
+		}
 	}
 }
 

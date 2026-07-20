@@ -143,6 +143,16 @@ func (s *server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 			"unparsable CSR or bad CSR signature"))
 		return
 	}
+	// Only dNSName SANs are acceptable: the challenges validated dns
+	// identifiers and nothing else, and the CA honors email/IP SANs on
+	// its operator-trusted CSR path - any other SAN type here would ride
+	// into the certificate unvalidated.
+	if len(csr.IPAddresses) > 0 || len(csr.EmailAddresses) > 0 ||
+		len(csr.URIs) > 0 {
+		s.writeProblem(w, problem(http.StatusBadRequest, "badCSR",
+			"CSR carries non-dns SANs"))
+		return
+	}
 	// The CSR must request exactly the order's identifiers (RFC 8555 §7.4);
 	// the CN, when present, must be one of them.
 	names := map[string]bool{}
