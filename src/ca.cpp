@@ -1144,15 +1144,16 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   if (req->subject_dn().count() > 1)
     log::warn("ignoring non-CN subject attributes in the CSR");
 
-  // SANs: only dns/email/IPv4/URI are honored (same types as --san);
-  // anything else in the CSR (directoryName, IPv6, otherName) is dropped.
+  // SANs: only dns/email/IPv4/URI are honored (same types as --san); the
+  // remaining entry types (directoryName, IPv6, otherName) are not
+  // implemented and are dropped.
   const auto &csr_san = req->subject_alt_name();
   const std::size_t supported = csr_san.dns().size() + csr_san.email().size() +
                                 csr_san.ipv4_address().size() +
                                 csr_san.uris().size();
   if (csr_san.count() > supported)
-    log::warn("ignoring {} unsupported SAN entries in the CSR (only dns, "
-              "email, IPv4 and URI are honored)",
+    log::warn("ignoring {} SAN entries in the CSR; only dns, email, IPv4 "
+              "and URI are implemented",
               csr_san.count() - supported);
   for (const auto &d : csr_san.dns())
     if (!dns_safe(d)) {
