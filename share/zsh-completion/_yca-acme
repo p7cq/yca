@@ -9,6 +9,15 @@ _yca-acme() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
 
+  if [[ $words[2] == ari ]]; then
+    _arguments \
+      '2:verb:(accelerate list clear)' \
+      '--state[protocol state database (default ./acme.db)]:state db:_files' \
+      '--issuer[CA generation common name (e.g. CA E1)]:issuer cn:' \
+      '--window[replacement window, clients randomize inside it]:duration (e.g. 2h):'
+    return
+  fi
+
   if [[ $words[2] == eab ]]; then
     _arguments \
       '2:verb:(new list delete)' \
@@ -19,7 +28,7 @@ _yca-acme() {
   fi
 
   _arguments \
-    '1:command:(eab)' \
+    '1:command:(eab ari)' \
     '--state[protocol state database (default ./acme.db)]:state db:_files' \
     '--listen[listen address (default 127.0.0.1:8555)]:address:' \
     '--url[external base URL clients use (JWS url binding)]:url:' \

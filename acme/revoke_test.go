@@ -55,11 +55,25 @@ func TestRevokeByAccount(t *testing.T) {
 		[]byte("revoke server --serial "+wantSerial+" --reason keyCompromise")) {
 		t.Fatalf("CLI args:\n%s", args)
 	}
-	// Second attempt: the stub answers like the CA - already revoked.
+	// The revocation is noted locally, keyed on the same serial.
+	known, err := e.s.db.CertBySerial(wantSerial)
+	if err != nil || known == nil {
+		t.Fatalf("cert lookup by serial: %v %v", known, err)
+	}
+	if known.RevokedAt.IsZero() || known.RevokedReason != "keyCompromise" {
+		t.Fatalf("revocation not recorded: %v %q", known.RevokedAt,
+			known.RevokedReason)
+	}
+
+	// Second attempt: answered from that note, without asking the CA again.
 	resp, v = e.post("/acme/revoke-cert", revokeBody(t, st, 0), e.kid, "")
 	if resp.StatusCode != http.StatusBadRequest ||
 		problemType(v) != "alreadyRevoked" {
 		t.Fatalf("re-revoke: %d %v", resp.StatusCode, v)
+	}
+	args, _ = os.ReadFile(st.args)
+	if n := bytes.Count(args, []byte("revoke server --serial")); n != 1 {
+		t.Fatalf("CLI invoked %d times for one revocation:\n%s", n, args)
 	}
 }
 

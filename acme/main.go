@@ -7,6 +7,10 @@
 //	yca-acme eab new [--allow patterns]  provision an EAB credential
 //	yca-acme eab list                    list provisioned credentials
 //	yca-acme eab delete <kid>            revoke a credential
+//	yca-acme ari accelerate --issuer cn  have that issuer's certificates
+//	                                     replaced at once (CA compromise)
+//	yca-acme ari list                    list active accelerations
+//	yca-acme ari clear --issuer cn       back to the policy window
 package main
 
 import (
@@ -52,6 +56,10 @@ func main() {
 
 	if len(os.Args) > 1 && os.Args[1] == "eab" {
 		eabMain(os.Args[2:])
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "ari" {
+		ariMain(os.Args[2:])
 		return
 	}
 
@@ -290,4 +298,73 @@ func orAny(s string) string {
 		return "(any)"
 	}
 	return s
+}
+
+// ariMain drives the renewal-acceleration directives: after a CA
+// compromise the operator revokes the generation (`yca revoke ca`) and
+// tells the frontend to have everything that generation signed replaced
+// at once, instead of at its policy age. Keying on the issuer makes the
+// directive self-limiting: a renewed certificate is signed by the
+// successor, so it stops matching.
+func ariMain(args []string) {
+	fs := flag.NewFlagSet("ari", flag.ExitOnError)
+	state := fs.String("state", "./acme.db", "protocol state database")
+	issuer := fs.String("issuer", "",
+		"common name of the issuing CA generation (e.g. 'CA E1')")
+	window := fs.Duration("window", 2*time.Hour,
+		"how long the fleet has to replace; clients pick a random moment "+
+			"inside it, so size it for the number of certificates (issuance "+
+			"is serialized)")
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr,
+			"usage: yca-acme ari <accelerate|list|clear> [--state db] "+
+				"[--issuer cn] [--window dur]")
+		os.Exit(2)
+	}
+	verb := args[0]
+	_ = fs.Parse(args[1:])
+
+	db, err := OpenDB(*state)
+	if err != nil {
+		log.Fatalf("open state %s: %v", *state, err)
+	}
+	defer db.Close()
+
+	switch verb {
+	case "accelerate":
+		if *issuer == "" {
+			log.Fatal("--issuer is required")
+		}
+		if *window <= 0 {
+			log.Fatal("--window must be positive")
+		}
+		if err := db.SetAccel(*issuer, *window); err != nil {
+			log.Fatalf("set: %v", err)
+		}
+		fmt.Printf("certificates issued by %q are now suggested for "+
+			"replacement within %s\n", *issuer, *window)
+	case "list":
+		rows, err := db.ListAccel()
+		if err != nil {
+			log.Fatalf("list: %v", err)
+		}
+		for _, a := range rows {
+			fmt.Printf("%s\twindow %s\tsince %s\n", a.IssuerCN, a.Window,
+				a.Created.UTC().Format(time.RFC3339))
+		}
+	case "clear":
+		if *issuer == "" {
+			log.Fatal("--issuer is required")
+		}
+		gone, err := db.ClearAccel(*issuer)
+		if err != nil {
+			log.Fatalf("clear: %v", err)
+		}
+		if !gone {
+			log.Fatalf("no acceleration set for %q", *issuer)
+		}
+		fmt.Printf("cleared the acceleration for %q\n", *issuer)
+	default:
+		log.Fatalf("unknown ari verb %q (accelerate|list|clear)", verb)
+	}
 }

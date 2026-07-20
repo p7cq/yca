@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/x509"
 	"encoding/json"
 	"io"
 	"math/big"
 	"net/http"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -78,6 +81,92 @@ func TestRenewalInfo(t *testing.T) {
 	}
 	if !v.SuggestedWindow.Start.Before(v.SuggestedWindow.End) {
 		t.Error("window is empty or inverted")
+	}
+}
+
+// ariWindow fetches the ARI resource for a leaf and returns the suggested
+// window with the Retry-After the server asked for.
+func ariWindow(t *testing.T, e *testEnv, leaf *x509.Certificate) (time.Time,
+	time.Time, int) {
+	t.Helper()
+	id, err := ariID(leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(e.ts.URL + "/acme/renewal-info/" + id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("renewal-info: %d", resp.StatusCode)
+	}
+	var v struct {
+		SuggestedWindow struct{ Start, End time.Time } `json:"suggestedWindow"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil {
+		t.Fatal(err)
+	}
+	retry, _ := strconv.Atoi(resp.Header.Get("Retry-After"))
+	return v.SuggestedWindow.Start, v.SuggestedWindow.End, retry
+}
+
+// A revoked certificate, and one whose issuer an operator accelerated, are
+// both told to replace now instead of at their policy age.
+func TestRenewalInfoReplaceNow(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	st := issueViaStub(t, e)
+
+	policyStart, _, policyRetry := ariWindow(t, e, st.leaf)
+	if !policyStart.After(time.Now().Add(24 * time.Hour)) {
+		t.Fatalf("policy window opens too soon: %v", policyStart)
+	}
+	if policyRetry < int(time.Hour.Seconds()) {
+		t.Errorf("policy Retry-After %ds, want at least an hour", policyRetry)
+	}
+
+	// Accelerating the issuer moves every certificate it signed.
+	if err := e.s.db.SetAccel(st.leaf.Issuer.CommonName, 2*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	start, end, retry := ariWindow(t, e, st.leaf)
+	if start.After(time.Now().Add(time.Minute)) {
+		t.Errorf("accelerated window has not opened: %v", start)
+	}
+	if d := end.Sub(start); d < 2*time.Hour-time.Minute ||
+		d > 2*time.Hour+time.Minute {
+		t.Errorf("accelerated window is %v, want the 2h asked for", d)
+	}
+	if retry > int(time.Hour.Seconds()) {
+		t.Errorf("accelerated Retry-After %ds, want an hour at most", retry)
+	}
+
+	// An issuer nobody accelerated is unaffected, so the directive stops
+	// applying the moment a certificate is re-issued by the successor.
+	if err := e.s.db.SetAccel("Some Other CA", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.s.db.ClearAccel(st.leaf.Issuer.CommonName); err != nil {
+		t.Fatal(err)
+	}
+	back, _, _ := ariWindow(t, e, st.leaf)
+	if d := back.Sub(policyStart); d > time.Second || d < -time.Second {
+		t.Errorf("window did not return to policy: %v vs %v", back, policyStart)
+	}
+
+	// Revocation alone is enough, with no directive in play.
+	if err := e.s.db.MarkCertRevoked(
+		strings.ToUpper(st.leaf.SerialNumber.Text(16)), "keyCompromise",
+		time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	start, end, _ = ariWindow(t, e, st.leaf)
+	if start.After(time.Now().Add(time.Minute)) {
+		t.Errorf("revoked certificate not told to replace now: %v", start)
+	}
+	if d := end.Sub(start); d < revokedWindow-time.Minute {
+		t.Errorf("revoked window is %v, want %v", d, revokedWindow)
 	}
 }
 

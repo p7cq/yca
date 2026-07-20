@@ -13,6 +13,15 @@ yca\-acme \- ACME (RFC 8555) issuance frontend for a yca certificate authority
 .br
 .B yca\-acme eab delete
 [\fB\-\-state\fR \fIdb\fR] \fIkid\fR
+.br
+.B yca\-acme ari accelerate
+[\fB\-\-state\fR \fIdb\fR] \fB\-\-issuer\fR \fIcn\fR [\fB\-\-window\fR \fIdur\fR]
+.br
+.B yca\-acme ari list
+[\fB\-\-state\fR \fIdb\fR]
+.br
+.B yca\-acme ari clear
+[\fB\-\-state\fR \fIdb\fR] \fB\-\-issuer\fR \fIcn\fR
 .SH DESCRIPTION
 .B yca\-acme
 exposes RFC 8555 (ACME) issuance for the server profile of a
@@ -86,6 +95,26 @@ Revoke a credential. Accounts registered with it keep existing but can
 no longer order anything (their identifier policy is gone) \- this is
 the containment step for a leaked credential or a decommissioned
 operator.
+.TP
+\fBari accelerate\fR \fB\-\-issuer\fR \fIcn\fR [\fB\-\-window\fR \fIdur\fR]
+Have every certificate issued by the CA generation \fIcn\fR suggested
+for replacement at once, instead of at its policy age: the renewal
+window returned by \fBrenewalInfo\fR opens immediately and closes
+\fIdur\fR later (default 2h). Use it after revoking a compromised
+signing CA generation (\fByca revoke ca\fR). Clients pick a uniformly
+random moment inside the window (RFC 9773), which is what keeps a whole
+fleet from arriving at once \- issuance is serialized behind one CA, so
+size \fIdur\fR for the number of certificates. The directive is
+self\-limiting: a replaced certificate is signed by the successor
+generation and stops matching. A revoked certificate is told to replace
+at once whether or not a directive exists.
+.TP
+.B ari list
+List the active accelerations: issuer, window, and when it was set.
+.TP
+\fBari clear\fR \fB\-\-issuer\fR \fIcn\fR
+Drop an acceleration; that issuer's certificates return to the policy
+window.
 .SH ENVIRONMENT
 .TP
 .B CA_STORE_PASSPHRASE / CA_HSM_PIN

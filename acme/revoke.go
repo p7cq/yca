@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Accepted CRLReason codes (RFC 5280) and their yca --reason names. The
@@ -87,6 +88,16 @@ func (s *server) handleRevokeCert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A revocation we already performed is answerable without the CA: the
+	// local note is only ever trusted in the affirmative, so its absence
+	// still goes through the CLI, whose refusal remains authoritative.
+	if known, err := s.db.CertBySerial(serial); err == nil && known != nil &&
+		!known.RevokedAt.IsZero() {
+		s.writeProblem(w, problem(http.StatusBadRequest, "alreadyRevoked",
+			"certificate is not active (revoked or expired)"))
+		return
+	}
+
 	if err := s.yca.revoke(serial, reasonName); err != nil {
 		if strings.Contains(err.Error(), "no active") {
 			s.writeProblem(w, problem(http.StatusBadRequest, "alreadyRevoked",
@@ -97,6 +108,10 @@ func (s *server) handleRevokeCert(w http.ResponseWriter, r *http.Request) {
 		s.writeProblem(w, problem(http.StatusInternalServerError,
 			"serverInternal", "revocation failed"))
 		return
+	}
+	if err := s.db.MarkCertRevoked(serial, reasonName, time.Now()); err != nil {
+		// The certificate is revoked either way; only the local note failed.
+		log.Printf("revokeCert serial %s: recording: %v", serial, err)
 	}
 	log.Printf("revoked serial %s (reason %s)", serial, reasonName)
 	s.writeJSON(w, http.StatusOK, nil)

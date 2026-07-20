@@ -25,6 +25,14 @@ const (
 	closePct = 10
 )
 
+// Spread for a certificate that must be replaced at once. Issuance is
+// serialized behind a single CA (one PKCS#11 login per exec), so a fleet
+// arriving together only queues; clients randomize inside the window
+// instead. Revocation of one certificate is urgent but small, hence the
+// short default; an operator accelerating a whole issuer sizes that case
+// with `yca-acme ari accelerate --window`.
+const revokedWindow = time.Hour
+
 // derIntBytes returns the DER INTEGER content octets of a serial: big.Int
 // bytes with a leading 0x00 when the high bit is set (two's complement).
 func derIntBytes(n *big.Int) []byte {
@@ -56,6 +64,27 @@ func leafOf(chainPEM string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
+// replaceNow reports the window to suggest when a certificate should be
+// replaced at once rather than at its policy age, and how long the fleet
+// has to get there. Two things call for it: the certificate is revoked, or
+// an operator accelerated everything its issuer signed (a CA compromise,
+// see docs/ca-rotation.md). Callers spread themselves across the window,
+// which matters because issuance is serialized behind one CA.
+func (s *server) replaceNow(cert *Cert) (time.Duration, bool) {
+	if !cert.RevokedAt.IsZero() {
+		return revokedWindow, true
+	}
+	leaf, err := leafOf(cert.ChainPEM)
+	if err != nil {
+		return 0, false
+	}
+	window, on, err := s.db.AccelWindow(leaf.Issuer.CommonName)
+	if err != nil || !on {
+		return 0, false
+	}
+	return window, true
+}
+
 func (s *server) handleRenewalInfo(w http.ResponseWriter, r *http.Request) {
 	cert, err := s.db.CertByARI(r.PathValue("id"))
 	if err != nil {
@@ -66,13 +95,31 @@ func (s *server) handleRenewalInfo(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown certificate", http.StatusNotFound)
 		return
 	}
-	life := cert.NotAfter.Sub(cert.NotBefore)
-	start := cert.NotAfter.Add(-life * renewPct / 100)
-	end := cert.NotAfter.Add(-life * closePct / 100)
+
+	window, now := s.replaceNow(cert)
+	var start, end time.Time
+	if now {
+		// Already open, so a client renews as soon as it reads this; it
+		// picks a uniformly random moment up to `end` (RFC 9773 4.2),
+		// which is what keeps a whole fleet from arriving at once.
+		start = time.Now()
+		end = start.Add(window)
+	} else {
+		life := cert.NotAfter.Sub(cert.NotBefore)
+		start = cert.NotAfter.Add(-life * renewPct / 100)
+		end = cert.NotAfter.Add(-life * closePct / 100)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	// Polling cadence hint (RFC 9773 §4.2): a quarter of the window,
-	// clamped to [1h, 24h].
-	retry := min(max(time.Until(end)/4, time.Hour), 24*time.Hour)
+	// Polling cadence hint (RFC 9773 4.3.1: the server sets this from how
+	// fast it needs the fleet to move): a quarter of the window, clamped
+	// to [1h, 24h] normally and to [10m, 1h] while replacing at once.
+	retry := time.Until(end) / 4
+	if now {
+		retry = min(max(retry, 10*time.Minute), time.Hour)
+	} else {
+		retry = min(max(retry, time.Hour), 24*time.Hour)
+	}
 	w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())))
 	fmt.Fprintf(w, `{"suggestedWindow":{"start":%q,"end":%q}}`+"\n",
 		start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339))

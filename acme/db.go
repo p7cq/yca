@@ -39,7 +39,11 @@ CREATE TABLE IF NOT EXISTS certs (
   id TEXT PRIMARY KEY, order_id TEXT NOT NULL, account_id TEXT NOT NULL,
   cn TEXT NOT NULL, chain_pem TEXT NOT NULL, issued INTEGER NOT NULL,
   serial TEXT NOT NULL DEFAULT '', ari_id TEXT NOT NULL DEFAULT '',
-  nb INTEGER NOT NULL DEFAULT 0, na INTEGER NOT NULL DEFAULT 0);
+  nb INTEGER NOT NULL DEFAULT 0, na INTEGER NOT NULL DEFAULT 0,
+  revoked INTEGER NOT NULL DEFAULT 0, revoked_reason TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS ari_accel (
+  issuer_cn TEXT PRIMARY KEY, window_secs INTEGER NOT NULL,
+  created INTEGER NOT NULL);
 `
 
 // nonceTTL bounds replay-nonce (and pending object) lifetimes; expired
@@ -66,6 +70,8 @@ func OpenDB(path string) (*DB, error) {
 		{"certs", "ari_id", "TEXT NOT NULL DEFAULT ''"},
 		{"certs", "nb", "INTEGER NOT NULL DEFAULT 0"},
 		{"certs", "na", "INTEGER NOT NULL DEFAULT 0"},
+		{"certs", "revoked", "INTEGER NOT NULL DEFAULT 0"},
+		{"certs", "revoked_reason", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := d.ensureColumn(m.table, m.column, m.ddl); err != nil {
 			return nil, err
@@ -478,6 +484,10 @@ type Cert struct {
 	ARIID     string // RFC 9773 CertID: b64url(AKI)."."b64url(DER serial)
 	NotBefore time.Time
 	NotAfter  time.Time
+	// Set when this frontend revoked the certificate. Zero means "no local
+	// record", not "active": the CA is the source of truth.
+	RevokedAt     time.Time
+	RevokedReason string
 }
 
 func (d *DB) InsertCert(c *Cert) error {
@@ -491,17 +501,31 @@ func (d *DB) InsertCert(c *Cert) error {
 
 func (d *DB) certRow(where string, args ...any) (*Cert, error) {
 	c := &Cert{}
-	var nb, na int64
+	var nb, na, revoked int64
 	err := d.sql.QueryRow(
 		"SELECT id, order_id, account_id, cn, chain_pem, serial, ari_id, "+
-			"nb, na FROM certs WHERE "+where, args...).
+			"nb, na, revoked, revoked_reason FROM certs WHERE "+where, args...).
 		Scan(&c.ID, &c.OrderID, &c.AccountID, &c.CN, &c.ChainPEM, &c.Serial,
-			&c.ARIID, &nb, &na)
+			&c.ARIID, &nb, &na, &revoked, &c.RevokedReason)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	c.NotBefore, c.NotAfter = time.Unix(nb, 0), time.Unix(na, 0)
+	if revoked != 0 {
+		c.RevokedAt = time.Unix(revoked, 0)
+	}
 	return c, err
+}
+
+// MarkCertRevoked records a revocation the frontend performed. The CA owns
+// revocation state; this is a local note, so it is only ever trusted in the
+// affirmative: a row without it may still have been revoked through the CLI
+// or by revoking its issuing CA.
+func (d *DB) MarkCertRevoked(serial, reason string, at time.Time) error {
+	_, err := d.sql.Exec(
+		"UPDATE certs SET revoked = ?, revoked_reason = ? WHERE serial = ?",
+		at.Unix(), reason, serial)
+	return err
 }
 
 func (d *DB) CertByID(id string) (*Cert, error) {
@@ -510,6 +534,69 @@ func (d *DB) CertByID(id string) (*Cert, error) {
 
 func (d *DB) CertByAccountSerial(accountID, serial string) (*Cert, error) {
 	return d.certRow("account_id = ? AND serial = ?", accountID, serial)
+}
+
+func (d *DB) CertBySerial(serial string) (*Cert, error) {
+	return d.certRow("serial = ?", serial)
+}
+
+// AccelWindow returns the renewal window an operator set for certificates
+// issued by `issuerCN`, and whether one is set at all. Zero rows is the
+// normal state: acceleration is an incident response, not a policy.
+func (d *DB) AccelWindow(issuerCN string) (time.Duration, bool, error) {
+	var secs int64
+	err := d.sql.QueryRow(
+		"SELECT window_secs FROM ari_accel WHERE issuer_cn = ?", issuerCN).
+		Scan(&secs)
+	if err == sql.ErrNoRows {
+		return 0, false, nil
+	}
+	return time.Duration(secs) * time.Second, err == nil, err
+}
+
+func (d *DB) SetAccel(issuerCN string, window time.Duration) error {
+	_, err := d.sql.Exec(
+		"INSERT OR REPLACE INTO ari_accel (issuer_cn, window_secs, created) "+
+			"VALUES (?, ?, ?)",
+		issuerCN, int64(window.Seconds()), time.Now().Unix())
+	return err
+}
+
+func (d *DB) ClearAccel(issuerCN string) (bool, error) {
+	res, err := d.sql.Exec("DELETE FROM ari_accel WHERE issuer_cn = ?",
+		issuerCN)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+type Accel struct {
+	IssuerCN string
+	Window   time.Duration
+	Created  time.Time
+}
+
+func (d *DB) ListAccel() ([]Accel, error) {
+	rows, err := d.sql.Query(
+		"SELECT issuer_cn, window_secs, created FROM ari_accel ORDER BY created")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Accel
+	for rows.Next() {
+		var a Accel
+		var secs, created int64
+		if err := rows.Scan(&a.IssuerCN, &secs, &created); err != nil {
+			return nil, err
+		}
+		a.Window = time.Duration(secs) * time.Second
+		a.Created = time.Unix(created, 0)
+		out = append(out, a)
+	}
+	return out, rows.Err()
 }
 
 func (d *DB) CertByARI(ariID string) (*Cert, error) {
