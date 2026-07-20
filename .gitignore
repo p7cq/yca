@@ -3,6 +3,7 @@
 /bin/
 /compile_commands.json
 /CMakePresets.json
+/acme/acme
 
 # Tooling caches
 /.cache/

@@ -108,14 +108,28 @@ func (d *DB) ensureColumn(table, column, ddl string) error {
 
 func (d *DB) Close() error { return d.sql.Close() }
 
-// newID returns a 128-bit random URL-safe identifier (also used for
-// tokens and nonces).
+// newID returns a random URL-safe identifier, also used for challenge
+// tokens, which RFC 8555 8.3 requires to carry at least 128 bits of
+// entropy and to stay inside the base64url alphabet.
+//
+// That alphabet includes '-', and an identifier starting with one reads
+// as an option to every command-line tool it is pasted into, so those are
+// drawn again. Rejecting one of 64 leading characters costs 0.023 bits,
+// which is why the draw is 17 bytes rather than 16: from 136 bits the
+// constraint is free, whereas 16 bytes sit exactly on the RFC's floor and
+// any constraint would put the token under it. Re-drawing (rather than
+// substituting a fixed character) keeps the result uniform, and avoids
+// the modulo bias a naive pick from a 63-character subset would add.
 func newID() string {
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
-		panic(err) // crypto/rand failure is not a recoverable state
+	for {
+		raw := make([]byte, 17)
+		if _, err := rand.Read(raw); err != nil {
+			panic(err) // crypto/rand failure is not a recoverable state
+		}
+		if id := base64.RawURLEncoding.EncodeToString(raw); id[0] != '-' {
+			return id
+		}
 	}
-	return base64.RawURLEncoding.EncodeToString(raw)
 }
 
 // --- nonces ---

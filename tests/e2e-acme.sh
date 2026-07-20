@@ -65,7 +65,10 @@ w() { "$BIN" --config "$CFG" --store "$PKI" "$@"; }
 
 # --- build the frontend ---
 (cd "$ACME_SRC" && go build -o "$WORK/yca-acme" .) &&
-  ok "go build yca-acme" || { bad "go build failed"; exit 1; }
+  ok "go build yca-acme" || {
+  bad "go build failed"
+  exit 1
+}
 "$WORK/yca-acme" --version | grep -q '^yca-acme version ' &&
   ok "yca-acme --version" || bad "yca-acme --version"
 
@@ -104,7 +107,25 @@ for _ in $(seq 1 50); do
   sleep 0.1
 done
 [ -n "$up" ] && ok "daemon up over TLS (own CA trust)" ||
-  { bad "daemon did not start"; cat "$WORK/daemon.log"; exit 1; }
+  {
+    bad "daemon did not start"
+    cat "$WORK/daemon.log"
+    exit 1
+  }
+# The webroot answers the http-01 fetches, so it has to be listening
+# before the first challenge - and if it never binds (a busy VAPORT, a
+# slow interpreter), say so here instead of letting issuance fail and
+# every assertion behind it cascade.
+webroot=""
+for _ in $(seq 1 50); do
+  curl -s -o /dev/null "http://127.0.0.1:$VAPORT/" && webroot=1 && break
+  sleep 0.1
+done
+[ -n "$webroot" ] && ok "http-01 webroot listening on $VAPORT" ||
+  {
+    bad "http-01 webroot never bound $VAPORT"
+    exit 1
+  }
 curl -s --cacert "$WORK/root.pem" "$DIR_URL" |
   grep -q '"externalAccountRequired": true' &&
   ok "directory advertises EAB" || bad "directory"
@@ -122,7 +143,9 @@ EAB_KID="$(awk '$1 == "kid" {print $3}' "$WORK/eab.txt")"
 EAB_HMAC="$(awk '$1 == "hmac:" {print $2}' "$WORK/eab.txt")"
 [ -n "$EAB_KID" ] && [ -n "$EAB_HMAC" ] &&
   ok "eab credential parsed" || bad "eab output: $(cat "$WORK/eab.txt")"
-# -F --: the kid is random base64url and can start with '-'.
+# -F --: the kid is generated data whose alphabet this test does not own,
+# so it is matched literally and never read as an option. newID keeps it
+# out of option shape at the source (see TestEABKidNeverLeadsWithDash).
 "$WORK/yca-acme" eab list --state "$WORK/acme.db" | grep -qF -- "$EAB_KID" &&
   ok "eab list shows the credential" || bad "eab list"
 
@@ -157,7 +180,7 @@ epoch() {
 }
 LNB=$(openssl x509 -in "$LEAF" -noout -startdate 2>/dev/null | cut -d= -f2)
 LNA=$(openssl x509 -in "$LEAF" -noout -enddate 2>/dev/null | cut -d= -f2)
-LDAYS=$(( ($(epoch "$LNA") - $(epoch "$LNB")) / 86400 ))
+LDAYS=$((($(epoch "$LNA") - $(epoch "$LNB")) / 86400))
 [ "$LDAYS" -eq 90 ] &&
   ok "ACME leaf validity 90d (daemon --valid)" ||
   bad "ACME leaf validity ${LDAYS}d, want 90"

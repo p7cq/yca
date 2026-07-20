@@ -218,6 +218,18 @@ func splitAllow(s string) []string {
 	return parts
 }
 
+// splitDeleteKid lifts the trailing kid off `eab delete` arguments before
+// they reach flag parsing. A kid is base64url and can start with '-',
+// which the flag package would read as an option and refuse - leaving
+// such a credential impossible to delete. The documented shape puts the
+// kid last, so taking it from there needs no escaping by the operator.
+func splitDeleteKid(verb string, args []string) (string, []string) {
+	if verb != "delete" || len(args) == 0 {
+		return "", args
+	}
+	return args[len(args)-1], args[:len(args)-1]
+}
+
 func eabMain(args []string) {
 	fs := flag.NewFlagSet("eab", flag.ExitOnError)
 	state := fs.String("state", "./acme.db", "protocol state database")
@@ -229,7 +241,8 @@ func eabMain(args []string) {
 		os.Exit(2)
 	}
 	verb := args[0]
-	_ = fs.Parse(args[1:])
+	kid, rest := splitDeleteKid(verb, args[1:])
+	_ = fs.Parse(rest)
 
 	db, err := OpenDB(*state)
 	if err != nil {
@@ -264,7 +277,6 @@ func eabMain(args []string) {
 			fmt.Printf("%s\tallow: %s\n", c[0], orAny(c[1]))
 		}
 	case "delete":
-		kid := fs.Arg(0)
 		if kid == "" {
 			fmt.Fprintln(os.Stderr, "usage: yca-acme eab delete [--state db] <kid>")
 			os.Exit(2)
