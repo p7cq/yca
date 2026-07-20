@@ -459,6 +459,59 @@ TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
   CHECK(ca::detail::live_cas(*h, *eff, "signing").size() == 3);
 }
 
+TEST_CASE("ca::revoke_ca puts a signing generation on the root CRL") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+  const auto root_crl = (t.dir / "ca" / "ut-root-e1.crl").string();
+
+  // Nothing may be revoked while it is the only issuer.
+  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "signing-ca", "cacompromise"));
+  CHECK(Botan::X509_CRL(root_crl).get_revoked().empty());
+
+  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E2"));
+  // The root is not revocable, and neither is a name nobody carries.
+  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "root-ca", "cacompromise"));
+  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, t.config.root_ca_cn,
+                            "cacompromise"));
+  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "UT CA E9", "cacompromise"));
+  // Nor is the successor, now that it is the active issuer.
+  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "signing-ca", "cacompromise"));
+  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "UT CA E2", "cacompromise"));
+  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "UT CA E1", "nosuchreason"));
+
+  // The retiring predecessor is the legitimate target.
+  const Botan::X509_CRL before(root_crl);
+  Botan::X509_Certificate e1((t.dir / "ca" / "ut-ca-e1.pem").string());
+  REQUIRE(ca::revoke_ca(*eff, t.dir, kPass, "UT CA E1", "cacompromise"));
+
+  const Botan::X509_CRL after(root_crl);
+  REQUIRE(after.get_revoked().size() == 1);
+  CHECK(after.get_revoked()[0].serial_number() == e1.serial_number());
+  CHECK(after.crl_number() == before.crl_number() + 1);
+  // The entry rides on a CRL that is fresh by construction: no separate
+  // root refresh is owed, only publication.
+  CHECK(after.this_update().time_since_epoch() >=
+        before.this_update().time_since_epoch());
+  CHECK(after.next_update().time_since_epoch() -
+            after.this_update().time_since_epoch() ==
+        static_cast<uint64_t>(app::root_crl_next_update_days) * 24 * 60 * 60);
+
+  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "UT CA E1", "cacompromise"));
+
+  // A revoked generation stops publishing a CRL, and the store still
+  // answers "initialized" although the config's own anchor is now revoked.
+  auto h = ca::detail::open_store(t.dir / "ca-store.db");
+  const auto live = ca::detail::live_cas(*h, *eff, "signing");
+  REQUIRE(live.size() == 1);
+  CHECK(live[0].slug == "ut-ca-e2");
+  CHECK(ca::is_initialized(t.dir));
+  // Issuance is unaffected: the active generation never moved.
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "after.ut.ca",
+                     {}));
+}
+
 TEST_CASE("ca::is_initialized: active anchors must match the locked config") {
   TempPki t;
   CHECK_FALSE(ca::is_initialized(t.dir)); // absent store

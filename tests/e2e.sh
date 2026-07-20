@@ -655,6 +655,52 @@ r revoke server --cn old.rot.ca --reason superseded >/dev/null 2>&1 &&
 # A name already used by a generation is refused.
 r renew signing-ca --new-cn "CA E2" >/dev/null 2>&1 &&
   bad "duplicate generation CN accepted" || ok "duplicate generation CN rejected"
+
+# --- revoke ca: the only operation that ever writes on the root CRL ---
+r revoke ca --cn root-ca --reason cACompromise >/dev/null 2>&1 &&
+  bad "root revocation accepted" || ok "root revocation refused"
+r revoke ca --cn signing-ca --reason cACompromise >/dev/null 2>&1 &&
+  bad "active issuer revocation accepted" ||
+  ok "active issuer revocation refused (renew first)"
+r revoke ca --cn "CA E1" --serial DEADBEEF >/dev/null 2>&1 &&
+  bad "revoke ca --serial accepted" || ok "revoke ca --serial refused"
+
+RN_BEFORE_CA="$(crlnum "$ROT/ca/ets-root-e1.crl")"
+r revoke ca --cn "CA E1" --reason cACompromise >/dev/null 2>&1 &&
+  ok "revoke ca (retiring generation)" || bad "revoke ca"
+[ "$(($(crlnum "$ROT/ca/ets-root-e1.crl")))" -eq "$((RN_BEFORE_CA + 1))" ] &&
+  ok "root crlNumber incremented" || bad "root crlNumber"
+[ "$(openssl crl -inform DER -in "$ROT/ca/ets-root-e1.crl" -noout -text 2>/dev/null |
+  grep -c 'Serial Number')" -eq 1 ] &&
+  ok "root CRL carries exactly one entry" || bad "root CRL entry count"
+r revoke ca --cn "CA E1" --reason cACompromise >/dev/null 2>&1 &&
+  bad "double CA revocation accepted" || ok "double CA revocation refused"
+
+# A verifier checking the root CRL now rejects the old chain and keeps
+# accepting the new one.
+openssl crl -inform DER -in "$ROT/ca/ets-root-e1.crl" -out "$WORK/rootcrl.pem" 2>/dev/null
+cat "$ROT/ca/ets-root-e1.pem" "$WORK/rootcrl.pem" >"$WORK/rootbundle.pem"
+openssl verify -crl_check -CAfile "$WORK/rootbundle.pem" \
+  "$ROT/ca/ca-e1.pem" >/dev/null 2>&1 &&
+  bad "revoked CA still verifies" || ok "revoked CA fails -crl_check"
+openssl verify -crl_check -CAfile "$WORK/rootbundle.pem" \
+  "$ROT/ca/ca-e2.pem" >/dev/null 2>&1 &&
+  ok "active CA still verifies under the same CRL" || bad "active CA rejected"
+
+# The revoked generation drops out of the refresh, the active one stays.
+R1="$(crlnum "$ROT/ca/ca-e1.crl")"
+R2="$(crlnum "$ROT/ca/ca-e2.crl")"
+r refresh crl signing >/dev/null 2>&1
+[ "$(($(crlnum "$ROT/ca/ca-e1.crl")))" -eq "$((R1))" ] &&
+  [ "$(($(crlnum "$ROT/ca/ca-e2.crl")))" -eq "$((R2 + 1))" ] &&
+  ok "revoked generation dropped from the refresh" || bad "revoked gen refreshed"
+
+# The store is still initialized although the config's own anchor is revoked.
+r get config >/dev/null 2>&1 &&
+  ok "store still initialized after revoking its config anchor" ||
+  bad "revoking the config anchor broke is_initialized"
+r create server --cn post.rot.ca >/dev/null 2>&1 &&
+  ok "issuance unaffected by the CA revocation" || bad "issuance broken"
 CA_STORE_PASSPHRASE="$CA_STORE_PASSPHRASE_SAVED"
 
 echo

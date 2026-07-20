@@ -733,14 +733,17 @@ bool is_initialized(const fs::path &store_dir) {
 
     if (root_cn.empty() || sign_cn.empty())
       return false;
-    auto active_anchor = [&](const std::string &kind, const std::string &cn) {
-      auto s = h->new_statement("SELECT 1 FROM cert_index WHERE kind=?1 AND "
-                                "cn=?2 AND status='active' LIMIT 1");
+    // Initialization is a historical fact about the ceremony, what
+    // later became of an anchor does not unmake it. What still
+    // matters is that the anchors the config names were actually issued.
+    auto anchor = [&](const std::string &kind, const std::string &cn) {
+      auto s = h->new_statement(
+          "SELECT 1 FROM cert_index WHERE kind=?1 AND cn=?2 LIMIT 1");
       s->bind(1, kind);
       s->bind(2, cn);
       return s->step();
     };
-    return active_anchor("root", root_cn) && active_anchor("signing", sign_cn);
+    return anchor("root", root_cn) && anchor("signing", sign_cn);
   } catch (const std::exception &) {
     return false; // unreadable store => not initialized
   }
@@ -886,9 +889,8 @@ bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
   opts.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.1")); // serverAuth
   opts.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.2")); // clientAuth
   add_signing_pointer_extensions(opts, config, root.slug);
-  auto req =
-      Botan::X509::create_cert_req(opts, *new_key, config.signing_ca_digest,
-                                   rng);
+  auto req = Botan::X509::create_cert_req(opts, *new_key,
+                                          config.signing_ca_digest, rng);
   Botan::X509_CA issuer(*root_cert, *root_key, config.root_ca_digest, rng);
   const auto tp = Clock::now();
   auto cert = issuer.sign_request(
@@ -899,11 +901,11 @@ bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
   // files behind is recoverable (the next run replaces them), while an
   // active generation without a published certificate would break issuance.
   Botan::X509_CA new_ca(cert, *new_key, config.signing_ca_digest, rng);
-  if (!write_pem(pem, cert) || !write_der(ca_dir / (next.slug + ".crt"), cert) ||
+  if (!write_pem(pem, cert) ||
+      !write_der(ca_dir / (next.slug + ".crt"), cert) ||
       !write_der(ca_dir / (next.slug + ".crl"),
-                 new_ca.new_crl(rng,
-                                crl_next_update(cert,
-                                                app::crl_next_update_days)))) {
+                 new_ca.new_crl(
+                     rng, crl_next_update(cert, app::crl_next_update_days)))) {
     log::error("could not write the new CA artifacts under {}",
                ca_dir.string());
     return false;
@@ -1688,6 +1690,138 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
             target,
             target_cert->subject_dn().get_first_attribute("X520.CommonName"),
             Botan::hex_encode(target_cert->serial_number()), reason_str);
+  return true;
+}
+
+bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
+               std::string_view secret, const std::string &selector,
+               const std::string &reason_str) {
+  const auto reason = parse_reason(reason_str);
+  if (!reason) {
+    log::error("unknown --reason '{}'", reason_str);
+    return false;
+  }
+  const fs::path db = store_path(store_dir);
+  if (!fs::exists(db)) {
+    log::error("not initialized; run '{} init'", app::name);
+    return false;
+  }
+  if (secret.empty()) {
+    log::error("{} not set (the root key signs its CRL)", secret_env(config));
+    return false;
+  }
+  if (selector.empty()) {
+    log::error("revoke ca needs --cn (a signing CA generation, or "
+               "signing-ca for the active one)");
+    return false;
+  }
+
+  Botan::AutoSeeded_RNG rng;
+  auto dbh = open_store(db);
+  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
+  ensure_ca_index(*dbh, config);
+
+  const CaGen root = active_ca(*dbh, config, "root");
+  const CaGen active = active_ca(*dbh, config, "signing");
+
+  // A self-signed root cannot be revoked by anything below it: dropping a
+  // trust anchor is the relying parties' job, not the CA's.
+  if (selector == "root-ca" || selector == root.cn) {
+    log::error("the root cannot be revoked; remove it from the trust stores "
+               "and re-initialize");
+    return false;
+  }
+  const std::string cn = selector == "signing-ca" ? active.cn : selector;
+  const auto victim = gen_by_cn(*dbh, "signing", cn);
+  if (!victim) {
+    log::error("no signing CA generation named '{}'", cn);
+    return false;
+  }
+  // Revoking the issuer of record would leave nothing to issue with, and
+  // the successor is one command away with the root key already in hand.
+  if (victim->gen == active.gen) {
+    log::error("'{}' is the active issuer; run '{} renew signing-ca "
+               "--new-cn <name>' first, then revoke it",
+               cn, app::name);
+    return false;
+  }
+
+  auto root_cert = load_ca_cert(store_dir, root.slug);
+  auto victim_cert = load_ca_cert(store_dir, victim->slug);
+  if (!root_cert || !victim_cert) {
+    log::error("CA certificates not found under {}",
+               (store_dir / "ca").string());
+    return false;
+  }
+  const std::string victim_fp = victim_cert->fingerprint("SHA-256");
+  auto already = dbh->new_statement(
+      "SELECT 1 FROM cert_index WHERE fingerprint=?1 AND status='revoked'");
+  already->bind(1, victim_fp);
+  if (already->step()) {
+    log::error("'{}' is already revoked", cn);
+    return false;
+  }
+  const fs::path root_crl_path = store_dir / "ca" / (root.slug + ".crl");
+  if (!fs::exists(root_crl_path)) {
+    log::error("root CRL not found at {}", root_crl_path.string());
+    return false;
+  }
+
+  std::optional<p11::Token> token; // must outlive root_key (owns the session)
+  std::shared_ptr<const Botan::Private_Key> root_key;
+  try {
+    root_key = ca_key(config, store, *root_cert, root.slug,
+                      config.root_ca_curve, secret, token);
+  } catch (const std::exception &e) {
+    log::error("cannot load the root key (wrong {}?): {}",
+               config.key_backend == "internal" ? "passphrase" : "user PIN",
+               e.what());
+    return false;
+  }
+  if (!root_key) {
+    log::error("root key missing from store");
+    return false;
+  }
+
+  // Same lock discipline as revoke: read-CRL -> write-CRL under the write
+  // lock. This is the entry that stops the root CRL being structurally
+  // empty, and it carries a fresh nextUpdate of its own, so nothing needs
+  // a separate root refresh afterwards - only publication.
+  begin_write(*dbh);
+  ensure_cert_index(*dbh);
+  Botan::X509_CRL prev(root_crl_path.string());
+  Botan::X509_CA root_ca(*root_cert, *root_key, config.root_ca_digest, rng);
+  const std::vector<Botan::CRL_Entry> entries{
+      Botan::CRL_Entry(*victim_cert, *reason)};
+  const auto updated = root_ca.update_crl(
+      prev, entries, rng,
+      crl_next_update(*root_cert, app::root_crl_next_update_days));
+  if (!write_der(root_crl_path, updated)) {
+    log::error("could not write the root CRL {}", root_crl_path.string());
+    return false;
+  }
+
+  store.revoke_cert(*victim_cert, *reason);
+  auto u = dbh->new_statement("UPDATE cert_index SET status='revoked', "
+                              "revoked_at=?1, reason=?2 WHERE fingerprint=?3");
+  u->bind(1, now_epoch());
+  u->bind(2, static_cast<std::size_t>(*reason));
+  u->bind(3, victim_fp);
+  u->spin();
+  auto g = dbh->new_statement("UPDATE ca_cert_index SET status='revoked' "
+                              "WHERE kind='signing' AND gen=?1");
+  g->bind(1, static_cast<std::size_t>(victim->gen));
+  g->spin();
+  commit_write(*dbh);
+
+  log::info("revoked signing CA generation {} '{}' (serial {}, reason: {}); "
+            "root CRL #{} carries it",
+            victim->gen, victim->cn,
+            Botan::hex_encode(victim_cert->serial_number()), reason_str,
+            updated.crl_number());
+  log::to_stderr("publish the root CRL now: relying parties may keep serving "
+                 "a cached one until its nextUpdate ({})",
+                 updated.next_update().readable_string());
   return true;
 }
 

@@ -18,9 +18,10 @@ struct San {
   std::string value;
 };
 
-// True when the store's cert_index holds active root and signing anchors
-// whose CNs match the locked config (ca_config) recorded in the store itself.
-// An absent, unreadable, or inconsistent store is not initialized.
+// Checks only if this store is initialized per its yca.toml, a historical
+// fact about the ceremony - what later became of those anchors (revoked,
+// expired, superseded by a newer generation) does not change it. An absent,
+// unreadable, or inconsistent store is not initialized.
 bool is_initialized(const std::filesystem::path &store_dir);
 
 // Initializes the PKI in `store_dir`: creates root + signing CA and records
@@ -120,6 +121,16 @@ bool revoke(const cfg::Config &config, const std::filesystem::path &store_dir,
             std::string_view secret, const std::string &target,
             const std::string &cn, const std::string &reason,
             const std::string &serial = "");
+
+// Revokes a signing CA generation by putting it on the ROOT CRL.
+// `selector` is a generation's CN or the alias signing-ca. Refused for
+// the root (a trust anchor is dropped by relying parties, not revoked) and
+// for the active issuer, which must be replaced by `renew_signing_ca` first
+// so issuance never has a gap. The updated root CRL carries a fresh nextUpdate,
+// so only publication is left to do.
+bool revoke_ca(const cfg::Config &config,
+               const std::filesystem::path &store_dir, std::string_view secret,
+               const std::string &selector, const std::string &reason);
 
 // Which published CRLs refresh_crl re-signs. Root and Signing exist so the
 // two CRLs can run on separate cadences (app::root_crl_next_update_days vs

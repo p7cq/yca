@@ -81,8 +81,18 @@ one URI SAN is refused.
 standard output for piping into \fBget\fR \fB\-\-cn \-\fR; writes nothing
 under \fBee/\fR (the private key stays with the requester).
 .TP
-\fBrevoke\fR \fIserver\fR|\fIclient\fR [\fB\-\-cn\fR \fIcn\fR | \fB\-\-serial\fR \fIhex\fR] [\fB\-\-reason\fR \fIname\fR]
-Revoke a certificate and rewrite the signed CRL. By \fB\-\-cn\fR the newest
+\fBrevoke\fR \fIserver\fR|\fIclient\fR|\fIca\fR [\fB\-\-cn\fR \fIcn\fR | \fB\-\-serial\fR \fIhex\fR] [\fB\-\-reason\fR \fIname\fR]
+Revoke a certificate and rewrite the signed CRL. For \fIserver\fR and
+\fIclient\fR the entry goes on the CRL of the generation that issued the
+certificate, not of whichever signs today. \fIca\fR revokes a signing CA
+generation instead, selected by \fB\-\-cn\fR (its common name, or
+\fBsigning-ca\fR for the active one) and never by \fB\-\-serial\fR: the
+entry goes on the \fBroot\fR CRL, the only thing that ever writes there,
+and the updated CRL carries a fresh nextUpdate, so only publication is
+left to do. Refused for the root, which relying parties drop from their
+trust stores rather than revoke, and for the active issuer, which
+\fBrenew signing-ca\fR must replace first so issuance never has a gap.
+By \fB\-\-cn\fR the newest
 active certificate for that name is revoked; \fB\-\-serial\fR (hex,
 \fB:\fR separators and leading zeros tolerated) selects the exact
 certificate (during a renewal overlap two can be active). \fIname\fR is a
@@ -114,9 +124,9 @@ notAfter); the \fBsigning\fR scope never loads the root key. Run each
 scope on a schedule shorter than its horizon (daily
 \fByca-crl-refresh.timer\fR, quarterly \fByca-root-crl-refresh.timer\fR)
 so relying parties never see a stale CRL. Trade-off of the long root
-horizon: after revoking the signing CA, run \fBrefresh\fR \fIcrl\fR
-\fBroot\fR by hand - relying parties may otherwise trust their cached
-root CRL for up to 6 months.
+horizon: a relying party may keep serving a cached root CRL until its
+nextUpdate, so after \fBrevoke\fR \fIca\fR publish the fresh one at once
+instead of waiting for the quarterly timer.
 .TP
 \fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR]
 Write a certificate, CRL, the effective (database) configuration, or an

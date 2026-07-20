@@ -95,10 +95,11 @@ int main(int argc, char **argv) {
 
   auto *revoke = app.add_subcommand("revoke", "revoke a certificate");
   std::string rev_target, r_cn, r_reason = "unspecified", r_serial;
-  revoke->add_option("target", rev_target, "server|client")
+  revoke->add_option("target", rev_target, "server|client|ca")
       ->required()
-      ->check(CLI::IsMember({"server", "client"}));
-  revoke->add_option("--cn", r_cn, "common name");
+      ->check(CLI::IsMember({"server", "client", "ca"}));
+  revoke->add_option("--cn", r_cn,
+                     "common name; for ca, a generation's CN or signing-ca");
   revoke->add_option("--serial", r_serial,
                      "serial (hex) - selects the exact certificate; by CN "
                      "the newest active one is revoked");
@@ -276,6 +277,14 @@ int main(int argc, char **argv) {
     }
 
     if (*revoke) {
+      if (rev_target == "ca") {
+        if (!r_serial.empty()) {
+          log::error("revoke ca selects by --cn, not --serial");
+          return 1;
+        }
+        return ca::revoke_ca(*eff, store_dir, secret(*eff), r_cn, r_reason) ? 0
+                                                                           : 1;
+      }
       if (r_cn.empty() == r_serial.empty()) {
         log::error("revoke {} needs exactly one of --cn or --serial",
                    rev_target);

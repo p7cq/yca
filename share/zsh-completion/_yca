@@ -62,8 +62,8 @@ _yca() {
       ;;
     revoke)
       _arguments \
-        '1:target:(server client)' \
-        '(--serial)--cn[common name]:common name:' \
+        '1:target:(server client ca)' \
+        '(--serial)--cn[common name; for ca a generation CN or signing-ca]:common name:' \
         '(--cn)--serial[serial (hex) - selects the exact certificate]:serial:' \
         "--reason[CRLReason name (default unspecified)]:reason:(${reasons[*]})"
       ;;
