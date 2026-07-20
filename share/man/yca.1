@@ -94,7 +94,9 @@ case-insensitive CRLReason: \fBunspecified\fR (default),
 \fBrefresh\fR \fIcrl\fR [\fBroot\fR|\fBsigning\fR|\fBall\fR]
 Re-sign the published CRLs selected by the scope (default \fBall\fR) from
 their current entry sets: same revocations, crlNumber+1, fresh
-thisUpdate/nextUpdate. The signing CRL promises re-publication within 7
+thisUpdate/nextUpdate. A scope covers every live generation of that CA:
+after a rotation the retiring predecessor keeps publishing its own CRL
+next to the active one's, and an expired generation is skipped. The signing CRL promises re-publication within 7
 days, the root CRL within 183 days (both clamped to the issuing CA's
 notAfter); the \fBsigning\fR scope never loads the root key. Run each
 scope on a schedule shorter than its horizon (daily

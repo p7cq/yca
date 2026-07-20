@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <botan/botan_all.h>
 
@@ -48,6 +49,14 @@ void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config);
 // so the locked config answers it: generation 1. Read-only.
 CaGen active_ca(Botan::SQL_Database &db, const cfg::Config &config,
                 const std::string &kind);
+
+// Every generation of `kind` that still publishes a CRL: the active one
+// plus the retiring predecessors that remain issuers of record, oldest
+// first. Revoked generations are left out - their CRL is moot. Expiry is
+// not a status here: it is read off the certificate, the way `list`
+// derives it for leaves.
+std::vector<CaGen> live_cas(Botan::SQL_Database &db, const cfg::Config &config,
+                            const std::string &kind);
 
 // Loads a CA certificate from its published PEM (O(1)); avoids an O(N) scan
 // of the store to find it on every issuance/revocation.

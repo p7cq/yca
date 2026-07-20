@@ -3,6 +3,8 @@
 #
 # `yca refresh crl signing` re-signs the signing CRL from its current
 # entry set: same revocations, crlNumber+1, fresh thisUpdate/nextUpdate.
+# After a CA rotation the scope covers every live generation, so the
+# retiring predecessor's CRL is re-signed by the same run.
 # Without it a strict CRL checker considers the signing CRL stale
 # crl_next_update_days (7) after the last revocation. The root CRL runs
 # on its own, much slower cadence - see yca-root-crl-refresh.{service,timer}.

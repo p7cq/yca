@@ -161,6 +161,23 @@ void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config) {
   }
 }
 
+std::vector<CaGen> live_cas(Botan::SQL_Database &db, const cfg::Config &config,
+                            const std::string &kind) {
+  std::vector<CaGen> out;
+  if (has_ca_index(db)) {
+    auto q = db.new_statement("SELECT gen,cn,slug FROM ca_cert_index WHERE "
+                              "kind=?1 AND status IN ('active','retiring') "
+                              "ORDER BY gen");
+    q->bind(1, kind);
+    while (q->step())
+      out.push_back(
+          {static_cast<int>(q->get_size_t(0)), q->get_str(1), q->get_str(2)});
+  }
+  if (out.empty())
+    out.push_back(config_gen(config, kind));
+  return out;
+}
+
 CaGen active_ca(Botan::SQL_Database &db, const cfg::Config &config,
                 const std::string &kind) {
   if (!has_ca_index(db))
@@ -1520,67 +1537,76 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
   const bool do_root = scope != CrlScope::Signing;
   const bool do_sign = scope != CrlScope::Root;
 
-  // The store answers which generation signs before any path is built.
   Botan::AutoSeeded_RNG rng;
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
-  const CaGen root = active_ca(*dbh, config, "root");
-  const CaGen sign = active_ca(*dbh, config, "signing");
-
   const fs::path ca_dir = store_dir / "ca";
-  const fs::path root_pem = ca_dir / (root.slug + ".pem");
-  const fs::path root_crl_path = ca_dir / (root.slug + ".crl");
-  const fs::path sign_crl_path = ca_dir / (sign.slug + ".crl");
-  std::vector<fs::path> needed;
-  if (do_root) {
-    needed.push_back(root_pem);
-    needed.push_back(root_crl_path);
-  }
-  if (do_sign)
-    needed.push_back(sign_crl_path);
-  for (const fs::path &p : needed) {
-    if (!fs::exists(p)) {
-      log::error("{} not found", p.string());
-      return false;
+
+  // One job per CA whose CRL is re-signed. A rotation leaves retiring
+  // generations behind and each keeps publishing its own CRL until the
+  // last certificate it issued is gone, so the scope is a set, not one CA.
+  struct Job {
+    CaGen ca;
+    std::string curve, digest;
+    int horizon;
+    Botan::X509_Certificate cert;
+    std::shared_ptr<const Botan::Private_Key> key;
+  };
+  std::vector<Job> jobs;
+  const std::size_t now = now_epoch();
+  auto collect = [&](const std::string &kind, const std::string &curve,
+                     const std::string &digest, int horizon) {
+    for (const CaGen &g : live_cas(*dbh, config, kind)) {
+      auto cert = load_ca_cert(store_dir, g.slug);
+      const fs::path crl_path = ca_dir / (g.slug + ".crl");
+      if (!cert || !fs::exists(crl_path)) {
+        log::error("{} CA artifacts not found for {} under {}", kind, g.slug,
+                   ca_dir.string());
+        return false;
+      }
+      // An expired CA cannot promise a future publication (crl_next_update
+      // clamps to its notAfter), so re-signing would only churn crlNumber.
+      if (static_cast<std::size_t>(cert->not_after().time_since_epoch()) <=
+          now) {
+        log::info("skipping {}: expired {}", g.slug,
+                  cert->not_after().readable_string());
+        continue;
+      }
+      jobs.push_back({g, curve, digest, horizon, *cert, nullptr});
     }
+    return true;
+  };
+  if (do_root && !collect("root", config.root_ca_curve, config.root_ca_digest,
+                          app::root_crl_next_update_days))
+    return false;
+  if (do_sign && !collect("signing", config.signing_ca_curve,
+                          config.signing_ca_digest, app::crl_next_update_days))
+    return false;
+  if (jobs.empty()) {
+    log::warn("no CA in scope has a CRL to refresh");
+    return true;
   }
 
-  std::optional<Botan::X509_Certificate> sign_cert;
-  if (do_sign) {
-    sign_cert = load_ca_cert(store_dir, sign.slug);
-    if (!sign_cert) {
-      log::error("signing CA cert not found under {}", ca_dir.string());
-      return false;
-    }
-  }
-  std::optional<Botan::X509_Certificate> root_cert;
-  if (do_root)
-    root_cert.emplace(root_pem.string());
-
-  // Only the keys the scope needs, through one token session (backend
-  // pkcs11), loaded before the write lock: a HSM lookup takes seconds and
-  // other writers wait at most busy_timeout. The signing scope never
-  // touches the root key - that is the point of the separate root cadence
-  // (root_crl_next_update_days vs crl_next_update_days).
+  // Keys through one token session (backend pkcs11), loaded before the
+  // write lock: a NK HSM lookup takes seconds and other writers wait at most
+  // busy_timeout. The signing scope never touches the root key - that is
+  // the point of the separate root cadence (root_crl_next_update_days vs
+  // crl_next_update_days).
   std::optional<p11::Token> token;
-  std::shared_ptr<const Botan::Private_Key> root_key, sign_key;
   try {
-    if (do_root)
-      root_key = ca_key(config, store, *root_cert, root.slug,
-                        config.root_ca_curve, secret, token);
-    if (do_sign)
-      sign_key =
-          signing_key(config, store, *sign_cert, sign.slug, secret, token);
+    for (Job &j : jobs)
+      j.key = ca_key(config, store, j.cert, j.ca.slug, j.curve, secret, token);
   } catch (const std::exception &e) {
     log::error("cannot load CA key (wrong {}?): {}",
                config.key_backend == "internal" ? "passphrase" : "user PIN",
                e.what());
     return false;
   }
-  if ((do_root && !root_key) || (do_sign && !sign_key)) {
-    log::error("CA key missing from store");
-    return false;
-  }
+  for (const Job &j : jobs)
+    if (!j.key) {
+      log::error("CA key missing from store: {}", j.ca.slug);
+      return false;
+    }
 
   // Same lock discipline as revoke: read-CRL -> write-CRL under the write
   // lock, so a refresh cannot lose a concurrent revocation's entry.
@@ -1589,24 +1615,15 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
   begin_write(*dbh);
   bool ok = true;
   std::string refreshed;
-  if (do_root) {
-    Botan::X509_CRL prev(root_crl_path.string());
-    Botan::X509_CA root_ca(*root_cert, *root_key, config.root_ca_digest, rng);
-    const auto next = root_ca.update_crl(
-        prev, {}, rng,
-        crl_next_update(*root_cert, app::root_crl_next_update_days));
-    ok = write_der(root_crl_path, next) && ok;
-    refreshed = std::format("root #{}", next.crl_number());
-  }
-  if (do_sign) {
-    Botan::X509_CRL prev(sign_crl_path.string());
-    Botan::X509_CA sign_ca(*sign_cert, *sign_key, config.signing_ca_digest,
-                           rng);
-    const auto next = sign_ca.update_crl(
-        prev, {}, rng, crl_next_update(*sign_cert, app::crl_next_update_days));
-    ok = write_der(sign_crl_path, next) && ok;
-    refreshed += std::format("{}signing #{}", refreshed.empty() ? "" : ", ",
-                             next.crl_number());
+  for (const Job &j : jobs) {
+    const fs::path crl_path = ca_dir / (j.ca.slug + ".crl");
+    Botan::X509_CRL prev(crl_path.string());
+    Botan::X509_CA ca(j.cert, *j.key, j.digest, rng);
+    const auto next =
+        ca.update_crl(prev, {}, rng, crl_next_update(j.cert, j.horizon));
+    ok = write_der(crl_path, next) && ok;
+    refreshed += std::format("{}{} #{}", refreshed.empty() ? "" : ", ",
+                             j.ca.slug, next.crl_number());
   }
   commit_write(*dbh);
   if (!ok) {

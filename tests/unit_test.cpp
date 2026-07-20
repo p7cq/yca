@@ -363,6 +363,41 @@ TEST_CASE("ca::detail::active_ca resolves the generation from the store") {
   }
 }
 
+TEST_CASE("ca::detail::live_cas selects the generations that publish CRLs") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+  const auto db = t.dir / "ca-store.db";
+  Botan::Sqlite3_Database h(db.string());
+
+  auto slugs = [&](const char *kind) {
+    std::vector<std::string> v;
+    for (const auto &g : ca::detail::live_cas(h, *eff, kind))
+      v.push_back(g.slug);
+    return v;
+  };
+  CHECK(slugs("signing") == std::vector<std::string>{eff->signing_ca_slug});
+
+  // A retiring predecessor keeps publishing: both generations, oldest first.
+  h.new_statement("UPDATE ca_cert_index SET status='retiring' "
+                  "WHERE kind='signing' AND gen=1")
+      ->spin();
+  h.new_statement("INSERT INTO ca_cert_index (kind,gen,cn,slug,status) "
+                  "VALUES ('signing',2,'UT CA E2','ut-ca-e2','active')")
+      ->spin();
+  CHECK(slugs("signing") ==
+        std::vector<std::string>{eff->signing_ca_slug, "ut-ca-e2"});
+
+  // A revoked generation drops out: its CRL is moot.
+  h.new_statement("UPDATE ca_cert_index SET status='revoked' "
+                  "WHERE kind='signing' AND gen=1")
+      ->spin();
+  CHECK(slugs("signing") == std::vector<std::string>{"ut-ca-e2"});
+  // The root is untouched by any of it.
+  CHECK(slugs("root") == std::vector<std::string>{eff->root_ca_slug});
+}
+
 TEST_CASE("ca::is_initialized: active anchors must match the locked config") {
   TempPki t;
   CHECK_FALSE(ca::is_initialized(t.dir)); // absent store
