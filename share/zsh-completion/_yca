@@ -44,7 +44,7 @@ _yca() {
       _arguments \
         '1:target:(server client)' \
         '--cn[common name]:common name:' \
-        '*--san[SAN as type\:name (dns|email|ip), repeatable]:san:' \
+        '*--san[SAN as type\:name (dns|email|ip|uri), repeatable]:san:' \
         '--valid[validity override, 5m..ee_valid_days]:duration (e.g. 1h, 30d):'
       ;;
     enroll)

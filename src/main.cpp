@@ -31,6 +31,8 @@ std::optional<ca::San> parse_san(const std::string &spec) {
     return ca::San{ca::San::Type::Email, std::move(value)};
   if (type == "ip")
     return ca::San{ca::San::Type::Ip, std::move(value)};
+  if (type == "uri")
+    return ca::San{ca::San::Type::Uri, std::move(value)};
   return std::nullopt;
 }
 
@@ -64,7 +66,7 @@ int main(int argc, char **argv) {
       ->check(CLI::IsMember({"server", "client"}));
   create->add_option("--cn", c_cn, "common name");
   create->add_option("--san", c_sans,
-                     "SAN as type:name (dns|email|ip), repeatable");
+                     "SAN as type:name (dns|email|ip|uri), repeatable");
   create->add_option("--valid", c_valid,
                      "validity override as <N><s|m|h|d>, in [5m, "
                      "ee_valid_days] (policy is the ceiling)");

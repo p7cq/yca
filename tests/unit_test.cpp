@@ -55,6 +55,48 @@ TEST_CASE("dns_safe / ascii_graphic") {
   CHECK_FALSE(util::ascii_graphic(""));
 }
 
+TEST_CASE("uri_safe: absolute, IA5-safe URIs") {
+  CHECK(util::uri_safe("spiffe://td.example.ca/workload"));
+  CHECK(util::uri_safe("https://example.ca/a?b=c#d"));
+  CHECK(util::uri_safe("urn:example:1"));
+  CHECK(util::uri_safe("x+y-z.1:v")); // full RFC 3986 scheme charset
+  CHECK_FALSE(util::uri_safe(""));
+  CHECK_FALSE(util::uri_safe("//example.ca/a"));   // relative: no scheme
+  CHECK_FALSE(util::uri_safe("example.ca/a"));     // no scheme
+  CHECK_FALSE(util::uri_safe(":value"));           // empty scheme
+  CHECK_FALSE(util::uri_safe("https:"));           // empty remainder
+  CHECK_FALSE(util::uri_safe("1https://x"));       // scheme starts with digit
+  CHECK_FALSE(util::uri_safe("ht tps://example")); // space
+  CHECK_FALSE(util::uri_safe("https://exämple"));  // non-ASCII
+}
+
+TEST_CASE("spiffe_id_safe: the SPIFFE-ID rules") {
+  CHECK(util::spiffe_id_safe("spiffe://example.ca/workload"));
+  CHECK(util::spiffe_id_safe("spiffe://example.ca/ns/prod/sa/web"));
+  CHECK(util::spiffe_id_safe("spiffe://example.ca"));    // trust domain ID
+  CHECK(util::spiffe_id_safe("spiffe://ex-1_2.ca/Wl.1")); // full charsets
+
+  CHECK_FALSE(util::spiffe_id_safe("SPIFFE://example.ca/wl")); // scheme case
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://Example.ca/wl")); // TD case
+  CHECK_FALSE(util::spiffe_id_safe("spiffe:///wl"));           // empty TD
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://u@example.ca/w")); // userinfo
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca:8443/w")); // port
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca/wl/"));    // trailing
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca//wl"));    // empty seg
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca/./wl"));   // relative
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca/../wl"));  // relative
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca/wl?q=1")); // query
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca/wl#f"));   // fragment
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca/wl%20x")); // '%' not
+                                                                   // in charset
+  // Length caps: 255-byte trust domain, 2048-byte ID.
+  CHECK(util::spiffe_id_safe("spiffe://" + std::string(255, 'a')));
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://" + std::string(256, 'a')));
+  const std::string base = "spiffe://example.ca/";
+  CHECK(util::spiffe_id_safe(base + std::string(2048 - base.size(), 'a')));
+  CHECK_FALSE(util::spiffe_id_safe(base + std::string(2049 - base.size(), 'a')));
+}
+
 TEST_CASE("parse_duration") {
   using std::chrono::seconds;
   CHECK(util::parse_duration("30s") == seconds(30));
@@ -408,6 +450,20 @@ TEST_CASE("ca: init + issuance + revocation rules") {
                            {{ca::San::Type::Email, "иван@ut.ca"}}));
   CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "Иван Петров",
                      {{ca::San::Type::Email, "ivan@ut.ca"}}));
+
+  // uri SANs: both profiles, and a lone uri satisfies the client rule.
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "workload",
+                     {{ca::San::Type::Uri, "spiffe://ut.ca/ns/prod/sa/web"}}));
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "svc.ut.ca",
+                     {{ca::San::Type::Uri, "spiffe://ut.ca/svc"}}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "bad-uri",
+                           {{ca::San::Type::Uri, "not-absolute"}}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "bad-sid",
+                           {{ca::San::Type::Uri, "spiffe://UT.ca/wl"}}));
+  // At most one URI SAN (an X509-SVID carries exactly one).
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "two-uris",
+                           {{ca::San::Type::Uri, "spiffe://ut.ca/a"},
+                            {ca::San::Type::Uri, "spiffe://ut.ca/b"}}));
 
   // --valid override: [5m, ee_valid_days] - the policy is the ceiling,
   // shorter is always allowed (ee_valid_days here: 90).

@@ -50,8 +50,12 @@ store is already initialized.
 .TP
 \fBcreate\fR \fIserver\fR|\fIclient\fR \fB\-\-cn\fR \fIcn\fR [\fB\-\-san\fR \fItype:name\fR ...] [\fB\-\-valid\fR \fIN\fR{s|m|h|d}]
 Issue an end-entity certificate. \fB\-\-san\fR is repeatable with
-\fItype\fR one of \fBdns\fR, \fBemail\fR, \fBip\fR; servers always get
-DNS:\fIcn\fR added, clients require at least one SAN. \fB\-\-valid\fR
+\fItype\fR one of \fBdns\fR, \fBemail\fR, \fBip\fR, \fBuri\fR; servers
+always get DNS:\fIcn\fR added, clients require at least one SAN. A
+\fBuri\fR SAN must be an absolute, printable-ASCII URI, and one using
+the \fBspiffe\fR scheme must be a valid SPIFFE ID; at most one
+\fBuri\fR per certificate (an X509\-SVID carries exactly one).
+\fB\-\-valid\fR
 requests a shorter validity for this one issuance, range [5m,
 \fBee_valid_days\fR]: the configured policy is both the default and the
 ceiling, a request below it is always allowed; nothing is persisted. One
@@ -69,8 +73,10 @@ valid (\fIid\fR, \fInonce\fR) pair from \fBget nonce\fR; the nonce is
 consumed on success (single use). \fIcsr\fR is inline PEM, \fB\-\fR for
 standard input, or a file path (PEM/DER auto-detected). Only the public key
 (ECDSA on the \fBee_curve\fR curve), the subject CN and the supported SANs
-(dns, email, IPv4) are taken from the CSR; every other requested extension
-or DN attribute is ignored and the CA dictates the profile.
+(dns, email, IPv4, URI) are taken from the CSR; every other requested
+extension or DN attribute is ignored and the CA dictates the profile.
+The \fBuri\fR rules of \fBcreate\fR apply, so a CSR carrying more than
+one URI SAN is refused.
 \fB\-\-valid\fR behaves exactly as in \fBcreate\fR. Prints the CN on
 standard output for piping into \fBget\fR \fB\-\-cn \-\fR; writes nothing
 under \fBee/\fR (the private key stays with the requester).

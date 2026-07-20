@@ -205,6 +205,28 @@ using namespace detail;
 
 namespace {
 
+// A uri SAN must be an absolute, IA5-safe URI; when it uses the spiffe
+// scheme the SPIFFE-ID rules apply on top (they are strictly narrower,
+// and a malformed SPIFFE ID is a silent authorization failure in a mesh
+// rather than a visible error). Says why on the error channel.
+bool valid_uri_san(const std::string &v) {
+  if (!uri_safe(v)) {
+    log::error("uri SAN must be an absolute, printable-ASCII URI "
+               "(scheme:value, percent-encode the rest): {}",
+               v);
+    return false;
+  }
+  if (v.starts_with("spiffe:") && !spiffe_id_safe(v)) {
+    log::error("invalid SPIFFE ID: {} (spiffe://<trust-domain>[/<path>], "
+               "lowercase trust domain of [a-z0-9.-_] with no port, path "
+               "segments of [a-zA-Z0-9.-_], no trailing slash, no query or "
+               "fragment)",
+               v);
+    return false;
+  }
+  return true;
+}
+
 std::optional<Botan::CRL_Code> parse_reason(const std::string &s) {
   const std::string r = lower(s);
   if (r == "unspecified")
@@ -804,6 +826,18 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
                  s.value);
       return false;
     }
+    if (s.type == San::Type::Uri && !valid_uri_san(s.value))
+      return false;
+  }
+  // At most one URI SAN: an X509-SVID "MUST contain exactly one URI SAN,
+  // and by extension, exactly one SPIFFE ID" - a second one would make
+  // the certificate unusable as an SVID.
+  if (std::count_if(sans.begin(), sans.end(), [](const San &s) {
+        return s.type == San::Type::Uri;
+      }) > 1) {
+    log::error("at most one --san uri per certificate (an X509-SVID carries "
+               "exactly one URI SAN)");
+    return false;
   }
 
   const fs::path db = store_path(store_dir);
@@ -886,6 +920,9 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
         log::error("invalid IPv4 in --san: {}", s.value);
         return false;
       }
+      break;
+    case San::Type::Uri:
+      an.add_uri(s.value);
       break;
     }
   }
@@ -1107,14 +1144,15 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   if (req->subject_dn().count() > 1)
     log::warn("ignoring non-CN subject attributes in the CSR");
 
-  // SANs: only dns/email/IPv4 are honored (same types as --san); anything
-  // else in the CSR (URI, directoryName, IPv6, otherName) is dropped.
+  // SANs: only dns/email/IPv4/URI are honored (same types as --san);
+  // anything else in the CSR (directoryName, IPv6, otherName) is dropped.
   const auto &csr_san = req->subject_alt_name();
   const std::size_t supported = csr_san.dns().size() + csr_san.email().size() +
-                                csr_san.ipv4_address().size();
+                                csr_san.ipv4_address().size() +
+                                csr_san.uris().size();
   if (csr_san.count() > supported)
     log::warn("ignoring {} unsupported SAN entries in the CSR (only dns, "
-              "email and IPv4 are honored)",
+              "email, IPv4 and URI are honored)",
               csr_san.count() - supported);
   for (const auto &d : csr_san.dns())
     if (!dns_safe(d)) {
@@ -1128,6 +1166,15 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
       log::error("CSR email SAN must be printable ASCII (IA5String): {}", m);
       return false;
     }
+  if (csr_san.uris().size() > 1) {
+    log::error("CSR carries {} URI SANs; at most one is allowed (an "
+               "X509-SVID carries exactly one)",
+               csr_san.uris().size());
+    return false;
+  }
+  for (const auto &u : csr_san.uris())
+    if (!valid_uri_san(u))
+      return false;
 
   Botan::AlternativeName an;
   if (profile == Profile::Server) {
@@ -1149,6 +1196,8 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     an.add_email(m);
   for (uint32_t ip : csr_san.ipv4_address())
     an.add_ipv4_address(ip);
+  for (const auto &u : csr_san.uris())
+    an.add_uri(u);
 
   const fs::path db = store_path(store_dir);
   if (!fs::exists(db)) {

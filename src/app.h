@@ -29,6 +29,13 @@ inline constexpr std::string_view config_table = "ca_config";
 // issuance starts refusing (a leaf may not outlive its issuer).
 inline constexpr int max_ee_valid_days = 398;
 
+// SPIFFE ID limits (SPIFFE-ID standard): a trust domain name has "a
+// maximum length of 255 bytes", and implementations "SHOULD NOT generate
+// URIs of length greater than 2048 bytes" - as the generator, yca
+// enforces both when a uri SAN uses the spiffe scheme.
+inline constexpr std::size_t spiffe_trust_domain_max = 255;
+inline constexpr std::size_t spiffe_id_max = 2048;
+
 // Default window for the `list` time filters, in days.
 inline constexpr int default_list_window_days = 30;
 

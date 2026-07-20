@@ -115,6 +115,26 @@ w create client --cn "No SAN" >/dev/null 2>&1 &&
 w create client --cn "Client" --san=email:p@example.ca >/dev/null 2>&1 &&
   ok "create client with SAN" || bad "create client failed"
 
+# --- uri SAN (SPIFFE): both profiles, one per certificate ---
+w create client --cn workload --san=uri:spiffe://example.ca/ns/prod/sa/web \
+  >/dev/null 2>&1 && ok "create client with uri SAN only" || bad "client uri SAN"
+w get client --cn workload 2>/dev/null |
+  openssl x509 -noout -ext subjectAltName 2>/dev/null |
+  grep -q "URI:spiffe://example.ca/ns/prod/sa/web" &&
+  ok "uri SAN present in the certificate" || bad "uri SAN missing"
+w create server --cn svc.example.ca --san=uri:spiffe://example.ca/svc \
+  >/dev/null 2>&1 && ok "create server with uri SAN" || bad "server uri SAN"
+w create client --cn badsid --san=uri:spiffe://EXAMPLE.ca/wl >/dev/null 2>&1 &&
+  bad "uppercase SPIFFE trust domain accepted" ||
+  ok "uppercase SPIFFE trust domain rejected"
+w create client --cn badsid2 --san=uri:spiffe://example.ca/wl/ >/dev/null 2>&1 &&
+  bad "SPIFFE trailing slash accepted" || ok "SPIFFE trailing slash rejected"
+w create client --cn badsid3 --san=uri:example.ca/wl >/dev/null 2>&1 &&
+  bad "relative uri SAN accepted" || ok "relative uri SAN rejected"
+w create client --cn twouris --san=uri:spiffe://example.ca/a \
+  --san=uri:spiffe://example.ca/b >/dev/null 2>&1 &&
+  bad "two uri SANs accepted" || ok "two uri SANs rejected (one per SVID)"
+
 # --- uniqueness (cn, profile) ---
 w create server --cn foo.ca >/dev/null 2>&1 && ok "server foo.ca" || bad "server foo.ca"
 w create client --cn foo.ca --san=dns:foo.ca >/dev/null 2>&1 &&
@@ -433,7 +453,10 @@ printf '%s' "$SAN" | grep -q "DNS:csr.example.ca" &&
   ok "DNS:CN forced into SAN" || bad "DNS:CN missing from SAN"
 printf '%s' "$SAN" | grep -q "DNS:alt.example.ca" &&
   ok "supported CSR SAN kept" || bad "dns SAN dropped"
-printf '%s' "$SAN" | grep -q "URI" && bad "URI SAN kept" || ok "unsupported URI SAN dropped"
+# URI SANs are honored now (SPIFFE): the CA still dictates everything
+# else, but a well-formed URI from the CSR survives.
+printf '%s' "$SAN" | grep -q "URI:https://evil.example" &&
+  ok "URI SAN kept from CSR" || bad "URI SAN dropped"
 openssl verify -CAfile "$PKI/ca/ets-root-e1.pem" \
   -untrusted "$PKI/ca/ca-e1.pem" "$WORK/csr-signed.pem" >/dev/null 2>&1 &&
   ok "CSR-signed chain verifies to root" || bad "CSR-signed chain verify failed"
@@ -478,6 +501,29 @@ w sign server --id user@example.ca --nonce "$NONCE_SV2" \
   --csr "$WORK/sv.csr" --valid 398d >/dev/null 2>&1 &&
   bad "sign --valid above ee_valid_days accepted" ||
   ok "sign --valid above ee_valid_days rejected"
+
+# uri SANs on the CSR path: honored, validated and capped at one
+openssl req -new -key "$WORK/ee.key" -out "$WORK/uri.csr" -subj "/CN=wl.example.ca" \
+  -addext "subjectAltName=URI:spiffe://example.ca/wl" 2>/dev/null
+NONCE_U="$(w get nonce --id user@example.ca 2>/dev/null)"
+w sign client --id user@example.ca --nonce "$NONCE_U" --csr "$WORK/uri.csr" \
+  >/dev/null 2>&1 && ok "sign CSR with uri SAN" || bad "sign CSR uri SAN"
+w get client --cn wl.example.ca 2>/dev/null |
+  openssl x509 -noout -ext subjectAltName 2>/dev/null |
+  grep -q "URI:spiffe://example.ca/wl" &&
+  ok "CSR uri SAN honored in the certificate" || bad "CSR uri SAN dropped"
+openssl req -new -key "$WORK/ee.key" -out "$WORK/2uri.csr" -subj "/CN=two.example.ca" \
+  -addext "subjectAltName=URI:spiffe://example.ca/a,URI:spiffe://example.ca/b" 2>/dev/null
+NONCE_U2="$(w get nonce --id user@example.ca 2>/dev/null)"
+w sign client --id user@example.ca --nonce "$NONCE_U2" --csr "$WORK/2uri.csr" \
+  >/dev/null 2>&1 &&
+  bad "CSR with two uri SANs accepted" || ok "CSR with two uri SANs rejected"
+openssl req -new -key "$WORK/ee.key" -out "$WORK/badsid.csr" -subj "/CN=bs.example.ca" \
+  -addext "subjectAltName=URI:spiffe://example.ca/wl/" 2>/dev/null
+w sign client --id user@example.ca --nonce "$NONCE_U2" --csr "$WORK/badsid.csr" \
+  >/dev/null 2>&1 &&
+  bad "CSR with malformed SPIFFE ID accepted" ||
+  ok "CSR with malformed SPIFFE ID rejected"
 
 # CN-less (SAN-only) CSR, the certbot shape: CN derived from the dns SAN
 openssl req -new -key "$WORK/ee.key" -out "$WORK/nocn.csr" -subj "/" \

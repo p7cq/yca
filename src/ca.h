@@ -14,7 +14,7 @@ namespace ca {
 enum class Profile { Server, Client };
 
 struct San {
-  enum class Type { Dns, Email, Ip } type;
+  enum class Type { Dns, Email, Ip, Uri } type;
   std::string value;
 };
 

@@ -1,6 +1,9 @@
 #include "util.h"
 
 #include <cctype>
+#include <string_view>
+
+#include "app.h"
 
 namespace util {
 
@@ -94,6 +97,73 @@ bool ascii_graphic(const std::string &s) {
     const auto u = static_cast<unsigned char>(c);
     if (u < 0x21 || u > 0x7E)
       return false;
+  }
+  return true;
+}
+
+bool uri_safe(const std::string &s) {
+  if (!ascii_graphic(s))
+    return false;
+  const auto colon = s.find(':');
+  if (colon == std::string::npos || colon == 0 || colon + 1 == s.size())
+    return false;
+  const char first = s[0];
+  if (!((first >= 'A' && first <= 'Z') || (first >= 'a' && first <= 'z')))
+    return false;
+  for (std::size_t i = 1; i < colon; ++i) {
+    const char c = s[i];
+    const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.';
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
+bool spiffe_id_safe(const std::string &s) {
+  static constexpr std::string_view kPrefix = "spiffe://";
+  // The scheme must be exactly "spiffe" (lowercase), so a plain prefix
+  // match doubles as the case check.
+  if (s.size() > app::spiffe_id_max || !s.starts_with(kPrefix))
+    return false;
+  const std::string rest = s.substr(kPrefix.size());
+
+  // Trust domain: everything up to the first '/'. The charset excludes
+  // '@' and ':', so userinfo and port cannot appear, and '?'/'#' are
+  // rejected too - a query or fragment can never parse as one.
+  const auto slash = rest.find('/');
+  const std::string td = rest.substr(0, slash);
+  if (td.empty() || td.size() > app::spiffe_trust_domain_max)
+    return false;
+  for (char c : td) {
+    const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                    c == '.' || c == '-' || c == '_';
+    if (!ok)
+      return false;
+  }
+  if (slash == std::string::npos)
+    return true; // trust domain ID, no path component
+
+  // Path: segments are non-empty, never relative modifiers, and their
+  // charset again excludes '?' and '#'. A trailing '/' leaves an empty
+  // last segment, which the same rule rejects.
+  std::size_t pos = slash;
+  while (pos < rest.size()) {
+    const auto next = rest.find('/', pos + 1);
+    const std::string seg = rest.substr(
+        pos + 1, next == std::string::npos ? std::string::npos : next - pos - 1);
+    if (seg.empty() || seg == "." || seg == "..")
+      return false;
+    for (char c : seg) {
+      const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                      (c >= '0' && c <= '9') || c == '.' || c == '-' ||
+                      c == '_';
+      if (!ok)
+        return false;
+    }
+    if (next == std::string::npos)
+      break;
+    pos = next;
   }
   return true;
 }
