@@ -15,6 +15,7 @@ _yca() {
     'enroll:enroll an identity for CSR signing'
     'sign:issue a certificate from a PKCS#10 CSR (server|client)'
     'revoke:revoke a certificate'
+    'renew:create the next generation of a CA (root key ceremony)'
     'refresh:re-sign the CRLs with a fresh nextUpdate'
     'get:export a certificate, CRL, nonce or the config to stdout'
     'list:list certificates by filter'
@@ -65,6 +66,11 @@ _yca() {
         '(--serial)--cn[common name]:common name:' \
         '(--cn)--serial[serial (hex) - selects the exact certificate]:serial:' \
         "--reason[CRLReason name (default unspecified)]:reason:(${reasons[*]})"
+      ;;
+    renew)
+      _arguments \
+        '1:target:(signing-ca)' \
+        '--new-cn[the new generation'"'"'s common name]:common name:'
       ;;
     refresh)
       _arguments \

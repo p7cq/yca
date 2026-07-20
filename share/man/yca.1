@@ -91,6 +91,18 @@ case-insensitive CRLReason: \fBunspecified\fR (default),
 \fBsuperseded\fR, \fBcessationOfOperation\fR, \fBcertificateHold\fR,
 \fBremoveFromCRL\fR, \fBprivilegeWithdrawn\fR, \fBaACompromise\fR.
 .TP
+\fBrenew\fR \fIsigning\-ca\fR \fB\-\-new\-cn\fR \fIcn\fR
+Create the next generation of the signing CA: a fresh key and the
+configured signing profile under the new display name \fIcn\fR, signed by
+the active root, so this brings the root key online like a root CRL
+refresh. The slug is derived (\fB<signing_ca_slug_prefix><generation>\fR)
+and with \fBpkcs11\fR the keypair is generated on the token under that
+label. The successor becomes the issuer of every new certificate; the
+incumbent turns retiring and keeps publishing its own CRL until the last
+certificate it signed has expired, so old chains keep validating. Refused
+when \fIcn\fR already names a generation, or when the new CA would
+outlive the root. Prints the new CN on standard output.
+.TP
 \fBrefresh\fR \fIcrl\fR [\fBroot\fR|\fBsigning\fR|\fBall\fR]
 Re-sign the published CRLs selected by the scope (default \fBall\fR) from
 their current entry sets: same revocations, crlNumber+1, fresh

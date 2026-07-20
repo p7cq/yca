@@ -105,6 +105,15 @@ int main(int argc, char **argv) {
   revoke->add_option("--reason", r_reason,
                      "CRLReason name (default unspecified)");
 
+  auto *renew = app.add_subcommand(
+      "renew", "create the next generation of a CA (root key ceremony)");
+  std::string n_target, n_new_cn;
+  renew->add_option("target", n_target, "signing-ca")
+      ->required()
+      ->check(CLI::IsMember({"signing-ca"}));
+  renew->add_option("--new-cn", n_new_cn, "the new generation's common name")
+      ->required();
+
   auto *refresh =
       app.add_subcommand("refresh", "re-sign the CRLs with a fresh nextUpdate");
   std::string f_target, f_scope = "all";
@@ -163,8 +172,8 @@ int main(int argc, char **argv) {
   CLI11_PARSE(app, argc, argv);
 
   // No subcommand: show help.
-  if (!*init && !*create && !*enroll && !*sign && !*revoke && !*refresh &&
-      !*get && !*list) {
+  if (!*init && !*create && !*enroll && !*sign && !*revoke && !*renew &&
+      !*refresh && !*get && !*list) {
     std::fputs(app.help().c_str(), stdout);
     return 0;
   }
@@ -277,6 +286,10 @@ int main(int argc, char **argv) {
                  ? 0
                  : 1;
     }
+
+    if (*renew)
+      return ca::renew_signing_ca(*eff, store_dir, secret(*eff), n_new_cn) ? 0
+                                                                           : 1;
 
     if (*refresh) {
       const ca::CrlScope scope = f_scope == "root"      ? ca::CrlScope::Root

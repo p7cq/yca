@@ -597,6 +597,66 @@ ERR="$(w --log "$WORK/nodir/x.log" get config 2>&1 >/dev/null)" &&
 printf '%s' "$ERR" | grep -q "cannot open" &&
   ok "unwritable --log explained on stderr" || bad "unwritable --log: '$ERR'"
 
+# --- CA rotation: renew signing-ca, in a store of its own so the rest of
+# --- the suite keeps its generation-1 issuer ---
+ROT="$WORK/pki_rot"
+r() { "$BIN" --config "$CFG" --store "$ROT" "$@"; }
+(export CA_STORE_PASSPHRASE=rotpass && r init >/dev/null 2>&1) &&
+  ok "rotation store init" || bad "rotation store init"
+export CA_STORE_PASSPHRASE_SAVED="$CA_STORE_PASSPHRASE"
+CA_STORE_PASSPHRASE=rotpass
+r create server --cn old.rot.ca >/dev/null 2>&1 &&
+  ok "leaf under generation 1" || bad "leaf under generation 1"
+
+NEWCN="$(r renew signing-ca --new-cn "CA E2" 2>/dev/null)"
+[ "$NEWCN" = "CA E2" ] &&
+  ok "renew signing-ca prints the new CN" || bad "renew signing-ca: '$NEWCN'"
+{ [ -f "$ROT/ca/ca-e2.pem" ] && [ -f "$ROT/ca/ca-e2.crt" ] &&
+  [ -f "$ROT/ca/ca-e2.crl" ]; } &&
+  ok "generation 2 artifacts published" || bad "generation 2 artifacts missing"
+
+# The alias follows the active generation.
+r get ca --cn signing-ca 2>/dev/null | openssl x509 -noout -subject 2>/dev/null |
+  grep -q "CA E2" && ok "get ca signing-ca -> generation 2" || bad "alias stuck on gen 1"
+r get crl --cn signing-ca 2>/dev/null | openssl crl -noout -issuer 2>/dev/null |
+  grep -q "CA E2" && ok "get crl signing-ca -> generation 2" || bad "crl alias stuck"
+r list --cn signing-ca 2>/dev/null | grep -c "signing" | grep -q "^2$" &&
+  ok "list --cn signing-ca shows both generations" || bad "list shows one generation"
+
+# Both chains verify against the same root: that is the point of rotating
+# under a 2-tier hierarchy.
+r create server --cn new.rot.ca >/dev/null 2>&1
+openssl verify -CAfile "$ROT/ca/ets-root-e1.pem" -untrusted "$ROT/ca/ca-e2.pem" \
+  "$ROT/ee/new.rot.ca.crt" >/dev/null 2>&1 &&
+  ok "new leaf chains through generation 2" || bad "new leaf chain"
+openssl verify -CAfile "$ROT/ca/ets-root-e1.pem" -untrusted "$ROT/ca/ca-e1.pem" \
+  "$ROT/ee/old.rot.ca.crt" >/dev/null 2>&1 &&
+  ok "old leaf still chains through generation 1" || bad "old leaf chain broken"
+
+# The refresh fan-out covers every live generation, in one run.
+N1="$(crlnum "$ROT/ca/ca-e1.crl")"
+N2="$(crlnum "$ROT/ca/ca-e2.crl")"
+r refresh crl signing >/dev/null 2>&1 &&
+  ok "refresh crl signing after rotation" || bad "refresh after rotation"
+[ "$(($(crlnum "$ROT/ca/ca-e1.crl")))" -eq "$((N1 + 1))" ] &&
+  [ "$(($(crlnum "$ROT/ca/ca-e2.crl")))" -eq "$((N2 + 1))" ] &&
+  ok "both generations' CRLs refreshed" || bad "fan-out missed a generation"
+
+# Revoking a leaf issued before the rotation lands on ITS issuer's CRL.
+r revoke server --cn old.rot.ca --reason superseded >/dev/null 2>&1 &&
+  ok "revoke a generation-1 leaf" || bad "revoke gen-1 leaf"
+[ "$(openssl crl -inform DER -in "$ROT/ca/ca-e1.crl" -noout -text 2>/dev/null |
+  grep -c 'Serial Number')" -ge 1 ] &&
+  ok "entry landed on generation 1's CRL" || bad "entry missing from gen-1 CRL"
+[ "$(openssl crl -inform DER -in "$ROT/ca/ca-e2.crl" -noout -text 2>/dev/null |
+  grep -c 'Serial Number')" -eq 0 ] &&
+  ok "generation 2's CRL untouched" || bad "entry landed on the wrong CRL"
+
+# A name already used by a generation is refused.
+r renew signing-ca --new-cn "CA E2" >/dev/null 2>&1 &&
+  bad "duplicate generation CN accepted" || ok "duplicate generation CN rejected"
+CA_STORE_PASSPHRASE="$CA_STORE_PASSPHRASE_SAVED"
+
 echo
 echo "e2e: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

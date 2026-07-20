@@ -161,6 +161,20 @@ void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config) {
   }
 }
 
+std::optional<CaGen> gen_by_cn(Botan::SQL_Database &db, const std::string &kind,
+                               const std::string &cn) {
+  if (!has_ca_index(db))
+    return std::nullopt;
+  auto q = db.new_statement("SELECT gen,cn,slug FROM ca_cert_index WHERE "
+                            "kind=?1 AND cn=?2 LIMIT 1");
+  q->bind(1, kind);
+  q->bind(2, cn);
+  if (!q->step())
+    return std::nullopt;
+  return CaGen{static_cast<int>(q->get_size_t(0)), q->get_str(1),
+               q->get_str(2)};
+}
+
 std::vector<CaGen> live_cas(Botan::SQL_Database &db, const cfg::Config &config,
                             const std::string &kind) {
   std::vector<CaGen> out;
@@ -784,6 +798,140 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
     log::error("CA init failed: {}", e.what());
     return false;
   }
+}
+
+bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
+                      std::string_view secret, const std::string &new_cn) {
+  const fs::path db = store_path(store_dir);
+  if (!fs::exists(db)) {
+    log::error("not initialized; run '{} init'", app::name);
+    return false;
+  }
+  if (secret.empty()) {
+    log::error("{} not set (the root key signs the new generation)",
+               secret_env(config));
+    return false;
+  }
+  if (new_cn.empty()) {
+    log::error("--new-cn is required (the new generation's common name)");
+    return false;
+  }
+
+  Botan::AutoSeeded_RNG rng;
+  auto dbh = open_store(db);
+  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
+  ensure_ca_index(*dbh, config);
+
+  const CaGen root = active_ca(*dbh, config, "root");
+  const CaGen incumbent = active_ca(*dbh, config, "signing");
+  const CaGen next{incumbent.gen + 1, new_cn,
+                   config.signing_ca_slug_prefix +
+                       std::to_string(incumbent.gen + 1)};
+
+  // A CN identifies a generation in `cert_index` and in the CRL's issuer
+  // field, so generations must not share one.
+  if (new_cn == root.cn || gen_by_cn(*dbh, "signing", new_cn) ||
+      gen_by_cn(*dbh, "root", new_cn)) {
+    log::error("CN '{}' already names a CA generation; pick another", new_cn);
+    return false;
+  }
+
+  const fs::path ca_dir = store_dir / "ca";
+  const fs::path pem = ca_dir / (next.slug + ".pem");
+  if (fs::exists(pem))
+    log::warn("{} exists from an unfinished renewal; replacing it",
+              pem.string());
+
+  auto root_cert = load_ca_cert(store_dir, root.slug);
+  if (!root_cert) {
+    log::error("root CA cert not found under {}", ca_dir.string());
+    return false;
+  }
+  // The new generation gets the configured signing validity, and a CA may
+  // no more outlive its issuer than a leaf may: a root too close to its
+  // own notAfter must itself be rotated first.
+  if (outlives_issuer(*root_cert, std::chrono::seconds(std::chrono::days(
+                                      config.signing_ca_valid_days))))
+    return false;
+
+  std::optional<p11::Token> token;
+  std::shared_ptr<const Botan::Private_Key> root_key, new_key;
+  try {
+    if (config.key_backend == "pkcs11") {
+      // Read-write: the new generation's keypair is generated on the token
+      // under its own label (adopted if a previous attempt left it there).
+      token.emplace(config, secret, /*read_write=*/true);
+      root_key = token_ca_key(*token, root.slug, config.root_ca_curve);
+      new_key = token_ca_key(*token, next.slug, config.signing_ca_curve);
+    } else {
+      root_key = store.find_key(*root_cert);
+      new_key = std::make_shared<Botan::ECDSA_PrivateKey>(
+          rng, Botan::EC_Group::from_name(config.signing_ca_curve));
+    }
+  } catch (const std::exception &e) {
+    log::error("cannot load the root key (wrong {}?): {}",
+               config.key_backend == "internal" ? "passphrase" : "user PIN",
+               e.what());
+    return false;
+  }
+  if (!root_key || !new_key) {
+    log::error("root key missing from store");
+    return false;
+  }
+
+  // Same profile as the generation the ceremony created, pointing at the
+  // active root: only the name, the key and the generation change.
+  auto opts =
+      ca_options(config, next.cn, config.signing_ca_valid_days, size_t{0});
+  opts.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.1")); // serverAuth
+  opts.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.2")); // clientAuth
+  add_signing_pointer_extensions(opts, config, root.slug);
+  auto req =
+      Botan::X509::create_cert_req(opts, *new_key, config.signing_ca_digest,
+                                   rng);
+  Botan::X509_CA issuer(*root_cert, *root_key, config.root_ca_digest, rng);
+  const auto tp = Clock::now();
+  auto cert = issuer.sign_request(
+      req, rng, Botan::X509_Time(tp),
+      Botan::X509_Time(tp + std::chrono::days(config.signing_ca_valid_days)));
+
+  // Artifacts before the database: an interrupted renewal that leaves
+  // files behind is recoverable (the next run replaces them), while an
+  // active generation without a published certificate would break issuance.
+  Botan::X509_CA new_ca(cert, *new_key, config.signing_ca_digest, rng);
+  if (!write_pem(pem, cert) || !write_der(ca_dir / (next.slug + ".crt"), cert) ||
+      !write_der(ca_dir / (next.slug + ".crl"),
+                 new_ca.new_crl(rng,
+                                crl_next_update(cert,
+                                                app::crl_next_update_days)))) {
+    log::error("could not write the new CA artifacts under {}",
+               ca_dir.string());
+    return false;
+  }
+
+  begin_write(*dbh);
+  store.insert_cert(cert);
+  if (config.key_backend != "pkcs11")
+    store.insert_key(cert, *new_key);
+  ensure_cert_index(*dbh);
+  index_cert(*dbh, cert, "signing");
+  auto retire = dbh->new_statement("UPDATE ca_cert_index SET status='retiring' "
+                                   "WHERE kind='signing' AND status='active'");
+  retire->spin();
+  auto ins = dbh->new_statement("INSERT INTO ca_cert_index "
+                                "(kind,gen,cn,slug,status) "
+                                "VALUES ('signing',?1,?2,?3,'active')");
+  ins->bind(1, static_cast<std::size_t>(next.gen));
+  ins->bind(2, next.cn);
+  ins->bind(3, next.slug);
+  ins->spin();
+  commit_write(*dbh);
+
+  log::info("renewed the signing CA: generation {} '{}' ({}) is now active; "
+            "'{}' is retiring and keeps publishing its CRL",
+            next.gen, next.cn, next.slug, incumbent.cn);
+  log::to_stdout("{}", next.cn);
+  return true;
 }
 
 std::optional<cfg::Config> load_config(const fs::path &store_dir) {
@@ -1431,20 +1579,6 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
 
-  const CaGen sign = active_ca(*dbh, config, "signing");
-  auto sign_cert = load_ca_cert(store_dir, sign.slug);
-  if (!sign_cert) {
-    log::error("signing CA cert not found under {}",
-               (store_dir / "ca").string());
-    return false;
-  }
-
-  const fs::path crl_path = store_dir / "ca" / (sign.slug + ".crl");
-  if (!fs::exists(crl_path)) {
-    log::error("CRL not found at {}", crl_path.string());
-    return false;
-  }
-
   // Fail fast before the signing key lookup (seconds on NK HSM): whether an
   // active cert exists is answerable from cert_index alone. The write lock
   // below repeats the lookup authoritatively.
@@ -1460,8 +1594,43 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
     else
       log::error("no active {} certificate with serial {}", target, sel);
   };
-  if (!lookup(*dbh)) {
+  const auto first_fp = lookup(*dbh);
+  if (!first_fp) {
     not_found();
+    return false;
+  }
+
+  // The CRL to rewrite is the ISSUING generation's, not whichever signs
+  // today: after a rotation the two differ for everything issued before
+  // it, and an entry on the wrong CRL revokes nothing.
+  auto issued_by = load_cert(*dbh, *first_fp);
+  if (!issued_by) {
+    log::error("certificate {} is indexed but missing from the store",
+               *first_fp);
+    return false;
+  }
+  const std::string issuer_cn =
+      issued_by->issuer_dn().get_first_attribute("X520.CommonName");
+  CaGen sign = active_ca(*dbh, config, "signing");
+  if (auto g = gen_by_cn(*dbh, "signing", issuer_cn)) {
+    sign = *g;
+  } else if (issuer_cn != sign.cn) {
+    log::error("no CA generation matches the issuer of this certificate "
+               "(issuer CN '{}')",
+               issuer_cn);
+    return false;
+  }
+
+  auto sign_cert = load_ca_cert(store_dir, sign.slug);
+  if (!sign_cert) {
+    log::error("CA certificate not found for {} under {}", sign.slug,
+               (store_dir / "ca").string());
+    return false;
+  }
+
+  const fs::path crl_path = store_dir / "ca" / (sign.slug + ".crl");
+  if (!fs::exists(crl_path)) {
+    log::error("CRL not found at {}", crl_path.string());
     return false;
   }
 

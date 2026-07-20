@@ -39,6 +39,16 @@ bool is_initialized(const std::filesystem::path &store_dir);
 bool init(const cfg::Config &config, const std::filesystem::path &store_dir,
           std::string_view secret);
 
+// Creates the next generation of the signing CA: a fresh key and the
+// configured signing profile under a new display name `new_cn`, signed by
+// the active root (the ceremony that brings the root key online). The
+// successor becomes the active issuer; the incumbent turns `retiring` and
+// keeps publishing its CRL until the last certificate it signed expires.
+// Prints the new CN on stdout. See docs/ca-rotation.md.
+bool renew_signing_ca(const cfg::Config &config,
+                      const std::filesystem::path &store_dir,
+                      std::string_view secret, const std::string &new_cn);
+
 // Loads the effective config from the DB (ca_config snapshot) - the source of
 // truth after init. Returns nullopt if not initialized.
 std::optional<cfg::Config> load_config(const std::filesystem::path &store_dir);
@@ -93,10 +103,11 @@ bool get_nonce(const std::filesystem::path &store_dir, const std::string &id);
 // (the CA never sees the private key) - and the CN is printed to stdout for
 // retrieval via `get <profile> --cn`. `valid_override` behaves exactly as in
 // issue_ee ([5m, ee_valid_days], one-shot).
-bool sign_csr(const cfg::Config &config, const std::filesystem::path &store_dir,
-              std::string_view secret, Profile profile, const std::string &id,
-              const std::string &nonce, const std::string &csr_src,
-              std::optional<std::chrono::seconds> valid_override = std::nullopt);
+bool sign_csr(
+    const cfg::Config &config, const std::filesystem::path &store_dir,
+    std::string_view secret, Profile profile, const std::string &id,
+    const std::string &nonce, const std::string &csr_src,
+    std::optional<std::chrono::seconds> valid_override = std::nullopt);
 
 // Revokes the active `target` certificate (server|client) for `cn` by
 // adding it to the signing CA's CRL (<store>/ca/<signing-slug>.crl).

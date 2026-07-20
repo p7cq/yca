@@ -50,6 +50,13 @@ void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config);
 CaGen active_ca(Botan::SQL_Database &db, const cfg::Config &config,
                 const std::string &kind);
 
+// The generation of `kind` carrying `cn`, whatever its status - the way
+// back from a certificate's issuer field to the CA that signed it. CNs
+// are unique across generations, so the match is exact. nullopt when the
+// store records no generations, or none by that name.
+std::optional<CaGen> gen_by_cn(Botan::SQL_Database &db, const std::string &kind,
+                               const std::string &cn);
+
 // Every generation of `kind` that still publishes a CRL: the active one
 // plus the retiring predecessors that remain issuers of record, oldest
 // first. Revoked generations are left out - their CRL is moot. Expiry is

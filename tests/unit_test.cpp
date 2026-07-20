@@ -398,6 +398,67 @@ TEST_CASE("ca::detail::live_cas selects the generations that publish CRLs") {
   CHECK(slugs("root") == std::vector<std::string>{eff->root_ca_slug});
 }
 
+TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "old.ut.ca",
+                       {}));
+
+  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E2"));
+  const auto gen2 = t.dir / "ca" / "ut-ca-e2.pem";
+  CHECK(std::filesystem::exists(gen2));
+  CHECK(std::filesystem::exists(t.dir / "ca" / "ut-ca-e2.crt"));
+  CHECK(std::filesystem::exists(t.dir / "ca" / "ut-ca-e2.crl"));
+
+  {
+    auto h = ca::detail::open_store(t.dir / "ca-store.db");
+    const auto active = ca::detail::active_ca(*h, *eff, "signing");
+    CHECK(active.gen == 2);
+    CHECK(active.cn == "UT CA E2");
+    CHECK(active.slug == "ut-ca-e2");
+    // The predecessor stays an issuer of record: still refreshing a CRL.
+    CHECK(ca::detail::live_cas(*h, *eff, "signing").size() == 2);
+  }
+
+  // The successor is a CA under the same root, with a fresh key.
+  Botan::X509_Certificate e1((t.dir / "ca" / "ut-ca-e1.pem").string());
+  Botan::X509_Certificate e2(gen2.string());
+  Botan::X509_Certificate root((t.dir / "ca" / "ut-root-e1.pem").string());
+  CHECK(e2.is_CA_cert());
+  CHECK(e2.issuer_dn() == root.subject_dn());
+  CHECK(e2.subject_public_key_bits() != e1.subject_public_key_bits());
+  CHECK(e2.check_signature(*root.subject_public_key()));
+
+  // New issuance chains to the successor; the old leaf still names E1.
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "new.ut.ca",
+                       {}));
+  Botan::X509_Certificate fresh(
+      (t.dir / "ee" / "new.ut.ca.crt").string());
+  CHECK(fresh.issuer_dn() == e2.subject_dn());
+  Botan::X509_Certificate old((t.dir / "ee" / "old.ut.ca.crt").string());
+  CHECK(old.issuer_dn() == e1.subject_dn());
+
+  // Revoking the old leaf must land on E1's CRL, not the active one's.
+  REQUIRE(ca::revoke(*eff, t.dir, kPass, "server", "old.ut.ca", "superseded"));
+  Botan::X509_CRL e1_crl((t.dir / "ca" / "ut-ca-e1.crl").string());
+  Botan::X509_CRL e2_crl((t.dir / "ca" / "ut-ca-e2.crl").string());
+  CHECK(e1_crl.get_revoked().size() == 1);
+  CHECK(e2_crl.get_revoked().empty());
+
+  // A generation's name is taken, and so is the root's.
+  CHECK_FALSE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E2"));
+  CHECK_FALSE(ca::renew_signing_ca(*eff, t.dir, kPass, t.config.root_ca_cn));
+  CHECK_FALSE(ca::renew_signing_ca(*eff, t.dir, kPass, ""));
+
+  // Generation 3 follows generation 2.
+  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E3"));
+  auto h = ca::detail::open_store(t.dir / "ca-store.db");
+  CHECK(ca::detail::active_ca(*h, *eff, "signing").slug == "ut-ca-e3");
+  CHECK(ca::detail::live_cas(*h, *eff, "signing").size() == 3);
+}
+
 TEST_CASE("ca::is_initialized: active anchors must match the locked config") {
   TempPki t;
   CHECK_FALSE(ca::is_initialized(t.dir)); // absent store
