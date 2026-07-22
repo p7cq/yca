@@ -32,7 +32,7 @@ signing_ca_slug_prefix = "ca-load-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-root_arc_oid = "1.3.6.1.4.1.00000"
+root_arc_oid = "1.3.6.1.4.1.32473"
 EOF
 
 export CA_STORE_PASSPHRASE=loadtest

@@ -52,7 +52,7 @@ struct Config {
   std::string ee_digest;
   // The end entity certificate's validity in days.
   int ee_valid_days;
-  // The OID of the root arc, e.g. 1.3.6.1.4.1.00000
+  // The OID of the root arc, e.g. 1.3.6.1.4.1.32473
   std::string root_arc_oid;
   // Key backend: "internal" for CA keys encrypted in the SQLite store
   // or "pkcs11" for CA keys encrypted on an HSM token (module path + token

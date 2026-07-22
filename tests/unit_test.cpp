@@ -131,7 +131,7 @@ signing_ca_slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-root_arc_oid = "1.3.6.1.4.1.00000"
+root_arc_oid = "1.3.6.1.4.1.32473"
 )";
 
 std::string with(const std::string &from, const std::string &to,
@@ -155,10 +155,10 @@ bool loads(const std::string &toml) {
 TEST_CASE("cfg::load accepts a valid config") { CHECK(loads(VALID)); }
 
 TEST_CASE("cfg::load: root_arc_oid is optional") {
-  CHECK(loads(with("root_arc_oid = \"1.3.6.1.4.1.00000\"\n", "")));
+  CHECK(loads(with("root_arc_oid = \"1.3.6.1.4.1.32473\"\n", "")));
   // Present means valid: empty or malformed values are still rejected.
   CHECK_FALSE(loads(
-      with("root_arc_oid = \"1.3.6.1.4.1.00000\"", "root_arc_oid = \"\"")));
+      with("root_arc_oid = \"1.3.6.1.4.1.32473\"", "root_arc_oid = \"\"")));
 }
 
 TEST_CASE("cfg::load parses values") {
@@ -169,7 +169,7 @@ TEST_CASE("cfg::load parses values") {
   REQUIRE(c.has_value());
   CHECK(c->repository_host == "pki.example.ca");
   CHECK(c->ee_valid_days == 397);
-  CHECK(c->root_arc_oid == "1.3.6.1.4.1.00000");
+  CHECK(c->root_arc_oid == "1.3.6.1.4.1.32473");
   CHECK(c->ee_curve == "secp256r1");
   CHECK(c->root_ca_curve == "secp384r1");
   // Slugs derive from the prefixes at generation 1; never parsed.
@@ -191,7 +191,7 @@ TEST_CASE("cfg::load rejects invalid configs") {
   CHECK_FALSE(loads(with("ee_digest = \"SHA-256\"", "ee_digest = \"sha256\"")));
   CHECK_FALSE(loads(
       with("root_ca_curve = \"secp384r1\"", "root_ca_curve = \"rsa2048\"")));
-  CHECK_FALSE(loads(with("1.3.6.1.4.1.00000", "1.a.b")));
+  CHECK_FALSE(loads(with("1.3.6.1.4.1.32473", "1.a.b")));
   CHECK_FALSE(loads(with("country_code = \"CA\"", "country_code = \"CAN\"")));
   CHECK_FALSE(loads(with("ee_valid_days = 397", "ee_valid_days = 500")));
   CHECK_FALSE(loads(with("org_name = \"Example\"", "org_name = \"\"")));
@@ -293,7 +293,7 @@ struct TempPki {
     config.org_name = "Example";
     config.country_code = "CA";
     config.repository_host = "pki.unit.ca";
-    config.root_arc_oid = "1.3.6.1.4.1.00000";
+    config.root_arc_oid = "1.3.6.1.4.1.32473";
     config.root_ca_cn = "UT Root E1";
     config.root_ca_curve = "secp256r1"; // canonical (Config built by hand,
     config.root_ca_digest = "SHA-256";  // no cfg::load validation here)
