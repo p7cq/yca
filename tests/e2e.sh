@@ -249,6 +249,53 @@ NOW="$(date +%s)"
 w refresh crl bogus >/dev/null 2>&1 &&
   bad "bogus refresh scope accepted" || ok "bogus refresh scope rejected"
 
+# --- CRL pruning (RFC 5280 3.3: an entry leaves the CRL only after one
+# scheduled CRL issued beyond the certificate's validity carried it) ---
+if command -v sqlite3 >/dev/null 2>&1; then
+  w create server --cn p1.ca >/dev/null 2>&1
+  w create server --cn p2.ca >/dev/null 2>&1
+  w revoke server --cn p1.ca --reason superseded >/dev/null 2>&1
+  w revoke server --cn p2.ca --reason superseded >/dev/null 2>&1
+  DB="$PKI/ca-store.db"
+  CRLF="$PKI/ca/ca-e1.crl"
+  s2=$(sqlite3 "$DB" "SELECT serial FROM cert_index WHERE cn='p2.ca'")
+  entries() {
+    openssl crl -inform DER -in "$CRLF" -noout -text 2>/dev/null |
+      grep -c 'Serial Number'
+  }
+  N0=$(entries)
+  # p1 "expired" long before the current CRL's thisUpdate: that CRL was its
+  # one post-expiry appearance, so the next refresh drops it; p2 stays.
+  sqlite3 "$DB" "UPDATE cert_index SET not_after=1 WHERE cn='p1.ca'"
+  w refresh crl signing >/dev/null 2>&1
+  [ "$(entries)" -eq "$((N0 - 1))" ] &&
+    ok "refresh prunes an entry expired before the previous CRL" ||
+    bad "pruning missed ($(entries) entries, expected $((N0 - 1)))"
+  openssl crl -inform DER -in "$CRLF" -noout -text 2>/dev/null |
+    grep -qi "$s2" &&
+    ok "unexpired entry survives pruning" || bad "unexpired entry lost"
+  # Boundary: expiry exactly at the previous CRL's thisUpdate is kept (the
+  # final CRL must be issued strictly beyond the validity period); the next
+  # refresh, issued after the expiry, is the final appearance - the one
+  # after that drops the entry.
+  lu=$(openssl crl -inform DER -in "$CRLF" -noout -lastupdate | cut -d= -f2)
+  sqlite3 "$DB" "UPDATE cert_index SET not_after=$(epoch "$lu") \
+    WHERE cn='p2.ca'"
+  sleep 2 # let the next thisUpdate move strictly past not_after
+  w refresh crl signing >/dev/null 2>&1
+  openssl crl -inform DER -in "$CRLF" -noout -text 2>/dev/null |
+    grep -qi "$s2" &&
+    ok "expiry at prev thisUpdate keeps the entry one more CRL" ||
+    bad "boundary entry dropped early"
+  w refresh crl signing >/dev/null 2>&1
+  openssl crl -inform DER -in "$CRLF" -noout -text 2>/dev/null |
+    grep -qi "$s2" &&
+    bad "post-expiry entry never dropped" ||
+    ok "entry dropped on the CRL after its final appearance"
+else
+  echo "  skip: CRL pruning (sqlite3 CLI not installed)"
+fi
+
 # --- config validation ---
 sed 's/SHA-384/SHA-999/' "$CFG" >"$WORK/bad.toml"
 "$BIN" --config "$WORK/bad.toml" --store "$WORK/pki2" init >/dev/null 2>&1 &&

@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -292,6 +293,38 @@ uint32_t crl_next_update(const Botan::X509_Certificate &issuer,
 } // namespace detail
 
 using namespace detail;
+
+bool crl_entry_prunable(std::size_t prev_this_update,
+                        std::optional<std::size_t> not_after) {
+  return not_after && *not_after < prev_this_update;
+}
+
+namespace detail {
+
+// The entries of `prev` minus those already past their final scheduled
+// appearance (the ca::crl_entry_prunable rule): every entry considered was
+// read from `prev`, so `prev` itself is the post-expiry CRL the RFC
+// requires. One indexed query (ci_sna) collects the prunable serials; an
+// entry whose serial is not in cert_index never lands in the set, so it is
+// kept forever, matching the rule's unknown-serial case.
+std::vector<Botan::CRL_Entry> prune_crl_entries(Botan::SQL_Database &db,
+                                                const Botan::X509_CRL &prev) {
+  const auto tu =
+      static_cast<std::size_t>(prev.this_update().time_since_epoch());
+  std::unordered_set<std::string> prunable;
+  auto q = db.new_statement(
+      "SELECT serial FROM cert_index WHERE status='revoked' AND not_after<?1");
+  q->bind(1, tu);
+  while (q->step())
+    prunable.insert(q->get_str(0));
+  std::vector<Botan::CRL_Entry> kept;
+  for (const Botan::CRL_Entry &e : prev.get_revoked())
+    if (!prunable.contains(Botan::hex_encode(e.serial_number())))
+      kept.push_back(e);
+  return kept;
+}
+
+} // namespace detail
 
 namespace {
 
@@ -1670,11 +1703,15 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   }
 
   Botan::X509_CA ca(*sign_cert, *sign_key, config.signing_ca_digest, rng);
-  const std::vector<Botan::CRL_Entry> entries{
-      Botan::CRL_Entry(*target_cert, *reason)};
-  const auto updated =
-      ca.update_crl(prev, entries, rng,
-                    crl_next_update(*sign_cert, app::crl_next_update_days));
+  // Carry forward only the unexpired entries (RFC 5280 3.3 pruning), plus
+  // the new one; make_crl continues the crlNumber that update_crl would.
+  auto entries = prune_crl_entries(*dbh, prev);
+  const std::size_t pruned = prev.get_revoked().size() - entries.size();
+  entries.emplace_back(*target_cert, *reason);
+  const auto updated = ca.make_crl(
+      entries, prev.crl_number() + 1, rng, std::chrono::system_clock::now(),
+      std::chrono::seconds(
+          crl_next_update(*sign_cert, app::crl_next_update_days)));
   if (!write_der(crl_path, updated)) {
     log::error("could not write CRL {}", crl_path.string());
     return false;
@@ -1695,6 +1732,9 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
             target,
             target_cert->subject_dn().get_first_attribute("X520.CommonName"),
             Botan::hex_encode(target_cert->serial_number()), reason_str);
+  if (pruned)
+    log::info("pruned {} expired entries from CRL #{}", pruned,
+              updated.crl_number());
   return true;
 }
 
@@ -1796,11 +1836,15 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
   ensure_cert_index(*dbh);
   Botan::X509_CRL prev(root_crl_path.string());
   Botan::X509_CA root_ca(*root_cert, *root_key, config.root_ca_digest, rng);
-  const std::vector<Botan::CRL_Entry> entries{
-      Botan::CRL_Entry(*victim_cert, *reason)};
-  const auto updated = root_ca.update_crl(
-      prev, entries, rng,
-      crl_next_update(*root_cert, app::root_crl_next_update_days));
+  // Same RFC 5280 3.3 pruning as the signing CRL: an expired signing CA
+  // generation leaves the root CRL after its final scheduled appearance.
+  auto entries = prune_crl_entries(*dbh, prev);
+  const std::size_t pruned = prev.get_revoked().size() - entries.size();
+  entries.emplace_back(*victim_cert, *reason);
+  const auto updated = root_ca.make_crl(
+      entries, prev.crl_number() + 1, rng, std::chrono::system_clock::now(),
+      std::chrono::seconds(
+          crl_next_update(*root_cert, app::root_crl_next_update_days)));
   if (!write_der(root_crl_path, updated)) {
     log::error("could not write the root CRL {}", root_crl_path.string());
     return false;
@@ -1824,6 +1868,8 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
             victim->gen, victim->cn,
             Botan::hex_encode(victim_cert->serial_number()), reason_str,
             updated.crl_number());
+  if (pruned)
+    log::info("pruned {} expired entries from the root CRL", pruned);
   log::to_stderr("publish the root CRL now: relying parties may keep serving "
                  "a cached one until its nextUpdate ({})",
                  updated.next_update().readable_string());
@@ -1917,9 +1963,10 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
     }
 
   // Same lock discipline as revoke: read-CRL -> write-CRL under the write
-  // lock, so a refresh cannot lose a concurrent revocation's entry.
-  // update_crl with no new entries IS the refresh: same revocation set,
-  // crlNumber+1, fresh thisUpdate/nextUpdate.
+  // lock, so a refresh cannot lose a concurrent revocation's entry. The
+  // refresh re-signs the unexpired revocation set (RFC 5280 3.3 pruning,
+  // see ca.h crl_entry_prunable) with crlNumber+1 and a fresh
+  // thisUpdate/nextUpdate.
   begin_write(*dbh);
   bool ok = true;
   std::string refreshed;
@@ -1927,11 +1974,16 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
     const fs::path crl_path = ca_dir / (j.ca.slug + ".crl");
     Botan::X509_CRL prev(crl_path.string());
     Botan::X509_CA ca(j.cert, *j.key, j.digest, rng);
-    const auto next =
-        ca.update_crl(prev, {}, rng, crl_next_update(j.cert, j.horizon));
+    const auto kept = prune_crl_entries(*dbh, prev);
+    const std::size_t pruned = prev.get_revoked().size() - kept.size();
+    const auto next = ca.make_crl(
+        kept, prev.crl_number() + 1, rng, std::chrono::system_clock::now(),
+        std::chrono::seconds(crl_next_update(j.cert, j.horizon)));
     ok = write_der(crl_path, next) && ok;
-    refreshed += std::format("{}{} #{}", refreshed.empty() ? "" : ", ",
-                             j.ca.slug, next.crl_number());
+    refreshed += std::format(
+        "{}{} #{}{}", refreshed.empty() ? "" : ", ", j.ca.slug,
+        next.crl_number(),
+        pruned ? std::format(" (pruned {})", pruned) : std::string());
   }
   commit_write(*dbh);
   if (!ok) {

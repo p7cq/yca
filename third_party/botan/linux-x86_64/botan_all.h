@@ -40511,12 +40511,14 @@ class BOTAN_PUBLIC_API(2, 0) X509_CA final {
 
       ~X509_CA();
 
-   private:
+   public:
       X509_CRL make_crl(const std::vector<CRL_Entry>& entries,
                         uint32_t crl_number,
                         RandomNumberGenerator& rng,
                         std::chrono::system_clock::time_point issue_time,
                         std::chrono::seconds next_update) const;
+
+   private:
 
       AlgorithmIdentifier m_ca_sig_algo;
       X509_Certificate m_ca_cert;

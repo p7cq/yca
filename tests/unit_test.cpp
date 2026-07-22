@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 
 #include <botan/botan_all.h>
 
@@ -818,6 +819,72 @@ TEST_CASE("ca::refresh_crl re-signs the scoped CRLs in place") {
   const Botan::X509_CRL root_r(root_path), sign_r(sign_path);
   CHECK(root_r.crl_number() == root_s.crl_number() + 1);
   CHECK(sign_r.crl_number() == sign_s.crl_number());
+}
+
+TEST_CASE("crl_entry_prunable: strictly-beyond-expiry rule") {
+  CHECK(ca::crl_entry_prunable(100, 99));
+  // Boundary: the final CRL must be issued strictly beyond the validity.
+  CHECK_FALSE(ca::crl_entry_prunable(100, 100));
+  CHECK_FALSE(ca::crl_entry_prunable(100, 101));
+  // A serial unknown to cert_index is kept forever (conservative).
+  CHECK_FALSE(ca::crl_entry_prunable(100, std::nullopt));
+}
+
+TEST_CASE("CRL pruning: an expired entry leaves after its final appearance") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+  REQUIRE(
+      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "p1.ut.ca", {}));
+  REQUIRE(
+      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "p2.ut.ca", {}));
+  REQUIRE(ca::revoke(*eff, t.dir, kPass, "server", "p1.ut.ca", "superseded"));
+  REQUIRE(ca::revoke(*eff, t.dir, kPass, "server", "p2.ut.ca", "superseded"));
+
+  const auto sign_path = (t.dir / "ca" / "ut-ca-e1.crl").string();
+  REQUIRE(Botan::X509_CRL(sign_path).get_revoked().size() == 2);
+
+  auto dbh = ca::detail::open_store(ca::detail::store_path(t.dir));
+  auto serial_of = [&](const std::string &cn) {
+    auto q = dbh->new_statement("SELECT serial FROM cert_index WHERE cn=?1");
+    q->bind(1, cn);
+    REQUIRE(q->step());
+    return q->get_str(0);
+  };
+  auto backdate = [&](const std::string &cn, std::size_t not_after) {
+    auto u =
+        dbh->new_statement("UPDATE cert_index SET not_after=?1 WHERE cn=?2");
+    u->bind(1, not_after);
+    u->bind(2, cn);
+    u->spin();
+  };
+  const std::string s2 = serial_of("p2.ut.ca");
+
+  // p1 expired long before the current CRL's thisUpdate: that CRL was its
+  // one post-expiry appearance, so the next refresh drops it; p2 stays.
+  backdate("p1.ut.ca", 1);
+  REQUIRE(ca::refresh_crl(*eff, t.dir, kPass, ca::CrlScope::Signing));
+  {
+    const Botan::X509_CRL crl(sign_path);
+    REQUIRE(crl.get_revoked().size() == 1);
+    CHECK(Botan::hex_encode(crl.get_revoked()[0].serial_number()) == s2);
+  }
+
+  // Boundary: expiry exactly at the previous CRL's thisUpdate is kept (the
+  // final CRL must be issued strictly beyond the validity period); the
+  // refresh after that one, issued past the expiry, is the final
+  // appearance, and the next refresh drops the entry.
+  const auto tu = static_cast<std::size_t>(
+      Botan::X509_CRL(sign_path).this_update().time_since_epoch());
+  backdate("p2.ut.ca", tu);
+  // X509 time has 1s resolution: let the next thisUpdate move strictly
+  // past not_after before refreshing.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+  REQUIRE(ca::refresh_crl(*eff, t.dir, kPass, ca::CrlScope::Signing));
+  CHECK(Botan::X509_CRL(sign_path).get_revoked().size() == 1); // kept
+  REQUIRE(ca::refresh_crl(*eff, t.dir, kPass, ca::CrlScope::Signing));
+  CHECK(Botan::X509_CRL(sign_path).get_revoked().empty()); // dropped
 }
 
 TEST_CASE("CRL nextUpdate is clamped to the issuer's notAfter") {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -138,14 +139,26 @@ bool revoke_ca(const cfg::Config &config,
 enum class CrlScope { Root, Signing, All };
 
 // Re-signs the published CRLs selected by `scope` from their current entry
-// sets: same revocations, crlNumber+1, fresh thisUpdate/nextUpdate. Run
-// each scope on a schedule shorter than its nextUpdate horizon (see
-// share/systemd/yca-crl-refresh.* for signing, daily, and
-// share/systemd/yca-root-crl-refresh.* for root, quarterly) so relying
-// parties never see a stale CRL.
+// sets: same unexpired revocations, crlNumber+1, fresh thisUpdate/nextUpdate.
+// Entries whose certificate has expired are pruned per RFC 5280 3.3 (see
+// crl_entry_prunable), so a CRL is bounded by the revoked-and-unexpired set,
+// not by the CA's age. Run each scope on a schedule shorter than its
+// nextUpdate horizon (see share/systemd/yca-crl-refresh.* for signing,
+// daily, and share/systemd/yca-root-crl-refresh.* for root, quarterly) so
+// relying parties never see a stale CRL.
 bool refresh_crl(const cfg::Config &config,
                  const std::filesystem::path &store_dir,
                  std::string_view secret, CrlScope scope = CrlScope::All);
+
+// RFC 5280 3.3 pruning decision for one CRL entry: an entry may leave the
+// CRL once it has appeared on one scheduled CRL issued beyond the
+// certificate's validity. `prev_this_update` is the previous CRL's
+// thisUpdate (that CRL carried the entry); `not_after` is the certificate's
+// expiry, nullopt when the serial is unknown to cert_index (kept forever,
+// conservative). Boundary: expiry exactly at thisUpdate is kept - the CRL
+// must be issued strictly beyond the validity period.
+bool crl_entry_prunable(std::size_t prev_this_update,
+                        std::optional<std::size_t> not_after);
 
 // Writes a certificate to stdout. `profile` is "ca", "server", or "client".
 // For "ca", `selector` is an alias ("root-ca"/"signing-ca") or the CA CN; for

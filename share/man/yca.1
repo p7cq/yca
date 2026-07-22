@@ -115,8 +115,12 @@ outlive the root. Prints the new CN on standard output.
 .TP
 \fBrefresh\fR \fIcrl\fR [\fBroot\fR|\fBsigning\fR|\fBall\fR]
 Re-sign the published CRLs selected by the scope (default \fBall\fR) from
-their current entry sets: same revocations, crlNumber+1, fresh
-thisUpdate/nextUpdate. A scope covers every live generation of that CA:
+their current entry sets: same unexpired revocations, crlNumber+1, fresh
+thisUpdate/nextUpdate. Entries whose certificate has expired are pruned
+per RFC 5280 3.3 (an entry leaves the CRL only after one scheduled CRL
+issued beyond the certificate's validity has carried it), so a CRL is
+bounded by the revoked-and-unexpired set, not by the CA's age; the store
+keeps every revocation. A scope covers every live generation of that CA:
 after a rotation the retiring predecessor keeps publishing its own CRL
 next to the active one's, and an expired generation is skipped. The signing CRL promises re-publication within 7
 days, the root CRL within 183 days (both clamped to the issuing CA's
