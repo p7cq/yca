@@ -27,3 +27,6 @@ go.work.sum
 /build.sh
 /install.sh
 /tools/
+
+# Claude
+/.claude/

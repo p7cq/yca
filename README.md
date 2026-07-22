@@ -1,1 +1,1 @@
-# yca - a private (non) CA
+# yca - a private CA
