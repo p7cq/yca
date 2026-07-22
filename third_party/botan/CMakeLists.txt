@@ -4,14 +4,15 @@
 # the same way).
 if(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
   set(BOTAN_AMALGAMATION macos-arm64/botan_all.cpp)
-elseif(UNIX
-       AND NOT APPLE
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux"
        AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
   set(BOTAN_AMALGAMATION linux-x86_64/botan_all.cpp)
-elseif(UNIX
-       AND NOT APPLE
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux"
        AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
   set(BOTAN_AMALGAMATION linux-aarch64/botan_all.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
+  set(BOTAN_AMALGAMATION freebsd-x86_64/botan_all.cpp)
 else()
   message(FATAL_ERROR "No vendored Botan amalgamation for "
                       "${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}; "
@@ -21,3 +22,7 @@ endif()
 add_library(botan OBJECT ${BOTAN_AMALGAMATION})
 target_include_directories(botan SYSTEM PUBLIC ${CMAKE_CURRENT_LIST_DIR})
 target_compile_options(botan PRIVATE -stdlib=libc++)
+# botan_all.cpp includes <sqlite3.h>; on FreeBSD that lives in
+# /usr/local/include, which the compiler does not search by default.
+find_package(SQLite3 REQUIRED)
+target_link_libraries(botan PRIVATE SQLite3::SQLite3)

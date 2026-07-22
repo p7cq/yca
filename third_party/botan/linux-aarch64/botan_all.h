@@ -6029,8 +6029,8 @@ class BOTAN_PUBLIC_API(3, 12) IPv4Subnet final {
 
       /**
       * Bytes for use in a DER-encoded GeneralName iPAddress field:
-      *  - 4 bytes (the address) if is_host() - SAN form per RFC 5280 4.2.1.6.
-      *  - 8 bytes (address || netmask) otherwise - name constraint form per RFC 5280 4.2.1.10.
+      *  - 4 bytes (the address) if is_host() — SAN form per RFC 5280 4.2.1.6.
+      *  - 8 bytes (address || netmask) otherwise — name constraint form per RFC 5280 4.2.1.10.
       */
       std::vector<uint8_t> serialize() const;
 

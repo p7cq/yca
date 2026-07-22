@@ -12,7 +12,8 @@ MODULE=""
 for m in /usr/lib/softhsm/libsofthsm2.so /usr/lib/pkcs11/libsofthsm2.so \
   /usr/lib/x86_64-linux-gnu/softhsm/libsofthsm2.so \
   /opt/homebrew/lib/softhsm/libsofthsm2.so \
-  /usr/lib64/softhsm/libsofthsm2.so; do
+  /usr/lib64/softhsm/libsofthsm2.so \
+  /usr/local/lib/softhsm/libsofthsm2.so; do
   [ -f "$m" ] && MODULE="$m" && break
 done
 if ! command -v softhsm2-util >/dev/null 2>&1 || [ -z "$MODULE" ]; then

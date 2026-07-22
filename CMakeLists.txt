@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.1)
+cmake_minimum_required(VERSION 3.31...4.1)
 
 file(STRINGS VERSION YCA_VERSION LIMIT_COUNT 1)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS VERSION)
@@ -50,6 +50,16 @@ if(APPLE)
   set(CMAKE_INSTALL_RPATH "${CMAKE_BUILD_RPATH}")
 endif()
 
+# Find SQLite3 before third_party/botan: the imported target must be created
+# in this directory so it is visible both here and in the subdirectory (with
+# CMake < 4 a target created only in the subdirectory is not usable here).
+find_package(SQLite3 REQUIRED)
+# CMake < 4.3 defines only the legacy SQLite::SQLite3 target name; 4.3+
+# defines SQLite3::SQLite3 and deprecates the legacy one.
+if(NOT TARGET SQLite3::SQLite3)
+  add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
+endif()
+
 # Third party
 add_subdirectory(third_party/botan)
 
@@ -67,8 +77,6 @@ add_executable(${PROJECT_NAME}-seed src/seed_main.cpp src/seed.cpp
                                     src/config.cpp src/ca.cpp src/p11.cpp
                                     src/util.cpp)
 
-find_package(SQLite3 REQUIRED)
-
 foreach(tgt IN ITEMS ${PROJECT_NAME} ${PROJECT_NAME}-seed)
   target_compile_definitions(${tgt} PRIVATE APP_VERSION="${PROJECT_VERSION}")
   target_include_directories(${tgt} PRIVATE "${PROJECT_SOURCE_DIR}/src")
@@ -80,7 +88,9 @@ foreach(tgt IN ITEMS ${PROJECT_NAME} ${PROJECT_NAME}-seed)
   target_link_options(${tgt} PRIVATE -stdlib=libc++ ${YCA_SAN_FLAGS}
                       ${YCA_COV_LINK})
   target_link_libraries(${tgt} PRIVATE botan SQLite3::SQLite3)
-  if(UNIX AND NOT APPLE)
+  # FreeBSD links libc++ (over libcxxrt) via -stdlib=libc++ alone; it has no
+  # separate libc++abi.
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(${tgt} PRIVATE c++ c++abi)
   endif()
 endforeach()
@@ -107,7 +117,7 @@ target_compile_options(${PROJECT_NAME}_tests
 target_link_options(${PROJECT_NAME}_tests PRIVATE -stdlib=libc++
                     ${YCA_SAN_FLAGS})
 target_link_libraries(${PROJECT_NAME}_tests PRIVATE botan SQLite3::SQLite3)
-if(UNIX AND NOT APPLE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_libraries(${PROJECT_NAME}_tests PRIVATE c++ c++abi)
 endif()
 
