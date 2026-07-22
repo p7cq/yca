@@ -138,12 +138,14 @@ most of its 5-minute validity remains, rotating it otherwise. \fB\-\-cn\fR
 \fB\-\fR reads the CN from standard input (piping from \fBsign\fR). Needs no
 secret.
 .TP
-\fBlist\fR \fIfilter\fR [\fB\-\-tsv\fR]
+\fBlist\fR \fIfilter\fR [\fB\-\-tsv\fR] [\fB\-\-limit\fR \fIN\fR]
 List certificates matching exactly one filter: \fB\-\-expiring\fR [\fIN\fR],
 \fB\-\-expired\fR [\fIN\fR], \fB\-\-revoked\fR [\fIN\fR], \fB\-\-last\fR
 [\fIN\fR] (window in days, 1\-398, default 30), or \fB\-\-cn\fR
 \fIcn\fR|\fBroot-ca\fR|\fBsigning-ca\fR. Columns: CN, kind, serial
 (truncated), expiry, status. \fB\-\-tsv\fR emits tab-separated output.
+At most \fB\-\-limit\fR rows are printed (default 50, \fB0\fR for all); a
+truncated listing says so on standard error.
 .SH ENVIRONMENT
 .TP
 .B CA_STORE_PASSPHRASE

@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <iostream>
 #include <optional>
 #include <string>
@@ -169,6 +170,11 @@ int main(int argc, char **argv) {
   auto *lo_cn =
       list->add_option("--cn", l_cn, "by CN (root-ca|signing-ca or literal)");
   list->add_flag("--tsv", l_tsv, "tab-separated output");
+  int l_limit = app::default_list_limit;
+  list->add_option("--limit", l_limit,
+                   std::format("max rows, 0 for all (default {})",
+                               app::default_list_limit))
+      ->check(CLI::NonNegativeNumber);
 
   CLI11_PARSE(app, argc, argv);
 
@@ -355,7 +361,9 @@ int main(int argc, char **argv) {
       }
       if (days < 1) // no value: CLI11 leaves 0, use the default
         days = app::default_list_window_days;
-      return ca::list_certs(store_dir, filter, days, l_cn, l_tsv) ? 0 : 1;
+      return ca::list_certs(store_dir, filter, days, l_cn, l_tsv, l_limit)
+                 ? 0
+                 : 1;
     }
 
     return 0;

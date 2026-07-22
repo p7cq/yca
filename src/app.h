@@ -39,6 +39,9 @@ inline constexpr std::size_t spiffe_id_max = 2048;
 // Default window for the `list` time filters, in days.
 inline constexpr int default_list_window_days = 30;
 
+// Default row cap for `list` output; --limit overrides, 0 lifts it.
+inline constexpr int default_list_limit = 50;
+
 // The --valid floor: below 5 minutes clock skew makes a certificate dead
 // on arrival. The ceiling is the effective ee_valid_days policy (the
 // industry model: the CA sets a maximum, a request may always be shorter).

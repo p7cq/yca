@@ -317,6 +317,14 @@ w list --cn root-ca 2>/dev/null | grep -q "ETS Root E1" &&
   ok "list --cn root-ca resolves the CA" || bad "list --cn root-ca"
 w list --last --tsv 2>/dev/null | head -1 | grep -q "$(printf 'CN\tKIND\tSERIAL')" &&
   ok "list --tsv tab-separated" || bad "list tsv"
+n=$(w list --last --limit 1 --tsv 2>/dev/null | tail -n +2 | wc -l)
+[ "$n" -eq 1 ] && ok "list --limit caps the rows" || bad "list --limit rows=$n"
+w list --last --limit 1 --tsv 2>&1 >/dev/null | grep -q "truncated" &&
+  ok "list --limit truncation notice on stderr" || bad "list truncation notice"
+n=$(w list --last --limit 0 --tsv 2>/dev/null | tail -n +2 | wc -l)
+[ "$n" -ge 2 ] && ok "list --limit 0 lifts the cap" || bad "list --limit 0 rows=$n"
+w list --last --limit -1 >/dev/null 2>&1 && bad "list --limit -1 accepted" ||
+  ok "list --limit rejects negatives"
 w list 2>/dev/null && bad "list with no filter accepted" ||
   ok "list requires exactly one filter"
 # window cap = max ee_valid_days (398): --expiring can cover a full EE

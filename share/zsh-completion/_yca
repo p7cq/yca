@@ -91,7 +91,8 @@ _yca() {
         '(--expiring --expired --last --cn)--revoked=-[revoked within last N days]::days:' \
         '(--expiring --expired --revoked --cn)--last=-[issued within last N days]::days:' \
         '(--expiring --expired --revoked --last)--cn[by CN or CA alias]:cn:(root-ca signing-ca)' \
-        '--tsv[tab-separated output]'
+        '--tsv[tab-separated output]' \
+        '--limit[max rows, 0 for all (default 50)]:limit:'
       ;;
     esac
     ;;

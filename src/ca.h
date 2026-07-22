@@ -158,9 +158,11 @@ bool get_cert(const cfg::Config &config, const std::filesystem::path &store_dir,
 // Lists certificates via cert_index. `filter` is one of "expiring", "expired",
 // "revoked", "last" (windowed by `days`, ordered) or "cn" (by `cn`, which may
 // be a CA alias root-ca/signing-ca). Columns: CN, kind, truncated serial,
-// expiry, status. `tsv` for tab-separated output. Read-only; no passphrase.
+// expiry, status. `tsv` for tab-separated output. At most `limit` rows are
+// printed (0 = unlimited); a truncated listing says so on stderr. Read-only;
+// no passphrase.
 bool list_certs(const std::filesystem::path &store_dir,
                 const std::string &filter, int days, const std::string &cn,
-                bool tsv);
+                bool tsv, int limit);
 
 } // namespace ca

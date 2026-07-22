@@ -219,7 +219,12 @@ void ensure_cert_index(Botan::SQL_Database &db) {
         "CREATE INDEX IF NOT EXISTS ci_nb ON cert_index(not_before)",
         "CREATE INDEX IF NOT EXISTS ci_st ON cert_index(status, revoked_at)",
         "CREATE INDEX IF NOT EXISTS ci_cn ON cert_index(cn)",
-        "CREATE INDEX IF NOT EXISTS ci_sn ON cert_index(serial)"})
+        "CREATE INDEX IF NOT EXISTS ci_sn ON cert_index(serial)",
+        // list: expiring/expired ride (status, not_after) instead of sorting
+        // every active row; the CA aliases ride (kind, not_before) instead of
+        // scanning the whole index for a handful of CA generations.
+        "CREATE INDEX IF NOT EXISTS ci_sna ON cert_index(status, not_after)",
+        "CREATE INDEX IF NOT EXISTS ci_knb ON cert_index(kind, not_before)"})
     db.new_statement(ix)->spin();
 }
 
@@ -2043,7 +2048,7 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
 }
 
 bool list_certs(const fs::path &store_dir, const std::string &filter, int days,
-                const std::string &cn, bool tsv) {
+                const std::string &cn, bool tsv, int limit) {
   const fs::path db = store_path(store_dir);
   if (!fs::exists(db)) {
     log::error("not initialized; run '{} init'", app::name);
@@ -2055,34 +2060,47 @@ bool list_certs(const fs::path &store_dir, const std::string &filter, int days,
   const std::size_t win = util::days_to_seconds(days);
   const std::string cols =
       "SELECT cn,kind,serial,not_after,status FROM cert_index ";
+  // One row past the cap detects truncation without a COUNT(*) pass; the
+  // ORDER BY of every filter rides an index, so the query stops early.
+  const std::string lim = limit > 0 ? std::format(" LIMIT {}", limit + 1) : "";
   std::shared_ptr<Botan::SQL_Database::Statement> q;
   if (filter == "expiring") {
-    q = dbh->new_statement(cols + "WHERE status='active' AND not_after>?1 AND "
-                                  "not_after<=?2 ORDER BY not_after DESC");
+    q = dbh->new_statement(cols +
+                           "WHERE status='active' AND not_after>?1 AND "
+                           "not_after<=?2 ORDER BY not_after DESC" +
+                           lim);
     q->bind(1, now);
     q->bind(2, now + win);
   } else if (filter == "expired") {
-    q = dbh->new_statement(cols + "WHERE status='active' AND not_after<?1 AND "
-                                  "not_after>=?2 ORDER BY not_after DESC");
+    q = dbh->new_statement(cols +
+                           "WHERE status='active' AND not_after<?1 AND "
+                           "not_after>=?2 ORDER BY not_after DESC" +
+                           lim);
     q->bind(1, now);
     q->bind(2, now - win);
   } else if (filter == "revoked") {
-    q = dbh->new_statement(cols + "WHERE status='revoked' AND revoked_at>=?1 "
-                                  "ORDER BY revoked_at DESC");
+    q = dbh->new_statement(cols +
+                           "WHERE status='revoked' AND revoked_at>=?1 "
+                           "ORDER BY revoked_at DESC" +
+                           lim);
     q->bind(1, now - win);
   } else if (filter == "last") {
-    q = dbh->new_statement(cols + "WHERE not_before<=?1 AND not_before>=?2 "
-                                  "ORDER BY not_before DESC");
+    q = dbh->new_statement(cols +
+                           "WHERE not_before<=?1 AND not_before>=?2 "
+                           "ORDER BY not_before DESC" +
+                           lim);
     q->bind(1, now);
     q->bind(2, now - win);
   } else { // cn
     // A CA alias selects the role, so every generation of it is listed; a
     // literal CN selects exactly that name.
     if (cn == "root-ca" || cn == "signing-ca") {
-      q = dbh->new_statement(cols + "WHERE kind=?1 ORDER BY not_before DESC");
+      q = dbh->new_statement(cols + "WHERE kind=?1 ORDER BY not_before DESC" +
+                             lim);
       q->bind(1, std::string(cn == "root-ca" ? "root" : "signing"));
     } else {
-      q = dbh->new_statement(cols + "WHERE cn=?1 ORDER BY not_before DESC");
+      q = dbh->new_statement(cols + "WHERE cn=?1 ORDER BY not_before DESC" +
+                             lim);
       q->bind(1, cn);
     }
   }
@@ -2102,6 +2120,11 @@ bool list_certs(const fs::path &store_dir, const std::string &filter, int days,
              : serial,
          fmt_epoch(na),
          st == "revoked" ? "revoked" : (na < now ? "expired" : "active")});
+  }
+  bool truncated = false;
+  if (limit > 0 && rows.size() > static_cast<std::size_t>(limit)) {
+    rows.resize(static_cast<std::size_t>(limit));
+    truncated = true;
   }
 
   if (tsv) {
@@ -2123,6 +2146,8 @@ bool list_certs(const fs::path &store_dir, const std::string &filter, int days,
       std::print("{:<{}}  {:<{}}  {:<{}}  {:<{}}  {}\n", r.cn, wc, r.kind, wk,
                  r.serial, ws, r.expires, we, r.status);
   }
+  if (truncated)
+    log::to_stderr("(truncated at {} rows)", limit);
   return true;
 }
 
