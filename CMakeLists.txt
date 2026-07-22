@@ -60,6 +60,11 @@ if(NOT TARGET SQLite3::SQLite3)
   add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
 endif()
 
+# Add libthr on FreeBSD for Botan's OS::set_thread_name call to
+# pthread_setname_np. Debug implicitly pulls it in via ASan runtime.
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
 # Third party
 add_subdirectory(third_party/botan)
 
@@ -87,11 +92,16 @@ foreach(tgt IN ITEMS ${PROJECT_NAME} ${PROJECT_NAME}-seed)
                                         ${YCA_COV})
   target_link_options(${tgt} PRIVATE -stdlib=libc++ ${YCA_SAN_FLAGS}
                       ${YCA_COV_LINK})
-  target_link_libraries(${tgt} PRIVATE botan SQLite3::SQLite3)
+  target_link_libraries(${tgt} PRIVATE botan SQLite3::SQLite3 Threads::Threads)
   # FreeBSD links libc++ (over libcxxrt) via -stdlib=libc++ alone; it has no
   # separate libc++abi.
   if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(${tgt} PRIVATE c++ c++abi)
+  endif()
+  # Release binaries ship stripped. ld64 on macOS has no --strip-all; dead
+  # code stripping is handled above via -dead_strip.
+  if(NOT APPLE)
+    target_link_options(${tgt} PRIVATE $<$<CONFIG:Release>:-Wl,--strip-all>)
   endif()
 endforeach()
 
@@ -116,7 +126,8 @@ target_compile_options(${PROJECT_NAME}_tests
                                ${YCA_SAN_FLAGS})
 target_link_options(${PROJECT_NAME}_tests PRIVATE -stdlib=libc++
                     ${YCA_SAN_FLAGS})
-target_link_libraries(${PROJECT_NAME}_tests PRIVATE botan SQLite3::SQLite3)
+target_link_libraries(${PROJECT_NAME}_tests PRIVATE botan SQLite3::SQLite3
+                                                   Threads::Threads)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   target_link_libraries(${PROJECT_NAME}_tests PRIVATE c++ c++abi)
 endif()
