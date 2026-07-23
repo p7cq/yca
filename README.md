@@ -8,11 +8,11 @@ a plain HTTP server; revocation is CRL-only.
 
 ```mermaid
 flowchart LR
-    R[root CA<br/>generation slug root-e1] -->|signs| S[signing CA<br/>generation slug ca-e1]
-    S -->|issues| EE[server / client certificates]
+    R[Root CA<br/>Generation 1 / root-e1] -->|signs| S[Signing CA<br/>Generation 1 / ca-e1]
+    S -->|issues| EE[Server / Client certificates]
     CLI[yca CLI] --> ST[(SQLite store<br/>ca-store.db)]
     ACME[yca-acme daemon] -->|execs yca sign| CLI
-    ST --> PUB[published repository:<br/>CA certs, CRLs]
+    ST --> PUB[Published repository:<br/>CA certs, CRLs]
 ```
 
 ## Limitations
@@ -29,17 +29,23 @@ flowchart LR
   SoftHSM2 and the Nitrokey HSM 2 via OpenSC only. Root and
   signing keys live on the token and never leave it; EE keys are always
   software.
+- **HSM: the root is not truly offline.** Both CA keys share one token,
+  and that token must be available for routine issuance.
+- **Fixed CA subject DN structure.** CA DNs are always `CN` + `O` + `C`
+  (from `root_ca_cn`/`signing_ca_cn`, `org_name`, `country_code`); no
+  other attributes (OU, L, ST, serialNumber) can be added.
+- **Fixed EE subject DN structure.** Simple subject DN for leaf
+  certificates (`CN` only).
 - **Two EE profiles.** `server` and `client` only; no code signing,
   S/MIME or document signing.
 - **CRL-only revocation.** No OCSP responder; status is served by the
   published signing and root CRLs, re-signed on timers.
 - **No root rotation or cross-signing.** The signing CA rotates
-  (`renew signing-ca`); the root does not. See docs/ca-rotation.md.
+  (`renew signing-ca`); the root does not.
 
 ## Configuration (`yca.toml`)
 
-TOML, parsed with toml++. Default path `./yca.toml`, override with
-`--config`.
+Format: TOML; default path `./yca.toml`, override with `--config`.
 
 | Key | Meaning |
 |-----|---------|
@@ -50,12 +56,12 @@ TOML, parsed with toml++. Default path `./yca.toml`, override with
 | `root_ca_curve` | root key curve |
 | `root_ca_digest` | root signature digest (also signs the root CRL) |
 | `root_ca_valid_days` | root certificate validity |
-| `root_ca_slug_prefix` | file/URL identifier; the slug is `<prefix><generation>` (generation 1 at init) |
+| `root_ca_slug_prefix` | file/URL identifier; the slug is `<root_ca_slug_prefix><generation>` (`<generation>` is 1 at init) |
 | `signing_ca_cn` | signing CA display name |
 | `signing_ca_curve` | signing key curve |
 | `signing_ca_digest` | signing signature digest (also signs the signing CRL) |
 | `signing_ca_valid_days` | signing certificate validity |
-| `signing_ca_slug_prefix` | as the root prefix; the two must differ, and not only by trailing digits |
+| `signing_ca_slug_prefix` | file/URL identifier; the slug is `<signing_ca_slug_prefix><generation>` (`<generation>` is 1 at init) |
 | `ee_curve` | EE key curve (`create` generates on it, `sign` requires the CSR key on it) |
 | `ee_digest` | EE signature digest |
 | `ee_valid_days` | default and ceiling for EE validity; at most 398 |
@@ -64,16 +70,23 @@ TOML, parsed with toml++. Default path `./yca.toml`, override with
 | `pkcs11_module` | path to the PKCS#11 provider `.so` (required with `pkcs11`) |
 | `pkcs11_token_label` | token label (required with `pkcs11`) |
 
-Constraints enforced at load: curves/digests from the sets above; slug
+Constraints enforced: curves/digests from the sets above; slug
 prefixes lowercase kebab-case `[a-z0-9.-]`; `repository_host` a DNS host
 name with optional port (no scheme or path);
 `ee_valid_days < signing_ca_valid_days < root_ca_valid_days`.
 
+Slug prefixes: the stable part of the CA slugs (file/URL names, pkcs11 
+key labels). The full slug is `<slug_prefix><generation>` at init;
+signing CA rotation increments its generation.
+
+On-token key labels are the derived slugs: at init an existing keypair
+MUST already be labeled `<slug_prefix>1` to be adopted (curve-checked),
+and a missing one WILL be generated on the token under exactly that
+label (`root-e1` and `ca-e1` in the example below).
+
 `yca init` snapshots the config into the store (`ca_config` table),
-which becomes the source of truth: every field is locked, and later
-edits to `yca.toml` are warned about and ignored. Per-issuance
-flexibility comes from `--valid` instead. `yca get config` prints the
-locked config.
+which becomes the definitive reference: all fields are locked, and later
+edits to `yca.toml` are warned and ignored.
 
 Example:
 
@@ -97,10 +110,11 @@ ee_valid_days = 397
 root_arc_oid = "1.3.6.1.4.1.32473" # org PEN arc (optional)
 
 # HSM-held CA keys (optional; default internal). PIN from CA_HSM_PIN.
-#key_backend = "pkcs11"
-#pkcs11_module = "/usr/lib/opensc-pkcs11.so"
-#pkcs11_token_label = "yts"
+# key_backend = "pkcs11"
+# pkcs11_module = "/usr/lib/opensc-pkcs11.so"
+# pkcs11_token_label = "yts"
 ```
+Note: `1.3.6.1.4.1.32473` is the IANA documentation PEN (RFC 5612), used here as a placeholder.
 
 ## CLI
 
@@ -144,15 +158,62 @@ yca get crl --cn signing-ca --encoding der
 yca list --expiring 30
 ```
 
-Examples for every flow are in docs/operation.md.
+The server certificate issued above, under the example configuration
+(`yca get server --cn server.example.ca | openssl x509 -text -noout`,
+key and signature bytes elided):
+
+```
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            b4:b9:c9:50:8f:04:b6:b3:58:90:6a:0b:16:4c:76:29
+        Signature Algorithm: ecdsa-with-SHA256
+        Issuer: CN=CA E1, C=CA, O=Example 会社
+        Validity
+            Not Before: Jul 23 12:05:36 2026 GMT
+            Not After : Aug 24 12:05:36 2027 GMT
+        Subject: CN=server.example.ca
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (256 bit)
+                pub:
+                    04:...
+                ASN1 OID: prime256v1
+                NIST CURVE: P-256
+        X509v3 extensions:
+            Authority Information Access: 
+                CA Issuers - URI:http://pki.example.ca/ca-e1.crt
+            X509v3 Subject Key Identifier: 
+                AB:B2:86:88:3C:C5:30:4F:B6:9C:CF:44:6F:8F:AE:7B:78:CE:EE:95:C6:6B:D8:F9
+            X509v3 Key Usage: critical
+                Digital Signature
+            X509v3 Subject Alternative Name: 
+                DNS:alt.example.ca, DNS:server.example.ca
+            X509v3 Basic Constraints: critical
+                CA:FALSE
+            X509v3 CRL Distribution Points: 
+                Full Name:
+                  URI:http://pki.example.ca/ca-e1.crl
+
+            X509v3 Certificate Policies: 
+                Policy: 1.3.6.1.4.1.32473.1.1
+            X509v3 Authority Key Identifier: 
+                F7:6F:5F:5C:AD:9F:1F:D7:99:3E:BF:56:B0:31:59:6D:34:9F:87:BF:5B:40:89:40
+            X509v3 Extended Key Usage: 
+                TLS Web Server Authentication
+    Signature Algorithm: ecdsa-with-SHA256
+    Signature Value:
+        ...
+```
 
 ## Operations
 
 - **Install.** `yca/install.sh [prefix]` builds the release variant and
-  installs `yca`, `yca-acme`, man pages, zsh completions, and (as root)
+  installs `yca`, `yca-acme`, man pages, zsh completions, and
   the systemd units. Provisioning (service user, store directory,
-  `yca init`, enabling timers) is deliberately manual: a CA init is a
-  ceremony. Step-by-step walkthrough: docs/install.md.
+  `yca init`, enabling timers) is deliberately manual, as part of the CA
+  init ceremony.
 - **Issuance.** Either `create` (the CA generates the key and delivers
   cert + key under `ee/`) or the CSR pipeline `enroll` / `get nonce` /
   `sign` (the CA never sees the private key; delivery via `get`).
@@ -160,19 +221,18 @@ Examples for every flow are in docs/operation.md.
 - **Revocation and CRLs.** `revoke`, then the CRLs do the rest. Two
   cadences, each on its own systemd timer: the signing CRL promises
   re-publication within 7 days (refreshed daily), the root CRL within
-  183 days (refreshed quarterly, offline-root practice). After
+  183 days (refreshed quarterly - the offline-root cadence, though the
+  root here is not strictly offline, see Limitations). After
   `revoke ca`, run `yca refresh crl root` immediately: relying parties
   may cache the root CRL for up to 6 months.
 - **Publication.** A timer rsyncs `store/ca/` (CA certs `.crt`, CRLs
   `.crl`) to the web root served at `repository_host`; the CDP and
   caIssuers URLs in issued certificates point there.
-- **Rotation.** `renew signing-ca` for the signing CA; design and
-  runbook in docs/ca-rotation.md and docs/operation.md.
+- **Rotation.** `renew signing-ca` for the signing CA.
 - **ACME.** `yca-acme` exposes RFC 8555 issuance for the server profile:
   EAB-gated accounts, http-01 and dns-01 (wildcards included),
   revokeCert, ARI (RFC 9773). It owns only protocol state and execs the
-  `yca` CLI to sign; verified with acme.sh and certbot. Setup: 
-  docs/acme-operation.md.
+  `yca` CLI to sign; verified with acme.sh and certbot.
 
 ## Build and test
 

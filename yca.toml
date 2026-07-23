@@ -1,16 +1,9 @@
-# The whole config is locked into the store at 'yca init'; later edits
-# here are warned and IGNORED (the DB is the source of truth - see it
-# with 'yca get config'). Re-initialize to change anything.
-# ee_valid_days is the issuance ceiling: --valid may request any shorter
-# validity per issuance, down to 5 minutes.
+# Config is locked at 'yca init'; later edits here are warned and ignored.
 
 org_name = "Example 会社"
 country_code = "CA"
 repository_host = "pki.example.ca"
 
-# Slug prefixes: the stable, branded part of the CA slugs (file/URL
-# names, pkcs11 key labels). The full slug is <prefix><generation>:
-# root-e1, ca-e1 at init; rotation increments the generation.
 root_ca_cn = "ETS Root E1"
 root_ca_curve = "secp384r1"
 root_ca_digest = "SHA-384"
@@ -25,17 +18,10 @@ ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
 # Optional: omit to skip the CP extension entirely
-# or replace the documentation PEN below.
+# or replace the PEN below.
 root_arc_oid = "1.3.6.1.4.1.32473"
 
-# Optional: HSM-held CA keys (default internal).
-# On-token key labels are the derived slugs: at init an existing keypair
-# MUST already be labeled <slug_prefix>1 to be adopted (curve-checked),
-# and a missing one WILL be generated on the token under exactly that
-# label (with the prefixes above: root-e1, ca-e1).
-key_backend = "pkcs11"
+# HSM-held CA keys (optional; default internal). PIN from CA_HSM_PIN.
+# key_backend = "pkcs11"
 # pkcs11_module = "/usr/lib/opensc-pkcs11.so"
-# pkcs11_module = "/usr/lib/softhsm/libsofthsm2.so"
-# pkcs11_module = "/usr/local/lib/softhsm/libsofthsm2.so"
-pkcs11_module = "/opt/homebrew/Cellar/softhsm/2.7.0/lib/softhsm/libsofthsm2.so"
-pkcs11_token_label = "yts"
+# pkcs11_token_label = "yts"
