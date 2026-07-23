@@ -152,7 +152,11 @@ public:
     using namespace std::chrono;
     auto end = steady_clock::now();
     auto ms = duration_cast<milliseconds>(end - start).count();
-    log::info("{} took: {}", name, ms);
+    try {
+      log::info("{} took: {}", name, ms);
+    } catch (...) {
+      // OK.
+    }
   }
 };
 } // namespace log
