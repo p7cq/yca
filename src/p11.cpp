@@ -32,22 +32,43 @@ Botan::EC_AffinePoint public_point_of(const P::PKCS11_ECDSA_PublicKey &pub,
   return *pt;
 }
 
+// One loaded module across live Tokens: C_Initialize may run only once,
+// and the split layout opens two Tokens on slots of the same module. The
+// config carries a single pkcs11_module, so one path covers every Token;
+// the module finalizes with the last Token holding it.
+std::shared_ptr<Botan::PKCS11::Module> shared_module(const std::string &path) {
+  static std::weak_ptr<Botan::PKCS11::Module> cache;
+  static std::string loaded;
+  if (auto module = cache.lock()) {
+    if (loaded != path)
+      throw std::runtime_error(std::format(
+          "PKCS#11 module already loaded from {}, cannot also load {}", loaded,
+          path));
+    return module;
+  }
+  auto module = std::make_shared<Botan::PKCS11::Module>(path);
+  cache = module;
+  loaded = path;
+  return module;
+}
+
 } // namespace
 
-Token::Token(const cfg::Config &config, std::string_view pin, bool read_write)
-    : m_module(config.pkcs11_module) {
-  const auto slots = P::Slot::get_available_slots(m_module, true);
+Token::Token(const cfg::Config &config, const std::string &label,
+             std::string_view pin, bool read_write)
+    : m_module(shared_module(config.pkcs11_module)) {
+  const auto slots = P::Slot::get_available_slots(*m_module, true);
   for (const auto id : slots) {
-    P::Slot candidate(m_module, id);
-    if (token_label(candidate.get_token_info()) == config.pkcs11_token_label) {
-      m_slot.emplace(m_module, id);
+    P::Slot candidate(*m_module, id);
+    if (token_label(candidate.get_token_info()) == label) {
+      m_slot.emplace(*m_module, id);
       break;
     }
   }
   if (!m_slot)
     throw std::runtime_error(std::format(
-        "no token labeled '{}' found via {} ({} token(s) present)",
-        config.pkcs11_token_label, config.pkcs11_module, slots.size()));
+        "no token labeled '{}' found via {} ({} token(s) present)", label,
+        config.pkcs11_module, slots.size()));
   m_session.emplace(*m_slot, /*read_only=*/!read_write);
   try {
     m_session->login(P::UserType::User,

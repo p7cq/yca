@@ -26,11 +26,15 @@ flowchart LR
   client). Only the arc is configurable; without it no policies are
   emitted.
 - **Narrow HSM support.** The `pkcs11` key backend is tested against
-  SoftHSM2 and the Nitrokey HSM 2 via OpenSC only. Root and
-  signing keys live on the token and never leave it; EE keys are always
-  software.
-- **HSM: the root is not truly offline.** Both CA keys share one token,
-  and that token must be available for routine issuance.
+  SoftHSM2 and the Nitrokey HSM 2 via OpenSC only. pkcs11-backed CA keys
+  live on their token and never leave it; EE keys are always software.
+- **HSM: single token is the default layout.** With `key_backend =
+  "pkcs11"` alone both CA keys share one token, which must be available
+  for routine issuance - the root is then not truly offline. The split
+  layout (a distinct `pkcs11_root_token_label`) puts the root key on its
+  own token, and the hybrid layout (`root_key_backend = "pkcs11"`,
+  signing key internal) keeps only the root on a token; in both, daily
+  issuance runs without the root token.
 - **Fixed CA subject DN structure.** CA DNs are always `CN` + `O` + `C`
   (from `root_ca_cn`/`signing_ca_cn`, `org_name`, `country_code`); no
   other attributes (OU, L, ST, serialNumber) can be added.
@@ -66,14 +70,16 @@ Format: TOML; default path `./yca.toml`, override with `--config`.
 | `ee_digest` | EE signature digest |
 | `ee_valid_days` | default and ceiling for EE validity; at most 398 |
 | `root_arc_oid` | optional dotted OID arc (org PEN) for CertificatePolicies; absent means no policies extension |
-| `key_backend` | `internal` (default: software keys, passphrase-encrypted in the store) or `pkcs11` |
-| `pkcs11_module` | path to the PKCS#11 provider `.so` (required with `pkcs11`) |
-| `pkcs11_token_label` | token label (required with `pkcs11`) |
+| `key_backend` | `internal` (default: software keys, passphrase-encrypted in the store) or `pkcs11`; shorthand default for the two per-CA backends below |
+| `root_key_backend`, `signing_key_backend` | per-CA backend (`internal`\|`pkcs11`), each defaulting to `key_backend`. `pkcs11` root with `internal` signing is the hybrid layout |
+| `pkcs11_module` | path to the PKCS#11 provider `.so` (required when any backend is `pkcs11`) |
+| `pkcs11_token_label` | signing token label (required when the signing backend is `pkcs11`) |
+| `pkcs11_root_token_label` | root token label; defaults to `pkcs11_token_label` (single-token layout), a different label means split tokens, required explicitly in the hybrid layout |
 
 Constraints enforced: curves/digests from the sets above; slug
 prefixes lowercase kebab-case `[a-z0-9.-]`; `repository_host` a DNS host
 name with optional port (no scheme or path);
-`ee_valid_days < signing_ca_valid_days < root_ca_valid_days`.
+`ee_valid_days < signing_ca_valid_days < root_ca_valid_days`. `internal` root with `pkcs11` signing is rejected (it would protect the replaceable key better than the anchor).
 
 Slug prefixes: the stable part of the CA slugs (file/URL names, pkcs11 
 key labels). The full slug is `<slug_prefix><generation>` at init;
@@ -112,7 +118,13 @@ root_arc_oid = "1.3.6.1.4.1.32473" # org PEN arc (optional)
 # HSM-held CA keys (optional; default internal). PIN from CA_HSM_PIN.
 # key_backend = "pkcs11"
 # pkcs11_module = "/usr/lib/opensc-pkcs11.so"
-# pkcs11_token_label = "yts"
+# pkcs11_token_label = "ets"
+# Split layout: the root key on its own token, plugged in only for
+# ceremonies. PIN from CA_HSM_ROOT_PIN (falls back to CA_HSM_PIN).
+# pkcs11_root_token_label = "ets-root"
+# Hybrid layout: only the root key on a token, signing key internal
+# (passphrase-encrypted in the store).
+# root_key_backend = "pkcs11"
 ```
 Note: `1.3.6.1.4.1.32473` is the IANA documentation PEN (RFC 5612), used here as a placeholder.
 
@@ -124,8 +136,11 @@ yca [--config PATH] [--store DIR] <action> <target> [options]
 
 Global options: `--config` (default `./yca.toml`), `--store` (default
 `./store`), `--version`. Secrets come from the environment:
-`CA_STORE_PASSPHRASE` (internal backend) or `CA_HSM_PIN` (pkcs11
-backend). Read-only commands (`get`, `list`) need neither.
+`CA_STORE_PASSPHRASE` (keys on the internal backend), `CA_HSM_PIN`
+(signing token) and `CA_HSM_ROOT_PIN` (root token; falls back to
+`CA_HSM_PIN`). An operation needs only the secrets of the CA keys it
+touches - daily issuance never needs the root secret. Read-only commands
+(`get`, `list`) need none.
 
 | Command | Purpose |
 |---------|---------|

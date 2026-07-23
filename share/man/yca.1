@@ -10,9 +10,14 @@ operates a simple two-tier X.509 CA (offline-style root plus
 signing CA): it initializes the hierarchy, issues and revokes end-entity
 certificates, maintains signed CRLs, and exports artifacts. Storage is a
 single SQLite database plus delivered PEM/DER files under the store
-directory. CA keys live either software-encrypted in the store
-(\fBinternal\fR backend) or on a PKCS#11 token/HSM (\fBpkcs11\fR backend);
-see the configuration file.
+directory. Each CA key lives either software-encrypted in the store
+(\fBinternal\fR backend) or on a PKCS#11 token/HSM (\fBpkcs11\fR backend),
+selected per CA (\fBroot_key_backend\fR/\fBsigning_key_backend\fR, with
+\fBkey_backend\fR as the shorthand for both); with \fBpkcs11\fR the root
+key may sit on its own token (\fBpkcs11_root_token_label\fR: equal to the
+signing label means one token, different means split tokens, and a
+\fBpkcs11\fR root over an \fBinternal\fR signing key is the hybrid
+layout). See the configuration file.
 .PP
 At
 .B yca init
@@ -41,12 +46,13 @@ Print the release version and exit.
 .TP
 .B init
 Initialize the PKI: create the root and signing CA (and empty signed CRLs).
-With the \fBinternal\fR backend a store passphrase is generated and shown
-once if \fBCA_STORE_PASSPHRASE\fR is unset. With \fBpkcs11\fR, an existing
-token keypair must already be labeled with the derived CA slug
-(\fB<slug_prefix>1\fR at init) to be adopted (curve-checked); a missing
-one is generated on the token under exactly that label. Fails if the
-store is already initialized.
+When any CA key uses the \fBinternal\fR backend, a store passphrase is
+generated and shown once if \fBCA_STORE_PASSPHRASE\fR is unset. For every
+key on a \fBpkcs11\fR backend, an existing token keypair must already be
+labeled with the derived CA slug (\fB<slug_prefix>1\fR at init) to be
+adopted (curve-checked); a missing one is generated on that key's token
+under exactly that label. Init needs every configured token present.
+Fails if the store is already initialized.
 .TP
 \fBcreate\fR \fIserver\fR|\fIclient\fR \fB\-\-cn\fR \fIcn\fR [\fB\-\-san\fR \fItype:name\fR ...] [\fB\-\-valid\fR \fIN\fR{s|m|h|d}]
 Issue an end-entity certificate. \fB\-\-san\fR is repeatable with
@@ -151,14 +157,24 @@ List certificates matching exactly one filter: \fB\-\-expiring\fR [\fIN\fR],
 At most \fB\-\-limit\fR rows are printed (default 50, \fB0\fR for all); a
 truncated listing says so on standard error.
 .SH ENVIRONMENT
+An operation needs only the secrets of the CA keys it touches: issuance
+and the \fBsigning\fR CRL scope the signing side's, \fBrevoke ca\fR and
+the \fBroot\fR CRL scope the root side's, \fBinit\fR and
+\fBrenew signing-ca\fR both.
 .TP
 .B CA_STORE_PASSPHRASE
-Store passphrase (\fBinternal\fR key backend). Generated and shown once at
-init when unset.
+Store passphrase (keys on the \fBinternal\fR backend). Generated and shown
+once at init when unset.
 .TP
 .B CA_HSM_PIN
-PKCS#11 user PIN (\fBpkcs11\fR key backend). Exactly one login attempt per
-run: hardware tokens decrement a PIN retry counter.
+PKCS#11 user PIN of the signing token (\fBpkcs11\fR signing backend).
+Exactly one login attempt per token per run: hardware tokens decrement a
+PIN retry counter.
+.TP
+.B CA_HSM_ROOT_PIN
+PKCS#11 user PIN of the root token (\fBpkcs11\fR root backend); falls
+back to \fBCA_HSM_PIN\fR when unset (identical PINs, or the single-token
+layout).
 .SH FILES
 .TP
 .B yca.toml

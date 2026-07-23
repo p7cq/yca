@@ -201,26 +201,65 @@ load(const std::filesystem::path &path) {
   c.root_ca_slug = c.root_ca_slug_prefix + "1";
   c.signing_ca_slug = c.signing_ca_slug_prefix + "1";
 
-  // key_backend is optional (default "internal"). With "pkcs11" both pkcs11_*
-  // fields are required; with "internal" they must be absent - a set-but-
-  // unused HSM field is a config mistake, not something to ignore.
-  if (tbl.contains("key_backend") && get_str("key_backend", c.key_backend) &&
-      c.key_backend != "internal" && c.key_backend != "pkcs11")
-    errs.push_back(
-        std::format("key_backend must be \"internal\" or \"pkcs11\", got '{}'",
-                    c.key_backend));
-  if (c.key_backend == "pkcs11") {
-    get_str("pkcs11_module", c.pkcs11_module);
-    if (get_str("pkcs11_token_label", c.pkcs11_token_label) &&
-        c.pkcs11_token_label.size() > app::p11_token_label_max)
-      errs.push_back(std::format("pkcs11_token_label: at most {} bytes "
-                                 "(PKCS#11 limit)",
+  // key_backend is optional (default "internal") and is the shorthand
+  // default for the per-CA backends. A pkcs11_* field that no backend uses
+  // is a config mistake, not something to ignore.
+  auto check_backend = [&](std::string_view key, const std::string &v) {
+    if (v != "internal" && v != "pkcs11")
+      errs.push_back(std::format(
+          "{} must be \"internal\" or \"pkcs11\", got '{}'", key, v));
+  };
+  if (tbl.contains("key_backend") && get_str("key_backend", c.key_backend))
+    check_backend("key_backend", c.key_backend);
+  c.root_key_backend = c.key_backend;
+  c.signing_key_backend = c.key_backend;
+  if (tbl.contains("root_key_backend") &&
+      get_str("root_key_backend", c.root_key_backend))
+    check_backend("root_key_backend", c.root_key_backend);
+  if (tbl.contains("signing_key_backend") &&
+      get_str("signing_key_backend", c.signing_key_backend))
+    check_backend("signing_key_backend", c.signing_key_backend);
+  // The one rejected layout: it would protect the replaceable key better
+  // than the anchor. The other mixed layout (pkcs11 root, internal
+  // signing) is the hybrid: offline root token, software signing key.
+  if (c.root_key_backend == "internal" && c.signing_key_backend == "pkcs11")
+    errs.push_back("root_key_backend = \"internal\" with signing_key_backend "
+                   "= \"pkcs11\" is rejected (misplaced trust)");
+  const bool root_p11 = c.root_key_backend == "pkcs11";
+  const bool sign_p11 = c.signing_key_backend == "pkcs11";
+  auto check_label = [&](std::string_view key, const std::string &v) {
+    if (v.size() > app::p11_token_label_max)
+      errs.push_back(std::format("{}: at most {} bytes (PKCS#11 limit)", key,
                                  app::p11_token_label_max));
-  } else {
-    for (const char *k : {"pkcs11_module", "pkcs11_token_label"})
-      if (tbl.contains(k))
-        errs.push_back(
-            std::format("{} is set but key_backend is not \"pkcs11\"", k));
+  };
+  if (root_p11 || sign_p11) {
+    get_str("pkcs11_module", c.pkcs11_module);
+  } else if (tbl.contains("pkcs11_module")) {
+    errs.push_back("pkcs11_module is set but no CA key uses the pkcs11 "
+                   "backend");
+  }
+  if (sign_p11) {
+    if (get_str("pkcs11_token_label", c.pkcs11_token_label))
+      check_label("pkcs11_token_label", c.pkcs11_token_label);
+  } else if (tbl.contains("pkcs11_token_label")) {
+    errs.push_back("pkcs11_token_label is set but signing_key_backend is not "
+                   "\"pkcs11\"");
+  }
+  if (root_p11) {
+    if (tbl.contains("pkcs11_root_token_label")) {
+      if (get_str("pkcs11_root_token_label", c.pkcs11_root_token_label))
+        check_label("pkcs11_root_token_label", c.pkcs11_root_token_label);
+    } else if (sign_p11) {
+      // Single-token layout by default; different labels mean split tokens.
+      c.pkcs11_root_token_label = c.pkcs11_token_label;
+    } else {
+      errs.push_back("pkcs11_root_token_label is required in the hybrid "
+                     "layout (pkcs11 root, internal signing): there is no "
+                     "signing token label to default from");
+    }
+  } else if (tbl.contains("pkcs11_root_token_label")) {
+    errs.push_back("pkcs11_root_token_label is set but root_key_backend is "
+                   "not \"pkcs11\"");
   }
 
   // Optional: without it, certificates carry no CertificatePolicies extension.

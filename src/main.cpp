@@ -207,15 +207,19 @@ int main(int argc, char **argv) {
       log::fatal("invalid configuration");
     }
 
-    // The store passphrase, or the token user PIN (pkcs11 backend).
-    auto secret = [](const cfg::Config &c) {
-      const char *v = std::getenv(
-          c.key_backend == "pkcs11" ? app::pin_env : app::passphrase_env);
+    // The CA secrets from the environment; which ones an operation needs
+    // depends on the key layout (see ca::Secrets).
+    auto env = [](const char *k) {
+      const char *v = std::getenv(k);
       return std::string_view(v ? v : "");
     };
+    ca::Secrets secrets{env(app::passphrase_env), env(app::pin_env),
+                        env(app::root_pin_env)};
+    if (secrets.root_pin.empty()) // identical-PIN and single-token layouts
+      secrets.root_pin = secrets.pin;
 
     if (*init)
-      return ca::init(*config, store_dir, secret(*config)) ? 0 : 1;
+      return ca::init(*config, store_dir, secrets) ? 0 : 1;
 
     // after init the DB has the effective config.
     if (!ca::is_initialized(store_dir)) {
@@ -254,7 +258,7 @@ int main(int argc, char **argv) {
           return 1;
         }
       }
-      return ca::issue_ee(*eff, store_dir, secret(*eff), profile, c_cn, sans,
+      return ca::issue_ee(*eff, store_dir, secrets, profile, c_cn, sans,
                           valid)
                  ? 0
                  : 1;
@@ -276,7 +280,7 @@ int main(int argc, char **argv) {
           return 1;
         }
       }
-      return ca::sign_csr(*eff, store_dir, secret(*eff), profile, s_id, s_nonce,
+      return ca::sign_csr(*eff, store_dir, secrets, profile, s_id, s_nonce,
                           s_csr, valid)
                  ? 0
                  : 1;
@@ -288,7 +292,7 @@ int main(int argc, char **argv) {
           log::error("revoke ca selects by --cn, not --serial");
           return 1;
         }
-        return ca::revoke_ca(*eff, store_dir, secret(*eff), r_cn, r_reason) ? 0
+        return ca::revoke_ca(*eff, store_dir, secrets, r_cn, r_reason) ? 0
                                                                            : 1;
       }
       if (r_cn.empty() == r_serial.empty()) {
@@ -296,21 +300,21 @@ int main(int argc, char **argv) {
                    rev_target);
         return 1;
       }
-      return ca::revoke(*eff, store_dir, secret(*eff), rev_target, r_cn,
+      return ca::revoke(*eff, store_dir, secrets, rev_target, r_cn,
                         r_reason, r_serial)
                  ? 0
                  : 1;
     }
 
     if (*renew)
-      return ca::renew_signing_ca(*eff, store_dir, secret(*eff), n_new_cn) ? 0
+      return ca::renew_signing_ca(*eff, store_dir, secrets, n_new_cn) ? 0
                                                                            : 1;
 
     if (*refresh) {
       const ca::CrlScope scope = f_scope == "root"      ? ca::CrlScope::Root
                                  : f_scope == "signing" ? ca::CrlScope::Signing
                                                         : ca::CrlScope::All;
-      return ca::refresh_crl(*eff, store_dir, secret(*eff), scope) ? 0 : 1;
+      return ca::refresh_crl(*eff, store_dir, secrets, scope) ? 0 : 1;
     }
 
     if (*get) {

@@ -14,6 +14,26 @@ namespace ca {
 
 enum class Profile { Server, Client };
 
+// The CA secrets, one per backend/token; which ones an operation needs
+// depends on the layout (per-CA key backends, see config.h). `passphrase`
+// (app::passphrase_env) unlocks keys on the internal backend, `pin`
+// (app::pin_env) the signing token, `root_pin` (app::root_pin_env, with
+// the caller applying the fallback to `pin`) the root token. The
+// converting constructors serve the single-secret layouts and the tests,
+// where one value plays every role.
+struct Secrets {
+  std::string_view passphrase;
+  std::string_view pin;
+  std::string_view root_pin;
+
+  Secrets() = default;
+  Secrets(std::string_view all) : passphrase(all), pin(all), root_pin(all) {}
+  Secrets(const char *all) : Secrets(std::string_view(all)) {}
+  Secrets(std::string_view passphrase, std::string_view pin,
+          std::string_view root_pin)
+      : passphrase(passphrase), pin(pin), root_pin(root_pin) {}
+};
+
 struct San {
   enum class Type { Dns, Email, Ip, Uri } type;
   std::string value;
@@ -26,20 +46,20 @@ struct San {
 bool is_initialized(const std::filesystem::path &store_dir);
 
 // Initializes the PKI in `store_dir`: creates root + signing CA and records
-// the PKI identity + locked config snapshot. Backend "internal": keys are
-// generated in software and persisted encrypted into the SQLite store.
-// Backend "pkcs11": keys live on the token (existing keypairs labeled with
-// the CA slugs are adopted, missing ones are generated on-token).
-// Fails if already initialized, or if `store_dir` exists and is not an empty
-// directory.
+// the PKI identity + locked config snapshot. Each CA key follows its
+// backend. "internal": generated in software and persisted encrypted into
+// the SQLite store. "pkcs11": lives on its token (an existing keypair
+// labeled with the CA slug is adopted, a missing one is generated
+// on-token). Fails if already initialized, or if `store_dir` exists and is
+// not an empty directory.
 //
-// `secret` is the CA secret from the environment: the store passphrase
-// (app::passphrase_env; if empty a strong one is generated and shown once),
-// or the token user PIN (app::pin_env, required) with the pkcs11 backend.
+// `secrets` come from the environment: token PINs are required for pkcs11
+// keys; the passphrase is required when any key is internal (if empty a
+// strong one is generated and shown once).
 //
 // Returns false on any fatal error.
 bool init(const cfg::Config &config, const std::filesystem::path &store_dir,
-          std::string_view secret);
+          const Secrets &secrets);
 
 // Creates the next generation of the signing CA: a fresh key and the
 // configured signing profile under a new display name `new_cn`, signed by
@@ -49,7 +69,7 @@ bool init(const cfg::Config &config, const std::filesystem::path &store_dir,
 // Prints the new CN on stdout. See docs/ca-rotation.md.
 bool renew_signing_ca(const cfg::Config &config,
                       const std::filesystem::path &store_dir,
-                      std::string_view secret, const std::string &new_cn);
+                      const Secrets &secrets, const std::string &new_cn);
 
 // Loads the effective config from the DB (ca_config snapshot) - the source of
 // truth after init. Returns nullopt if not initialized.
@@ -73,7 +93,7 @@ void reconcile(const cfg::Config &file, const cfg::Config &eff);
 // ceiling, shorter is always allowed - and not persisted anywhere.
 bool issue_ee(
     const cfg::Config &config, const std::filesystem::path &store_dir,
-    std::string_view secret, Profile profile, const std::string &cn,
+    const Secrets &secrets, Profile profile, const std::string &cn,
     const std::vector<San> &extra_sans,
     std::optional<std::chrono::seconds> valid_override = std::nullopt);
 
@@ -107,7 +127,7 @@ bool get_nonce(const std::filesystem::path &store_dir, const std::string &id);
 // issue_ee ([5m, ee_valid_days], one-shot).
 bool sign_csr(
     const cfg::Config &config, const std::filesystem::path &store_dir,
-    std::string_view secret, Profile profile, const std::string &id,
+    const Secrets &secrets, Profile profile, const std::string &id,
     const std::string &nonce, const std::string &csr_src,
     std::optional<std::chrono::seconds> valid_override = std::nullopt);
 
@@ -119,7 +139,7 @@ bool sign_csr(
 // active" while by-serial is unambiguous (what ACME revokeCert needs).
 // Fails if no matching active cert exists.
 bool revoke(const cfg::Config &config, const std::filesystem::path &store_dir,
-            std::string_view secret, const std::string &target,
+            const Secrets &secrets, const std::string &target,
             const std::string &cn, const std::string &reason,
             const std::string &serial = "");
 
@@ -130,7 +150,7 @@ bool revoke(const cfg::Config &config, const std::filesystem::path &store_dir,
 // so issuance never has a gap. The updated root CRL carries a fresh nextUpdate,
 // so only publication is left to do.
 bool revoke_ca(const cfg::Config &config,
-               const std::filesystem::path &store_dir, std::string_view secret,
+               const std::filesystem::path &store_dir, const Secrets &secrets,
                const std::string &selector, const std::string &reason);
 
 // Which published CRLs refresh_crl re-signs. Root and Signing exist so the
@@ -148,7 +168,7 @@ enum class CrlScope { Root, Signing, All };
 // relying parties never see a stale CRL.
 bool refresh_crl(const cfg::Config &config,
                  const std::filesystem::path &store_dir,
-                 std::string_view secret, CrlScope scope = CrlScope::All);
+                 const Secrets &secrets, CrlScope scope = CrlScope::All);
 
 // RFC 5280 3.3 pruning decision for one CRL entry: an entry may leave the
 // CRL once it has appeared on one scheduled CRL issued beyond the

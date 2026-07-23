@@ -594,15 +594,72 @@ locked_config(const cfg::Config &c) {
       {"ee_curve", c.ee_curve},
       {"ee_digest", c.ee_digest},
       {"key_backend", c.key_backend},
+      {"root_key_backend", c.root_key_backend},
+      {"signing_key_backend", c.signing_key_backend},
       {"pkcs11_module", c.pkcs11_module},
       {"pkcs11_token_label", c.pkcs11_token_label},
+      {"pkcs11_root_token_label", c.pkcs11_root_token_label},
       {"ee_valid_days", std::to_string(c.ee_valid_days)},
   };
 }
 
-// Env var naming the CA secret for this backend (for error messages).
-const char *secret_env(const cfg::Config &config) {
-  return config.key_backend == "pkcs11" ? app::pin_env : app::passphrase_env;
+// Per-CA-kind selectors: the root and signing keys may live on different
+// backends and tokens (see the layout matrix in config.cpp). `root` picks
+// the kind.
+const std::string &backend_of(const cfg::Config &c, bool root) {
+  return root ? c.root_key_backend : c.signing_key_backend;
+}
+
+const std::string &token_label_of(const cfg::Config &c, bool root) {
+  return root ? c.pkcs11_root_token_label : c.pkcs11_token_label;
+}
+
+std::string_view kind_secret(const cfg::Config &c, const ca::Secrets &s,
+                             bool root) {
+  if (backend_of(c, root) == "pkcs11")
+    return root ? s.root_pin : s.pin;
+  return s.passphrase;
+}
+
+// Env var(s) naming the CA secret of this kind (for error messages). The
+// root PIN falls back to the signing PIN, so name both.
+std::string secret_env(const cfg::Config &config, bool root) {
+  if (backend_of(config, root) != "pkcs11")
+    return app::passphrase_env;
+  return root ? std::format("{} (or {})", app::root_pin_env, app::pin_env)
+              : std::string(app::pin_env);
+}
+
+// "passphrase"/"user PIN" for wrong-secret error messages; the two-kind
+// variant covers operations that load both CA keys.
+const char *secret_word(const cfg::Config &config, bool root) {
+  return backend_of(config, root) == "pkcs11" ? "user PIN" : "passphrase";
+}
+
+const char *secret_word_both(const cfg::Config &config) {
+  return backend_of(config, true) == backend_of(config, false)
+             ? secret_word(config, true)
+             : "passphrase or user PIN";
+}
+
+// One session per token; with equal labels (single-token layout) both CA
+// kinds share the first session opened, so several keys still cost a
+// single login.
+struct TokenPair {
+  std::optional<p11::Token> signing, root;
+};
+
+p11::Token &open_token(const cfg::Config &config, const ca::Secrets &secrets,
+                       TokenPair &tokens, bool root, bool read_write) {
+  auto &own = root ? tokens.root : tokens.signing;
+  if (own)
+    return *own;
+  auto &other = root ? tokens.signing : tokens.root;
+  if (other && token_label_of(config, root) == token_label_of(config, !root))
+    return *other;
+  own.emplace(config, token_label_of(config, root),
+              kind_secret(config, secrets, root), read_write);
+  return *own;
 }
 
 // Adopt-or-generate one CA key on the token: use the existing keypair labeled
@@ -618,19 +675,18 @@ token_ca_key(p11::Token &token, const std::string &label,
   return token.generate_keypair(label, curve);
 }
 
-// Loads one CA private key: from the store (backend "internal",
-// passphrase-encrypted) or from the token (label = the CA's slug). `token`
-// owns the PKCS#11 session and must outlive the returned key; an already
-// open session is reused, so several keys cost a single login.
+// Loads one CA private key per its kind's backend: from the store
+// ("internal", passphrase-encrypted) or from the kind's token (label = the
+// CA's slug). `tokens` owns the PKCS#11 sessions and must outlive the
+// returned key; open sessions are reused (see open_token).
 std::shared_ptr<const Botan::Private_Key>
-ca_key(const cfg::Config &config, Botan::Certificate_Store_In_SQL &store,
+ca_key(const cfg::Config &config, const ca::Secrets &secrets,
+       Botan::Certificate_Store_In_SQL &store,
        const Botan::X509_Certificate &cert, const std::string &slug,
-       const std::string &curve, std::string_view secret,
-       std::optional<p11::Token> &token) {
-  if (config.key_backend == "pkcs11") {
-    if (!token)
-      token.emplace(config, secret, /*read_write=*/false);
-    auto key = token->find_keypair(slug, curve);
+       const std::string &curve, bool root, TokenPair &tokens) {
+  if (backend_of(config, root) == "pkcs11") {
+    auto key = open_token(config, secrets, tokens, root, /*read_write=*/false)
+                   .find_keypair(slug, curve);
     if (!key)
       throw std::runtime_error(
           std::format("CA key '{}' not found on the token", slug));
@@ -641,32 +697,35 @@ ca_key(const cfg::Config &config, Botan::Certificate_Store_In_SQL &store,
 
 // The signing CA key, the one every issuance/revocation needs.
 std::shared_ptr<const Botan::Private_Key>
-signing_key(const cfg::Config &config, Botan::Certificate_Store_In_SQL &store,
+signing_key(const cfg::Config &config, const ca::Secrets &secrets,
+            Botan::Certificate_Store_In_SQL &store,
             const Botan::X509_Certificate &sign_cert, const std::string &slug,
-            std::string_view secret, std::optional<p11::Token> &token) {
-  return ca_key(config, store, sign_cert, slug, config.signing_ca_curve, secret,
-                token);
+            TokenPair &tokens) {
+  return ca_key(config, secrets, store, sign_cert, slug,
+                config.signing_ca_curve, /*root=*/false, tokens);
 }
 
 bool create(const cfg::Config &config, const fs::path &db_path,
-            std::string_view secret) {
+            const ca::Secrets &secrets) {
   Botan::AutoSeeded_RNG rng;
 
-  // Keys per backend: token-resident (adopted by label, or generated on the
-  // token), or in-memory ECDSA later persisted encrypted into the store.
-  std::optional<p11::Token> token;
-  std::shared_ptr<const Botan::Private_Key> root_key, sign_key;
-  if (config.key_backend == "pkcs11") {
-    token.emplace(config, secret, /*read_write=*/true);
-    root_key = token_ca_key(*token, config.root_ca_slug, config.root_ca_curve);
-    sign_key =
-        token_ca_key(*token, config.signing_ca_slug, config.signing_ca_curve);
-  } else {
-    root_key = std::make_shared<Botan::ECDSA_PrivateKey>(
-        rng, Botan::EC_Group::from_name(config.root_ca_curve));
-    sign_key = std::make_shared<Botan::ECDSA_PrivateKey>(
-        rng, Botan::EC_Group::from_name(config.signing_ca_curve));
-  }
+  // Keys per kind and backend: token-resident (adopted by label, or
+  // generated on the kind's token), or in-memory ECDSA later persisted
+  // encrypted into the store.
+  TokenPair tokens;
+  auto make_key = [&](bool root, const std::string &slug,
+                      const std::string &curve)
+      -> std::shared_ptr<const Botan::Private_Key> {
+    if (backend_of(config, root) == "pkcs11")
+      return token_ca_key(
+          open_token(config, secrets, tokens, root, /*read_write=*/true), slug,
+          curve);
+    return std::make_shared<Botan::ECDSA_PrivateKey>(
+        rng, Botan::EC_Group::from_name(curve));
+  };
+  auto root_key = make_key(true, config.root_ca_slug, config.root_ca_curve);
+  auto sign_key =
+      make_key(false, config.signing_ca_slug, config.signing_ca_curve);
 
   auto root_opts = ca_options(config, config.root_ca_cn,
                               config.root_ca_valid_days, std::nullopt);
@@ -692,13 +751,14 @@ bool create(const cfg::Config &config, const fs::path &db_path,
   set_perms(db_path, fs::perms::owner_read | fs::perms::owner_write);
   // New stores start in WAL directly (see begin_write).
   db->new_statement("PRAGMA journal_mode=WAL")->spin();
-  Botan::Certificate_Store_In_SQL store(db, secret, rng);
+  Botan::Certificate_Store_In_SQL store(db, secrets.passphrase, rng);
   store.insert_cert(root_cert);
   store.insert_cert(sign_cert);
-  if (config.key_backend != "pkcs11") { // pkcs11: keys never leave the token
+  // pkcs11 keys never leave their token; internal keys persist encrypted.
+  if (backend_of(config, true) == "internal")
     store.insert_key(root_cert, *root_key);
+  if (backend_of(config, false) == "internal")
     store.insert_key(sign_cert, *sign_key);
-  }
 
   db->create_table(std::format("CREATE TABLE IF NOT EXISTS {} ("
                                "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
@@ -788,7 +848,7 @@ bool is_initialized(const fs::path &store_dir) {
 }
 
 bool init(const cfg::Config &config, const fs::path &store_dir,
-          std::string_view secret) {
+          const Secrets &secrets) {
   const fs::path db_path = store_path(store_dir);
   if (is_initialized(store_dir)) {
     log::error("already initialized ({})", db_path.string());
@@ -810,21 +870,24 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  // The CA secret is settled before anything touches the filesystem: a
+  // The CA secrets are settled before anything touches the filesystem: a
   // failed precondition must not leave a store_dir (or a log file) behind.
-  std::string generated;
-  if (config.key_backend == "pkcs11") {
-    // The token PIN cannot be invented for the user.
-    if (secret.empty()) {
-      log::error("{} not set (token user PIN)", app::pin_env);
+  Secrets eff = secrets;
+  for (bool root : {true, false}) // a token PIN cannot be invented
+    if (backend_of(config, root) == "pkcs11" &&
+        kind_secret(config, eff, root).empty()) {
+      log::error("{} not set (token user PIN)", secret_env(config, root));
       return false;
     }
-  } else if (secret.empty()) {
+  std::string generated;
+  const bool any_internal = backend_of(config, true) == "internal" ||
+                            backend_of(config, false) == "internal";
+  if (any_internal && eff.passphrase.empty()) {
     Botan::AutoSeeded_RNG rng;
     std::vector<uint8_t> raw(app::passphrase_bytes);
     rng.randomize(raw.data(), raw.size());
     generated = Botan::hex_encode(raw);
-    secret = generated;
+    eff.passphrase = generated;
     log::to_stdout("\n=== GENERATED CA PASSPHRASE (shown once) ===\n{}\n"
                    "Store it now; set {} to it on future runs.\n"
                    "============================================\n\n",
@@ -834,7 +897,7 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
   fs::create_directories(store_dir);
   set_perms(store_dir, fs::perms::owner_all);
   try {
-    return create(config, db_path, secret);
+    return create(config, db_path, eff);
   } catch (const std::exception &e) {
     log::error("CA init failed: {}", e.what());
     return false;
@@ -842,15 +905,21 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
 }
 
 bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
-                      std::string_view secret, const std::string &new_cn) {
+                      const Secrets &secrets, const std::string &new_cn) {
   const fs::path db = store_path(store_dir);
   if (!fs::exists(db)) {
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  if (secret.empty()) {
+  // The ceremony needs both CA keys: the root signs the new generation.
+  if (kind_secret(config, secrets, true).empty()) {
     log::error("{} not set (the root key signs the new generation)",
-               secret_env(config));
+               secret_env(config, true));
+    return false;
+  }
+  if (kind_secret(config, secrets, false).empty()) {
+    log::error("{} not set (the new signing key needs it)",
+               secret_env(config, false));
     return false;
   }
   if (new_cn.empty()) {
@@ -860,7 +929,7 @@ bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
 
   Botan::AutoSeeded_RNG rng;
   auto dbh = open_store(db);
-  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
+  Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
   ensure_ca_index(*dbh, config);
 
   const CaGen root = active_ca(*dbh, config, "root");
@@ -895,24 +964,28 @@ bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
                                       config.signing_ca_valid_days))))
     return false;
 
-  std::optional<p11::Token> token;
+  TokenPair tokens;
   std::shared_ptr<const Botan::Private_Key> root_key, new_key;
   try {
-    if (config.key_backend == "pkcs11") {
-      // Read-write: the new generation's keypair is generated on the token
-      // under its own label (adopted if a previous attempt left it there).
-      token.emplace(config, secret, /*read_write=*/true);
-      root_key = token_ca_key(*token, root.slug, config.root_ca_curve);
-      new_key = token_ca_key(*token, next.slug, config.signing_ca_curve);
-    } else {
+    // Read-write sessions: with a pkcs11 signing backend the new
+    // generation's keypair is generated on its token under its own label
+    // (adopted if a previous attempt left it there).
+    if (backend_of(config, true) == "pkcs11")
+      root_key = token_ca_key(
+          open_token(config, secrets, tokens, true, /*read_write=*/true),
+          root.slug, config.root_ca_curve);
+    else
       root_key = store.find_key(*root_cert);
+    if (backend_of(config, false) == "pkcs11")
+      new_key = token_ca_key(
+          open_token(config, secrets, tokens, false, /*read_write=*/true),
+          next.slug, config.signing_ca_curve);
+    else
       new_key = std::make_shared<Botan::ECDSA_PrivateKey>(
           rng, Botan::EC_Group::from_name(config.signing_ca_curve));
-    }
   } catch (const std::exception &e) {
-    log::error("cannot load the root key (wrong {}?): {}",
-               config.key_backend == "internal" ? "passphrase" : "user PIN",
-               e.what());
+    log::error("cannot load the CA keys (wrong {}?): {}",
+               secret_word_both(config), e.what());
     return false;
   }
   if (!root_key || !new_key) {
@@ -951,7 +1024,7 @@ bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
 
   begin_write(*dbh);
   store.insert_cert(cert);
-  if (config.key_backend != "pkcs11")
+  if (backend_of(config, false) == "internal")
     store.insert_key(cert, *new_key);
   ensure_cert_index(*dbh);
   index_cert(*dbh, cert, "signing");
@@ -1019,8 +1092,11 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
   c.ee_digest = S("ee_digest");
   c.ee_valid_days = I("ee_valid_days");
   c.key_backend = S("key_backend");
+  c.root_key_backend = S("root_key_backend");
+  c.signing_key_backend = S("signing_key_backend");
   c.pkcs11_module = S("pkcs11_module");
   c.pkcs11_token_label = S("pkcs11_token_label");
+  c.pkcs11_root_token_label = S("pkcs11_root_token_label");
   return c;
 }
 
@@ -1053,7 +1129,7 @@ bool check_valid_override(const cfg::Config &config, std::chrono::seconds v) {
 } // namespace
 
 bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
-              std::string_view secret, Profile profile, const std::string &cn,
+              const Secrets &secrets, Profile profile, const std::string &cn,
               const std::vector<San> &extra_sans,
               std::optional<std::chrono::seconds> valid_override) {
   const std::chrono::seconds validity = valid_override.value_or(
@@ -1108,14 +1184,15 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  if (secret.empty()) {
-    log::error("{} not set (required to sign with the CA)", secret_env(config));
+  if (kind_secret(config, secrets, false).empty()) {
+    log::error("{} not set (required to sign with the CA)",
+               secret_env(config, false));
     return false;
   }
 
   Botan::AutoSeeded_RNG rng;
   auto dbh = open_store(db);
-  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
+  Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
 
   const CaGen sign = active_ca(*dbh, config, "signing");
   auto sign_cert = load_ca_cert(store_dir, sign.slug);
@@ -1136,14 +1213,14 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   if (duplicate())
     return false;
 
-  std::optional<p11::Token> token; // must outlive sign_key (owns the session)
+  TokenPair tokens; // must outlive sign_key (owns the session)
   std::shared_ptr<const Botan::Private_Key> sign_key;
   try {
-    sign_key = signing_key(config, store, *sign_cert, sign.slug, secret, token);
+    sign_key =
+        signing_key(config, secrets, store, *sign_cert, sign.slug, tokens);
   } catch (const std::exception &e) {
     log::error("cannot load signing key (wrong {}?): {}",
-               config.key_backend == "internal" ? "passphrase" : "user PIN",
-               e.what());
+               secret_word(config, false), e.what());
     return false;
   }
   if (!sign_key) {
@@ -1357,7 +1434,7 @@ bool get_nonce(const fs::path &store_dir, const std::string &id) {
 }
 
 bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
-              std::string_view secret, Profile profile, const std::string &id,
+              const Secrets &secrets, Profile profile, const std::string &id,
               const std::string &nonce, const std::string &csr_src,
               std::optional<std::chrono::seconds> valid_override) {
   if (valid_override && !check_valid_override(config, *valid_override))
@@ -1469,14 +1546,15 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  if (secret.empty()) {
-    log::error("{} not set (required to sign with the CA)", secret_env(config));
+  if (kind_secret(config, secrets, false).empty()) {
+    log::error("{} not set (required to sign with the CA)",
+               secret_env(config, false));
     return false;
   }
 
   Botan::AutoSeeded_RNG rng;
   auto dbh = open_store(db);
-  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
+  Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
 
   const CaGen sign = active_ca(*dbh, config, "signing");
   auto sign_cert = load_ca_cert(store_dir, sign.slug);
@@ -1521,14 +1599,14 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   if (nonce_rejected() || duplicate())
     return false;
 
-  std::optional<p11::Token> token; // owns the session; must outlive sign_key
+  TokenPair tokens; // owns the sessions; must outlive sign_key
   std::shared_ptr<const Botan::Private_Key> sign_key;
   try {
-    sign_key = signing_key(config, store, *sign_cert, sign.slug, secret, token);
+    sign_key =
+        signing_key(config, secrets, store, *sign_cert, sign.slug, tokens);
   } catch (const std::exception &e) {
     log::error("cannot load signing key (wrong {}?): {}",
-               config.key_backend == "internal" ? "passphrase" : "user PIN",
-               e.what());
+               secret_word(config, false), e.what());
     return false;
   }
   if (!sign_key) {
@@ -1596,7 +1674,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
 }
 
 bool revoke(const cfg::Config &config, const fs::path &store_dir,
-            std::string_view secret, const std::string &target,
+            const Secrets &secrets, const std::string &target,
             const std::string &cn, const std::string &reason_str,
             const std::string &serial) {
   const auto reason = parse_reason(reason_str);
@@ -1610,14 +1688,15 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  if (secret.empty()) {
-    log::error("{} not set (required to sign the CRL)", secret_env(config));
+  if (kind_secret(config, secrets, false).empty()) {
+    log::error("{} not set (required to sign the CRL)",
+               secret_env(config, false));
     return false;
   }
 
   Botan::AutoSeeded_RNG rng;
   auto dbh = open_store(db);
-  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
+  Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
 
   // Fail fast before the signing key lookup (seconds on NK HSM): whether an
   // active cert exists is answerable from cert_index alone. The write lock
@@ -1674,14 +1753,14 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  std::optional<p11::Token> token; // must outlive sign_key (owns the session)
+  TokenPair tokens; // must outlive sign_key (owns the sessions)
   std::shared_ptr<const Botan::Private_Key> sign_key;
   try {
-    sign_key = signing_key(config, store, *sign_cert, sign.slug, secret, token);
+    sign_key =
+        signing_key(config, secrets, store, *sign_cert, sign.slug, tokens);
   } catch (const std::exception &e) {
     log::error("cannot load signing key (wrong {}?): {}",
-               config.key_backend == "internal" ? "passphrase" : "user PIN",
-               e.what());
+               secret_word(config, false), e.what());
     return false;
   }
   if (!sign_key) {
@@ -1708,10 +1787,10 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   auto entries = prune_crl_entries(*dbh, prev);
   const std::size_t pruned = prev.get_revoked().size() - entries.size();
   entries.emplace_back(*target_cert, *reason);
-  const auto updated = ca.make_crl(
-      entries, prev.crl_number() + 1, rng, std::chrono::system_clock::now(),
-      std::chrono::seconds(
-          crl_next_update(*sign_cert, app::crl_next_update_days)));
+  const auto updated = ca.make_crl(entries, prev.crl_number() + 1, rng,
+                                   std::chrono::system_clock::now(),
+                                   std::chrono::seconds(crl_next_update(
+                                       *sign_cert, app::crl_next_update_days)));
   if (!write_der(crl_path, updated)) {
     log::error("could not write CRL {}", crl_path.string());
     return false;
@@ -1739,7 +1818,7 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
 }
 
 bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
-               std::string_view secret, const std::string &selector,
+               const Secrets &secrets, const std::string &selector,
                const std::string &reason_str) {
   const auto reason = parse_reason(reason_str);
   if (!reason) {
@@ -1751,8 +1830,9 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  if (secret.empty()) {
-    log::error("{} not set (the root key signs its CRL)", secret_env(config));
+  if (kind_secret(config, secrets, true).empty()) {
+    log::error("{} not set (the root key signs its CRL)",
+               secret_env(config, true));
     return false;
   }
   if (selector.empty()) {
@@ -1763,7 +1843,7 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
 
   Botan::AutoSeeded_RNG rng;
   auto dbh = open_store(db);
-  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
+  Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
   ensure_ca_index(*dbh, config);
 
   const CaGen root = active_ca(*dbh, config, "root");
@@ -1812,15 +1892,14 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  std::optional<p11::Token> token; // must outlive root_key (owns the session)
+  TokenPair tokens; // must outlive root_key (owns the sessions)
   std::shared_ptr<const Botan::Private_Key> root_key;
   try {
-    root_key = ca_key(config, store, *root_cert, root.slug,
-                      config.root_ca_curve, secret, token);
+    root_key = ca_key(config, secrets, store, *root_cert, root.slug,
+                      config.root_ca_curve, /*root=*/true, tokens);
   } catch (const std::exception &e) {
     log::error("cannot load the root key (wrong {}?): {}",
-               config.key_backend == "internal" ? "passphrase" : "user PIN",
-               e.what());
+               secret_word(config, true), e.what());
     return false;
   }
   if (!root_key) {
@@ -1877,23 +1956,28 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
 }
 
 bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
-                 std::string_view secret, CrlScope scope) {
+                 const Secrets &secrets, CrlScope scope) {
   const fs::path db = store_path(store_dir);
   if (!fs::exists(db)) {
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  if (secret.empty()) {
-    log::error("{} not set (required to sign the CRL)", secret_env(config));
-    return false;
-  }
 
   const bool do_root = scope != CrlScope::Signing;
   const bool do_sign = scope != CrlScope::Root;
+  // Each scope needs only its own kind's secret; that is the point of the
+  // separate cadences (a signing run works with the root token in the safe).
+  for (bool root : {true, false})
+    if ((root ? do_root : do_sign) &&
+        kind_secret(config, secrets, root).empty()) {
+      log::error("{} not set (required to sign the CRL)",
+                 secret_env(config, root));
+      return false;
+    }
 
   Botan::AutoSeeded_RNG rng;
   auto dbh = open_store(db);
-  Botan::Certificate_Store_In_SQL store(dbh, secret, rng);
+  Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
   const fs::path ca_dir = store_dir / "ca";
 
   // One job per CA whose CRL is re-signed. A rotation leaves retiring
@@ -1901,6 +1985,7 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
   // last certificate it issued is gone, so the scope is a set, not one CA.
   struct Job {
     CaGen ca;
+    bool root;
     std::string curve, digest;
     int horizon;
     Botan::X509_Certificate cert;
@@ -1926,7 +2011,8 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
                   cert->not_after().readable_string());
         continue;
       }
-      jobs.push_back({g, curve, digest, horizon, *cert, nullptr});
+      jobs.push_back(
+          {g, kind == "root", curve, digest, horizon, *cert, nullptr});
     }
     return true;
   };
@@ -1941,18 +2027,18 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
     return true;
   }
 
-  // Keys through one token session (backend pkcs11), loaded before the
+  // Keys through per-kind token sessions (backend pkcs11), loaded before the
   // write lock: a NK HSM lookup takes seconds and other writers wait at most
-  // busy_timeout. The signing scope never touches the root key - that is
-  // the point of the separate root cadence (root_crl_next_update_days vs
-  // crl_next_update_days).
-  std::optional<p11::Token> token;
+  // busy_timeout. The signing scope never touches the root key or its token
+  // - that is the point of the separate root cadence
+  // (root_crl_next_update_days vs crl_next_update_days).
+  TokenPair tokens;
   try {
     for (Job &j : jobs)
-      j.key = ca_key(config, store, j.cert, j.ca.slug, j.curve, secret, token);
+      j.key = ca_key(config, secrets, store, j.cert, j.ca.slug, j.curve, j.root,
+                     tokens);
   } catch (const std::exception &e) {
-    log::error("cannot load CA key (wrong {}?): {}",
-               config.key_backend == "internal" ? "passphrase" : "user PIN",
+    log::error("cannot load CA key (wrong {}?): {}", secret_word_both(config),
                e.what());
     return false;
   }
@@ -1980,10 +2066,10 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
         kept, prev.crl_number() + 1, rng, std::chrono::system_clock::now(),
         std::chrono::seconds(crl_next_update(j.cert, j.horizon)));
     ok = write_der(crl_path, next) && ok;
-    refreshed += std::format(
-        "{}{} #{}{}", refreshed.empty() ? "" : ", ", j.ca.slug,
-        next.crl_number(),
-        pruned ? std::format(" (pruned {})", pruned) : std::string());
+    refreshed += std::format("{}{} #{}{}", refreshed.empty() ? "" : ", ",
+                             j.ca.slug, next.crl_number(),
+                             pruned ? std::format(" (pruned {})", pruned)
+                                    : std::string());
   }
   commit_write(*dbh);
   if (!ok) {
@@ -2029,10 +2115,17 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
     if (!config.root_arc_oid.empty())
       std::print("root_arc_oid = \"{}\"\n", config.root_arc_oid);
     std::print("key_backend = \"{}\"\n", config.key_backend);
-    if (config.key_backend == "pkcs11") {
+    std::print("root_key_backend = \"{}\"\n", config.root_key_backend);
+    std::print("signing_key_backend = \"{}\"\n", config.signing_key_backend);
+    const bool root_p11 = config.root_key_backend == "pkcs11";
+    const bool sign_p11 = config.signing_key_backend == "pkcs11";
+    if (root_p11 || sign_p11)
       std::print("pkcs11_module = \"{}\"\n", config.pkcs11_module);
+    if (sign_p11)
       std::print("pkcs11_token_label = \"{}\"\n", config.pkcs11_token_label);
-    }
+    if (root_p11)
+      std::print("pkcs11_root_token_label = \"{}\"\n",
+                 config.pkcs11_root_token_label);
     return true;
   }
 

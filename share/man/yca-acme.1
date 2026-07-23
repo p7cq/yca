@@ -118,9 +118,11 @@ window.
 .SH ENVIRONMENT
 .TP
 .B CA_STORE_PASSPHRASE / CA_HSM_PIN
-The CA secret for the exec'd \fByca sign\fR/\fByca revoke\fR, per the
-store's key backend. Under systemd it comes from
-\fB/etc/yca/yca.env\fR (see share/systemd/yca\-acme.service).
+The signing-side CA secret for the exec'd \fByca sign\fR/\fByca
+revoke\fR, per the signing key's backend (the passphrase with
+\fBinternal\fR - including the hybrid layout - and the signing token PIN
+with \fBpkcs11\fR; the root secret is never needed). Under systemd it
+comes from \fB/etc/yca/yca.env\fR (see share/systemd/yca\-acme.service).
 .SH FILES
 .TP
 .B acme.db

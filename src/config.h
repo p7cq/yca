@@ -55,13 +55,24 @@ struct Config {
   // The OID of the root arc, e.g. 1.3.6.1.4.1.32473
   std::string root_arc_oid;
   // Key backend: "internal" for CA keys encrypted in the SQLite store
-  // or "pkcs11" for CA keys encrypted on an HSM token (module path + token
-  // label below, PIN from the environment).
+  // or "pkcs11" for CA keys on an HSM token (module path + token
+  // label below, PIN from the environment). Shorthand default for the two
+  // per-CA backends below.
   std::string key_backend = "internal";
+  // Per-CA backends ("internal"|"pkcs11"), defaulting to key_backend.
+  // "internal" root with "pkcs11" signing is rejected: it would protect
+  // the replaceable key better than the anchor. The remaining mixed
+  // layout (pkcs11 root, internal signing) is the hybrid: offline root
+  // token, software signing key.
+  std::string root_key_backend = "internal";
+  std::string signing_key_backend = "internal";
   // The PKCS11 module path, e.g. /usr/lib/opensc-pkcs11.so.
   std::string pkcs11_module;
-  // The token label.
+  // The signing token label.
   std::string pkcs11_token_label;
+  // The root token label; defaults to pkcs11_token_label (single-token
+  // layout). Must be set explicitly in the hybrid layout.
+  std::string pkcs11_root_token_label;
 };
 
 std::expected<Config, std::vector<std::string>>

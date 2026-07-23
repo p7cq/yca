@@ -256,6 +256,65 @@ TEST_CASE("cfg::load: pkcs11 backend requires module and token label") {
                           "\"012345678901234567890123456789012\"\n"));
 }
 
+TEST_CASE("cfg::load: per-CA key backends and the layout matrix") {
+  const auto path = std::filesystem::temp_directory_path() / "yca_unit4.toml";
+  auto load = [&](const std::string &body) {
+    std::ofstream(path) << body;
+    auto c = cfg::load(path);
+    std::filesystem::remove(path);
+    return c;
+  };
+  const std::string MOD = "pkcs11_module = \"/usr/lib/opensc-pkcs11.so\"\n";
+
+  // key_backend is the shorthand default for both per-CA backends.
+  auto def = load(VALID);
+  REQUIRE(def.has_value());
+  CHECK(def->root_key_backend == "internal");
+  CHECK(def->signing_key_backend == "internal");
+  auto p11 = load(VALID + "key_backend = \"pkcs11\"\n" + MOD +
+                  "pkcs11_token_label = \"yts\"\n");
+  REQUIRE(p11.has_value());
+  CHECK(p11->root_key_backend == "pkcs11");
+  CHECK(p11->signing_key_backend == "pkcs11");
+  // Single-token layout: the root label defaults to the signing label.
+  CHECK(p11->pkcs11_root_token_label == "yts");
+
+  // Split tokens: an explicit, different root label.
+  auto split = load(VALID + "key_backend = \"pkcs11\"\n" + MOD +
+                    "pkcs11_token_label = \"yts\"\n"
+                    "pkcs11_root_token_label = \"yts-root\"\n");
+  REQUIRE(split.has_value());
+  CHECK(split->pkcs11_root_token_label == "yts-root");
+
+  // Hybrid: pkcs11 root, internal signing; the root label is required
+  // explicitly (nothing to default from) and the signing label is rejected.
+  const std::string HYBRID = VALID + "root_key_backend = \"pkcs11\"\n" + MOD;
+  CHECK(load(HYBRID + "pkcs11_root_token_label = \"yts-root\"\n"));
+  CHECK_FALSE(load(HYBRID));
+  CHECK_FALSE(load(HYBRID + "pkcs11_token_label = \"yts\"\n"
+                            "pkcs11_root_token_label = \"yts-root\"\n"));
+  // Explicit per-CA backends may also spell the hybrid from key_backend.
+  CHECK(load(VALID + "key_backend = \"pkcs11\"\n"
+                     "signing_key_backend = \"internal\"\n" +
+             MOD + "pkcs11_root_token_label = \"yts-root\"\n"));
+
+  // The rejected layout: internal root under a pkcs11 signing key would
+  // protect the replaceable key better than the anchor.
+  CHECK_FALSE(load(VALID + "signing_key_backend = \"pkcs11\"\n" + MOD +
+                   "pkcs11_token_label = \"yts\"\n"));
+  CHECK_FALSE(load(VALID + "key_backend = \"pkcs11\"\n"
+                           "root_key_backend = \"internal\"\n" +
+                   MOD + "pkcs11_token_label = \"yts\"\n"));
+
+  // Unknown backend values and orphan pkcs11_* fields.
+  CHECK_FALSE(load(VALID + "root_key_backend = \"tpm\"\n"));
+  CHECK_FALSE(load(VALID + "signing_key_backend = \"tpm\"\n"));
+  CHECK_FALSE(load(VALID + "pkcs11_root_token_label = \"yts-root\"\n"));
+  // The root label obeys the same 32-byte PKCS#11 cap.
+  CHECK_FALSE(load(HYBRID + "pkcs11_root_token_label = "
+                            "\"012345678901234567890123456789012\"\n"));
+}
+
 TEST_CASE("cfg::load validates repository_host as a DNS host, optional :port") {
   auto url = [](const char *v) {
     return loads(with("repository_host = \"pki.example.ca\"",

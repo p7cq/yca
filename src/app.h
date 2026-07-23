@@ -11,8 +11,12 @@ inline constexpr std::string_view name = "yca";
 // Store passphrase of the internal key backend.
 inline constexpr const char *passphrase_env = "CA_STORE_PASSPHRASE";
 
-// User PIN of the PKCS#11 token.
+// User PIN of the PKCS#11 signing token.
 inline constexpr const char *pin_env = "CA_HSM_PIN";
+
+// User PIN of the PKCS#11 root token; falls back to pin_env when unset
+// (identical-PIN case and the single-token layout).
+inline constexpr const char *root_pin_env = "CA_HSM_ROOT_PIN";
 
 // Default directory holding the store and the delivered artifacts.
 inline constexpr std::string_view store_dir = "store";
