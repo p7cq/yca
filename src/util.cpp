@@ -150,8 +150,9 @@ bool spiffe_id_safe(const std::string &s) {
   std::size_t pos = slash;
   while (pos < rest.size()) {
     const auto next = rest.find('/', pos + 1);
-    const std::string seg = rest.substr(
-        pos + 1, next == std::string::npos ? std::string::npos : next - pos - 1);
+    const std::string seg =
+        rest.substr(pos + 1, next == std::string::npos ? std::string::npos
+                                                       : next - pos - 1);
     if (seg.empty() || seg == "." || seg == "..")
       return false;
     for (char c : seg) {

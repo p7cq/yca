@@ -117,8 +117,7 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
     emit_cert("same.test.ca", true, (j == same_cn - 1) ? 'a' : 'r');
   dbh->new_statement("COMMIT")->spin();
 
-  const fs::path crl_path =
-      store_dir / "ca" / (sign.slug + ".crl");
+  const fs::path crl_path = store_dir / "ca" / (sign.slug + ".crl");
   Botan::X509_CRL prev(crl_path.string());
   Botan::X509_CA crl_issuer(*sign_cert, *sign_key, config.signing_ca_digest,
                             rng);

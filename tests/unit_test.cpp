@@ -74,12 +74,12 @@ TEST_CASE("uri_safe: absolute, IA5-safe URIs") {
 TEST_CASE("spiffe_id_safe: the SPIFFE-ID rules") {
   CHECK(util::spiffe_id_safe("spiffe://example.ca/workload"));
   CHECK(util::spiffe_id_safe("spiffe://example.ca/ns/prod/sa/web"));
-  CHECK(util::spiffe_id_safe("spiffe://example.ca"));    // trust domain ID
+  CHECK(util::spiffe_id_safe("spiffe://example.ca"));     // trust domain ID
   CHECK(util::spiffe_id_safe("spiffe://ex-1_2.ca/Wl.1")); // full charsets
 
-  CHECK_FALSE(util::spiffe_id_safe("SPIFFE://example.ca/wl")); // scheme case
-  CHECK_FALSE(util::spiffe_id_safe("spiffe://Example.ca/wl")); // TD case
-  CHECK_FALSE(util::spiffe_id_safe("spiffe:///wl"));           // empty TD
+  CHECK_FALSE(util::spiffe_id_safe("SPIFFE://example.ca/wl"));  // scheme case
+  CHECK_FALSE(util::spiffe_id_safe("spiffe://Example.ca/wl"));  // TD case
+  CHECK_FALSE(util::spiffe_id_safe("spiffe:///wl"));            // empty TD
   CHECK_FALSE(util::spiffe_id_safe("spiffe://u@example.ca/w")); // userinfo
   CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca:8443/w")); // port
   CHECK_FALSE(util::spiffe_id_safe("spiffe://example.ca/wl/"));    // trailing
@@ -95,7 +95,8 @@ TEST_CASE("spiffe_id_safe: the SPIFFE-ID rules") {
   CHECK_FALSE(util::spiffe_id_safe("spiffe://" + std::string(256, 'a')));
   const std::string base = "spiffe://example.ca/";
   CHECK(util::spiffe_id_safe(base + std::string(2048 - base.size(), 'a')));
-  CHECK_FALSE(util::spiffe_id_safe(base + std::string(2049 - base.size(), 'a')));
+  CHECK_FALSE(
+      util::spiffe_id_safe(base + std::string(2049 - base.size(), 'a')));
 }
 
 TEST_CASE("parse_duration") {
@@ -212,23 +213,24 @@ TEST_CASE("cfg::load: names are free-form UTF-8, slugs are strict ASCII") {
   CHECK(loads(with("org_name = \"Example\"", "org_name = \"Компания 株\"")));
   CHECK(loads(
       with("root_ca_cn = \"ETS Root E1\"", "root_ca_cn = \"ETS 株 Root E1\"")));
-  CHECK(loads(with("signing_ca_cn = \"CA E1\"", "signing_ca_cn = \"CA ﺵﺮﻛﺓ\"")));
+  CHECK(
+      loads(with("signing_ca_cn = \"CA E1\"", "signing_ca_cn = \"CA ﺵﺮﻛﺓ\"")));
   // Declared slug prefixes go verbatim into URLs/file names (as
   // <prefix><generation>): lowercase ASCII only.
   CHECK_FALSE(loads(with("root_ca_slug_prefix = \"ets-root-e\"",
                          "root_ca_slug_prefix = \"ets-株\"")));
-  CHECK_FALSE(loads(
-      with("root_ca_slug_prefix = \"ets-root-e\"",
-           "root_ca_slug_prefix = \"ETS Root E\""))); // case + spaces
-  CHECK_FALSE(loads(
-      with("root_ca_slug_prefix = \"ets-root-e\"",
-           "root_ca_slug_prefix = \"ets_root_e\""))); // kebab-case only
-  CHECK_FALSE(loads(
-      with("signing_ca_slug_prefix = \"ca-e\"",
-           "signing_ca_slug_prefix = \"ets-root-e\""))); // collision
-  CHECK_FALSE(loads(
-      with("signing_ca_slug_prefix = \"ca-e\"",
-           "signing_ca_slug_prefix = \"ets-root-e1\""))); // digits apart
+  CHECK_FALSE(
+      loads(with("root_ca_slug_prefix = \"ets-root-e\"",
+                 "root_ca_slug_prefix = \"ETS Root E\""))); // case + spaces
+  CHECK_FALSE(
+      loads(with("root_ca_slug_prefix = \"ets-root-e\"",
+                 "root_ca_slug_prefix = \"ets_root_e\""))); // kebab-case only
+  CHECK_FALSE(
+      loads(with("signing_ca_slug_prefix = \"ca-e\"",
+                 "signing_ca_slug_prefix = \"ets-root-e\""))); // collision
+  CHECK_FALSE(
+      loads(with("signing_ca_slug_prefix = \"ca-e\"",
+                 "signing_ca_slug_prefix = \"ets-root-e1\""))); // digits apart
   CHECK_FALSE(
       loads(with("signing_ca_slug_prefix = \"ca-e\"\n", ""))); // required
 }
@@ -294,16 +296,18 @@ TEST_CASE("cfg::load: per-CA key backends and the layout matrix") {
   CHECK_FALSE(load(HYBRID + "pkcs11_token_label = \"yts\"\n"
                             "pkcs11_root_token_label = \"yts-root\"\n"));
   // Explicit per-CA backends may also spell the hybrid from key_backend.
-  CHECK(load(VALID + "key_backend = \"pkcs11\"\n"
-                     "signing_key_backend = \"internal\"\n" +
+  CHECK(load(VALID +
+             "key_backend = \"pkcs11\"\n"
+             "signing_key_backend = \"internal\"\n" +
              MOD + "pkcs11_root_token_label = \"yts-root\"\n"));
 
   // The rejected layout: internal root under a pkcs11 signing key would
   // protect the replaceable key better than the anchor.
   CHECK_FALSE(load(VALID + "signing_key_backend = \"pkcs11\"\n" + MOD +
                    "pkcs11_token_label = \"yts\"\n"));
-  CHECK_FALSE(load(VALID + "key_backend = \"pkcs11\"\n"
-                           "root_key_backend = \"internal\"\n" +
+  CHECK_FALSE(load(VALID +
+                   "key_backend = \"pkcs11\"\n"
+                   "root_key_backend = \"internal\"\n" +
                    MOD + "pkcs11_token_label = \"yts\"\n"));
 
   // Unknown backend values and orphan pkcs11_* fields.
@@ -463,8 +467,8 @@ TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
   REQUIRE(ca::init(t.config, t.dir, kPass));
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
-  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "old.ut.ca",
-                       {}));
+  REQUIRE(
+      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "old.ut.ca", {}));
 
   REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E2"));
   const auto gen2 = t.dir / "ca" / "ut-ca-e2.pem";
@@ -492,10 +496,9 @@ TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
   CHECK(e2.check_signature(*root.subject_public_key()));
 
   // New issuance chains to the successor; the old leaf still names E1.
-  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "new.ut.ca",
-                       {}));
-  Botan::X509_Certificate fresh(
-      (t.dir / "ee" / "new.ut.ca.crt").string());
+  REQUIRE(
+      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "new.ut.ca", {}));
+  Botan::X509_Certificate fresh((t.dir / "ee" / "new.ut.ca.crt").string());
   CHECK(fresh.issuer_dn() == e2.subject_dn());
   Botan::X509_Certificate old((t.dir / "ee" / "old.ut.ca.crt").string());
   CHECK(old.issuer_dn() == e1.subject_dn());
@@ -533,8 +536,8 @@ TEST_CASE("ca::revoke_ca puts a signing generation on the root CRL") {
   REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E2"));
   // The root is not revocable, and neither is a name nobody carries.
   CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "root-ca", "cacompromise"));
-  CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, t.config.root_ca_cn,
-                            "cacompromise"));
+  CHECK_FALSE(
+      ca::revoke_ca(*eff, t.dir, kPass, t.config.root_ca_cn, "cacompromise"));
   CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "UT CA E9", "cacompromise"));
   // Nor is the successor, now that it is the active issuer.
   CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "signing-ca", "cacompromise"));
@@ -568,8 +571,8 @@ TEST_CASE("ca::revoke_ca puts a signing generation on the root CRL") {
   CHECK(live[0].slug == "ut-ca-e2");
   CHECK(ca::is_initialized(t.dir));
   // Issuance is unaffected: the active generation never moved.
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "after.ut.ca",
-                     {}));
+  CHECK(
+      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "after.ut.ca", {}));
 }
 
 TEST_CASE("ca::is_initialized: active anchors must match the locked config") {

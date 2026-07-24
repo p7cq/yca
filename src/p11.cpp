@@ -66,9 +66,9 @@ Token::Token(const cfg::Config &config, const std::string &label,
     }
   }
   if (!m_slot)
-    throw std::runtime_error(std::format(
-        "no token labeled '{}' found via {} ({} token(s) present)", label,
-        config.pkcs11_module, slots.size()));
+    throw std::runtime_error(
+        std::format("no token labeled '{}' found via {} ({} token(s) present)",
+                    label, config.pkcs11_module, slots.size()));
   m_session.emplace(*m_slot, /*read_only=*/!read_write);
   try {
     m_session->login(P::UserType::User,

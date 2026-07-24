@@ -167,8 +167,8 @@ enum class CrlScope { Root, Signing, All };
 // daily, and share/systemd/yca-root-crl-refresh.* for root, quarterly) so
 // relying parties never see a stale CRL.
 bool refresh_crl(const cfg::Config &config,
-                 const std::filesystem::path &store_dir,
-                 const Secrets &secrets, CrlScope scope = CrlScope::All);
+                 const std::filesystem::path &store_dir, const Secrets &secrets,
+                 CrlScope scope = CrlScope::All);
 
 // RFC 5280 3.3 pruning decision for one CRL entry: an entry may leave the
 // CRL once it has appeared on one scheduled CRL issued beyond the

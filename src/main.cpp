@@ -130,8 +130,8 @@ int main(int argc, char **argv) {
   std::string g_target, g_cn, g_id, g_encoding = "pem";
   get->add_option("target", g_target, "server|client|ca|crl|config|nonce")
       ->required()
-      ->check(CLI::IsMember(
-          {"server", "client", "ca", "crl", "config", "nonce"}));
+      ->check(
+          CLI::IsMember({"server", "client", "ca", "crl", "config", "nonce"}));
   get->add_option(
       "--cn", g_cn,
       "CN ('-' reads it from stdin); root-ca|signing-ca for ca/crl; "
@@ -258,8 +258,7 @@ int main(int argc, char **argv) {
           return 1;
         }
       }
-      return ca::issue_ee(*eff, store_dir, secrets, profile, c_cn, sans,
-                          valid)
+      return ca::issue_ee(*eff, store_dir, secrets, profile, c_cn, sans, valid)
                  ? 0
                  : 1;
     }
@@ -292,23 +291,21 @@ int main(int argc, char **argv) {
           log::error("revoke ca selects by --cn, not --serial");
           return 1;
         }
-        return ca::revoke_ca(*eff, store_dir, secrets, r_cn, r_reason) ? 0
-                                                                           : 1;
+        return ca::revoke_ca(*eff, store_dir, secrets, r_cn, r_reason) ? 0 : 1;
       }
       if (r_cn.empty() == r_serial.empty()) {
         log::error("revoke {} needs exactly one of --cn or --serial",
                    rev_target);
         return 1;
       }
-      return ca::revoke(*eff, store_dir, secrets, rev_target, r_cn,
-                        r_reason, r_serial)
+      return ca::revoke(*eff, store_dir, secrets, rev_target, r_cn, r_reason,
+                        r_serial)
                  ? 0
                  : 1;
     }
 
     if (*renew)
-      return ca::renew_signing_ca(*eff, store_dir, secrets, n_new_cn) ? 0
-                                                                           : 1;
+      return ca::renew_signing_ca(*eff, store_dir, secrets, n_new_cn) ? 0 : 1;
 
     if (*refresh) {
       const ca::CrlScope scope = f_scope == "root"      ? ca::CrlScope::Root
@@ -365,9 +362,8 @@ int main(int argc, char **argv) {
       }
       if (days < 1) // no value: CLI11 leaves 0, use the default
         days = app::default_list_window_days;
-      return ca::list_certs(store_dir, filter, days, l_cn, l_tsv, l_limit)
-                 ? 0
-                 : 1;
+      return ca::list_certs(store_dir, filter, days, l_cn, l_tsv, l_limit) ? 0
+                                                                           : 1;
     }
 
     return 0;
