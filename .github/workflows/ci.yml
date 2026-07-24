@@ -44,7 +44,7 @@ jobs:
 
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.26.x'
           cache-dependency-path: acme/go.sum
@@ -85,7 +85,7 @@ jobs:
           softhsm2-util --version
 
       - name: Restore ccache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: /github/home/.cache/ccache
           key: ccache-trixie-${{ matrix.build_type }}-${{ github.sha }}
@@ -127,7 +127,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.26.x'
           cache-dependency-path: acme/go.sum
