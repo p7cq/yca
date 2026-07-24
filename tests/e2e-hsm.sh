@@ -9,6 +9,9 @@
 # shellcheck disable=SC2015  # `cmd && ok || bad` is the assert idiom; ok/bad never fail
 set -u
 
+# Prevent a cascade-fail due to inherited environment variables.
+unset CA_HSM_PIN CA_HSM_ROOT_PIN
+
 BIN="$(realpath "${1:?usage: e2e-hsm.sh <yca-binary>}")"
 
 MODULE=""
@@ -119,7 +122,10 @@ openssl verify -CAfile "$PKI/ca/ets-root-e1.pem" \
   ok "EE chain verifies to root" || bad "chain verify failed"
 
 # --- wrong PIN rejected (no retry loop; softhsm has no lockout) ---
-(export CA_HSM_PIN=9999; w create server --cn wp.ca >/dev/null 2>&1) &&
+(
+  export CA_HSM_PIN=9999
+  w create server --cn wp.ca >/dev/null 2>&1
+) &&
   bad "wrong PIN accepted" || ok "wrong PIN rejected"
 
 # --- revoke: CRL signed by the token key ---
@@ -161,8 +167,10 @@ SPKI="$WORK/pki-split"
 w2() { "$BIN" --config "$CFG2" --store "$SPKI" "$@"; }
 
 # The root PIN falls back to CA_HSM_PIN, which is wrong for the root token.
-(unset CA_HSM_ROOT_PIN
-  "$BIN" --config "$CFG2" --store "$WORK/pki-splitx" init >/dev/null 2>&1) &&
+(
+  unset CA_HSM_ROOT_PIN
+  "$BIN" --config "$CFG2" --store "$WORK/pki-splitx" init >/dev/null 2>&1
+) &&
   bad "split init with fallback PIN accepted" ||
   ok "split init needs the root token PIN (fallback is the signing PIN)"
 
@@ -193,28 +201,43 @@ grep -q "using existing token keypair 'sr-root-e1'" "$LOG" &&
 
 # Daily issuance must not touch the root token: a wrong root PIN is
 # irrelevant to create and to the signing CRL scope.
-(export CA_HSM_ROOT_PIN=9999; w2 create server --cn split.ca >/dev/null 2>&1) &&
+(
+  export CA_HSM_ROOT_PIN=9999
+  w2 create server --cn split.ca >/dev/null 2>&1
+) &&
   ok "create with only the signing token" || bad "create touched the root token"
 openssl verify -CAfile "$SPKI/ca/sr-root-e1.pem" \
   -untrusted "$SPKI/ca/sr-ca-e1.pem" "$SPKI/ee/split.ca.crt" >/dev/null 2>&1 &&
   ok "split EE chain verifies" || bad "split chain verify failed"
-(export CA_HSM_ROOT_PIN=9999; w2 refresh crl signing >/dev/null 2>&1) &&
+(
+  export CA_HSM_ROOT_PIN=9999
+  w2 refresh crl signing >/dev/null 2>&1
+) &&
   ok "signing CRL refresh with only the signing token" ||
   bad "signing refresh touched the root token"
 
 # Root ceremonies must not touch the signing token.
-(export CA_HSM_PIN=9999; w2 refresh crl root >/dev/null 2>&1) &&
+(
+  export CA_HSM_PIN=9999
+  w2 refresh crl root >/dev/null 2>&1
+) &&
   ok "root CRL refresh with only the root token" ||
   bad "root refresh touched the signing token"
 
 # The rotation ceremony needs both tokens.
-(export CA_HSM_ROOT_PIN=9999; w2 renew signing-ca --new-cn "SR CA E2" \
-  >/dev/null 2>&1) &&
+(
+  export CA_HSM_ROOT_PIN=9999
+  w2 renew signing-ca --new-cn "SR CA E2" \
+    >/dev/null 2>&1
+) &&
   bad "renew accepted a wrong root PIN" || ok "renew needs the root token"
 w2 renew signing-ca --new-cn "SR CA E2" >/dev/null 2>&1 &&
   ok "renew with both tokens" || bad "renew with both tokens"
-(export CA_HSM_PIN=9999; w2 revoke ca --cn "SR CA E1" --reason cACompromise \
-  >/dev/null 2>&1) &&
+(
+  export CA_HSM_PIN=9999
+  w2 revoke ca --cn "SR CA E1" --reason cACompromise \
+    >/dev/null 2>&1
+) &&
   ok "revoke ca with only the root token" ||
   bad "revoke ca touched the signing token"
 unset CA_HSM_ROOT_PIN
@@ -249,9 +272,11 @@ printf '%s' "$OUT" | grep -q GENERATED &&
   ok "hybrid generates a passphrase" || bad "no passphrase generated"
 
 export CA_STORE_PASSPHRASE="$HPASS"
-(unset CA_HSM_PIN
+(
+  unset CA_HSM_PIN
   export CA_HSM_ROOT_PIN="$HPIN"
-  w3 init >/dev/null 2>&1) &&
+  w3 init >/dev/null 2>&1
+) &&
   ok "hybrid init exits 0 (no signing PIN needed)" || bad "hybrid init"
 grep -q "generating keypair 'hy-root-e1' on the token" "$LOG" &&
   ok "hybrid root key generated on token" || bad "hybrid root key not on token"
@@ -267,29 +292,42 @@ if command -v pkcs11-tool >/dev/null 2>&1; then
 fi
 
 # Issuance and the signing CRL scope run on the passphrase alone.
-(unset CA_HSM_PIN CA_HSM_ROOT_PIN
-  w3 create server --cn hy.ca >/dev/null 2>&1) &&
+(
+  unset CA_HSM_PIN CA_HSM_ROOT_PIN
+  w3 create server --cn hy.ca >/dev/null 2>&1
+) &&
   ok "create with no token PIN" || bad "create wanted a PIN"
 openssl verify -CAfile "$HPKI/ca/hy-root-e1.pem" \
   -untrusted "$HPKI/ca/hy-ca-e1.pem" "$HPKI/ee/hy.ca.crt" >/dev/null 2>&1 &&
   ok "hybrid EE chain verifies" || bad "hybrid chain verify failed"
-(export CA_STORE_PASSPHRASE=wrong; w3 create server --cn hw.ca \
-  >/dev/null 2>&1) &&
+(
+  export CA_STORE_PASSPHRASE=wrong
+  w3 create server --cn hw.ca \
+    >/dev/null 2>&1
+) &&
   bad "wrong passphrase accepted" || ok "wrong passphrase rejected"
-(unset CA_HSM_PIN CA_HSM_ROOT_PIN
-  w3 refresh crl signing >/dev/null 2>&1) &&
+(
+  unset CA_HSM_PIN CA_HSM_ROOT_PIN
+  w3 refresh crl signing >/dev/null 2>&1
+) &&
   ok "signing CRL refresh on the passphrase alone" || bad "signing refresh"
 
 # Root ceremonies want the root PIN (and only it for the root CRL).
-(unset CA_HSM_PIN CA_HSM_ROOT_PIN
-  w3 refresh crl root >/dev/null 2>&1) &&
+(
+  unset CA_HSM_PIN CA_HSM_ROOT_PIN
+  w3 refresh crl root >/dev/null 2>&1
+) &&
   bad "root refresh without a PIN accepted" || ok "root refresh needs the PIN"
-(unset CA_HSM_PIN CA_STORE_PASSPHRASE
+(
+  unset CA_HSM_PIN CA_STORE_PASSPHRASE
   export CA_HSM_ROOT_PIN="$HPIN"
-  w3 refresh crl root >/dev/null 2>&1) &&
+  w3 refresh crl root >/dev/null 2>&1
+) &&
   ok "root CRL refresh with only the root PIN" || bad "root refresh"
-(unset CA_HSM_PIN CA_HSM_ROOT_PIN
-  w3 renew signing-ca --new-cn "HY CA E2" >/dev/null 2>&1) &&
+(
+  unset CA_HSM_PIN CA_HSM_ROOT_PIN
+  w3 renew signing-ca --new-cn "HY CA E2" >/dev/null 2>&1
+) &&
   bad "renew without the root PIN accepted" || ok "renew needs the root PIN"
 (CA_HSM_ROOT_PIN="$HPIN" w3 renew signing-ca --new-cn "HY CA E2" \
   >/dev/null 2>&1) &&
@@ -300,8 +338,10 @@ openssl verify -CAfile "$HPKI/ca/hy-root-e1.pem" \
 # With the root token gone (in the safe), daily operation is unaffected
 # and root ceremonies fail cleanly.
 softhsm2-util --delete-token --token yca-hy-root >/dev/null 2>&1
-(unset CA_HSM_PIN CA_HSM_ROOT_PIN
-  w3 create server --cn hy2.ca >/dev/null 2>&1) &&
+(
+  unset CA_HSM_PIN CA_HSM_ROOT_PIN
+  w3 create server --cn hy2.ca >/dev/null 2>&1
+) &&
   ok "create with the root token removed" || bad "create needs the root token"
 (CA_HSM_ROOT_PIN="$HPIN" w3 refresh crl root >/dev/null 2>&1) &&
   bad "root refresh without the token accepted" ||
