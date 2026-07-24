@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Build and test in a debian:trixie container: the stock ubuntu-24.04
+  # runner ships cmake 3.28, below the 3.31 required by CMakeLists.txt.
+  build-test:
+    name: build + ctest (${{ matrix.build_type }})
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # Debug adds ASan and coverage instrumentation, Release strips.
+        build_type: [Debug, Release]
+    env:
+      CCACHE_DIR: /github/home/.cache/ccache
+      CCACHE_MAXSIZE: 500M
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates git curl \
+            clang libc++-dev libc++abi-dev build-essential \
+            cmake ninja-build ccache libsqlite3-dev pkg-config \
+            openssl sqlite3 python3 \
+            autoconf automake libtool libssl-dev opensc
+
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: acme/go.sum
+
+      # e2e-acme drives the daemon with a real ACME client.
+      - name: Install acme.sh
+        run: |
+          git clone --depth 1 https://github.com/acmesh-official/acme.sh /opt/acme.sh
+          ln -s /opt/acme.sh/acme.sh /usr/local/bin/acme.sh
+
+      # Botan signs X.509 through the hash-on-token mechanisms
+      # (CKM_ECDSA_SHAxxx), which SoftHSM offers only since 2.7.0, while
+      # trixie ships 2.6.1; without this the e2e-hsm suite exits 77.
+      # The 2.7.0 release carries no tarball asset, only GitHub's
+      # auto-generated archives, whose bytes are not guaranteed stable.
+      # The tag is cloned and pinned by commit id.
+      - name: Build SoftHSM 2.7.0
+        env:
+          SOFTHSM_COMMIT: 13e6e86b83748fef74046dbf0c91f664b7acc1c3
+        run: |
+          git clone --depth 1 --branch 2.7.0 \
+            https://github.com/softhsm/SoftHSMv2 "$RUNNER_TEMP/softhsm"
+          cd "$RUNNER_TEMP/softhsm"
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$SOFTHSM_COMMIT" ]; then
+            echo "tag 2.7.0 is $head, expected $SOFTHSM_COMMIT" >&2
+            exit 1
+          fi
+          sh autogen.sh
+          # --disable-gost: OpenSSL 3 dropped the GOST engine. The object
+          # store stays on the file backend, which is what the suite
+          # configures, so no database backend is needed.
+          ./configure --prefix=/usr/local --disable-gost \
+            --with-crypto-backend=openssl
+          make -j"$(nproc)"
+          make install
+          ldconfig
+          softhsm2-util --version
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        with:
+          path: /github/home/.cache/ccache
+          key: ccache-trixie-${{ matrix.build_type }}-${{ github.sha }}
+          restore-keys: ccache-trixie-${{ matrix.build_type }}-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_CXX_COMPILER=/usr/bin/clang++ \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      # All four suites run for real here: nothing should report as
+      # skipped.
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: ccache statistics
+        if: always()
+        run: ccache --show-stats
+
+  go:
+    name: go (acme)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: acme
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache-dependency-path: acme/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-clean:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./...
+
+  lint:
+    name: lint (shell + format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLANG_FORMAT_VERSION: '22.1.8'
+      SHELLCHECK_VERSION: 'v0.11.0'
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install pinned lint tools
+        run: |
+          python3 -m venv "$RUNNER_TEMP/lint-venv"
+          "$RUNNER_TEMP/lint-venv/bin/pip" install --quiet \
+            "clang-format==${CLANG_FORMAT_VERSION}"
+          echo "$RUNNER_TEMP/lint-venv/bin" >> "$GITHUB_PATH"
+
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL \
+            "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | tar -xJ --strip-components=1 -C "$HOME/.local/bin" \
+              "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      # Default severity also reports `info` findings (SC2030/SC2031 in
+      # e2e-hsm.sh, where the subshell scoping is intentional).
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          shellcheck --severity=warning tests/*.sh
+
+      - name: clang-format
+        run: |
+          clang-format --version
+          clang-format --dry-run -Werror \
+            src/*.cpp src/*.h tests/unit_test.cpp
