@@ -214,7 +214,11 @@ void ensure_cert_index(Botan::SQL_Database &db) {
       "serial TEXT NOT NULL, not_before INTEGER NOT NULL, "
       "not_after INTEGER NOT NULL, status TEXT NOT NULL, "
       "revoked_at INTEGER NOT NULL DEFAULT 0, "
-      "reason INTEGER NOT NULL DEFAULT 0)");
+      "reason INTEGER NOT NULL DEFAULT 0, "
+      // Subject/authority key identifiers: the issuer link a chain walk
+      // follows. Empty when the certificate carries no such extension.
+      "ski TEXT NOT NULL DEFAULT '', "
+      "aki TEXT NOT NULL DEFAULT '')");
   for (const char *ix :
        {"CREATE INDEX IF NOT EXISTS ci_na ON cert_index(not_after)",
         "CREATE INDEX IF NOT EXISTS ci_nb ON cert_index(not_before)",
@@ -225,7 +229,8 @@ void ensure_cert_index(Botan::SQL_Database &db) {
         // every active row; the CA aliases ride (kind, not_before) instead of
         // scanning the whole index for a handful of CA generations.
         "CREATE INDEX IF NOT EXISTS ci_sna ON cert_index(status, not_after)",
-        "CREATE INDEX IF NOT EXISTS ci_knb ON cert_index(kind, not_before)"})
+        "CREATE INDEX IF NOT EXISTS ci_knb ON cert_index(kind, not_before)",
+        "CREATE INDEX IF NOT EXISTS ci_ski ON cert_index(ski)"})
     db.new_statement(ix)->spin();
 }
 
@@ -234,8 +239,9 @@ void index_cert(Botan::SQL_Database &db, const Botan::X509_Certificate &c,
                 std::size_t revoked_at) {
   auto s = db.new_statement(
       "INSERT OR REPLACE INTO cert_index "
-      "(fingerprint,cn,kind,serial,not_before,not_after,status,revoked_at) "
-      "VALUES (?1,?2,?3,?4,?5,?6,?7,?8)");
+      "(fingerprint,cn,kind,serial,not_before,not_after,status,revoked_at,"
+      "ski,aki) "
+      "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
   s->bind(1, c.fingerprint("SHA-256"));
   s->bind(2, c.subject_dn().get_first_attribute("X520.CommonName"));
   s->bind(3, kind);
@@ -244,6 +250,8 @@ void index_cert(Botan::SQL_Database &db, const Botan::X509_Certificate &c,
   s->bind(6, static_cast<std::size_t>(c.not_after().time_since_epoch()));
   s->bind(7, status);
   s->bind(8, revoked_at);
+  s->bind(9, Botan::hex_encode(c.subject_key_id()));
+  s->bind(10, Botan::hex_encode(c.authority_key_id()));
   s->spin();
 }
 
@@ -566,6 +574,46 @@ std::optional<Botan::X509_Certificate> load_cert(Botan::SQL_Database &db,
     return std::nullopt;
   const auto [blob, len] = q->get_blob(0);
   return Botan::X509_Certificate(std::vector<uint8_t>(blob, blob + len));
+}
+
+std::string ski_of(const Botan::X509_Certificate &c) {
+  return Botan::hex_encode(c.subject_key_id());
+}
+
+std::string aki_of(const Botan::X509_Certificate &c) {
+  return Botan::hex_encode(c.authority_key_id());
+}
+
+// The issuers above `cert`, nearest first, stopping before the self-signed
+// anchor: relying parties already hold that one, and RFC 8555 wants it left
+// out of a served chain. Each step resolves a certificate's aki to the ski of
+// its issuer, the way path building does.
+//
+// One ski means one certificate. Cross-signing puts two on the same key
+// and the visited set is what bounds the walk; cross-certificates make the
+// issuer a graph, not a tree.
+std::vector<Botan::X509_Certificate>
+issuers_above(Botan::SQL_Database &db, Botan::X509_Certificate cert) {
+  std::vector<Botan::X509_Certificate> out;
+  std::unordered_set<std::string> seen{cert.fingerprint("SHA-256")};
+  for (;;) {
+    const std::string aki = aki_of(cert);
+    if (aki.empty() || aki == ski_of(cert)) // self-signed: nothing above it
+      return out;
+    auto q = db.new_statement("SELECT fingerprint FROM cert_index WHERE ski=?1 "
+                              "ORDER BY fingerprint LIMIT 1");
+    q->bind(1, aki);
+    if (!q->step())
+      return out;
+    const std::string fp = q->get_str(0);
+    if (!seen.insert(fp).second)
+      return out;
+    auto issuer = load_cert(db, fp);
+    if (!issuer || ski_of(*issuer) == aki_of(*issuer))
+      return out;
+    out.push_back(*issuer);
+    cert = *issuer;
+  }
 }
 
 // The full config, recorded at init and enforced on every later run: every
@@ -2083,7 +2131,7 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
 
 bool get_cert(const cfg::Config &config, const fs::path &store_dir,
               const std::string &target, const std::string &selector,
-              const std::string &encoding) {
+              const std::string &encoding, bool chain) {
   const fs::path db = store_path(store_dir);
   if (!fs::exists(db)) {
     log::error("not initialized; run '{} init'", app::name);
@@ -2189,6 +2237,9 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
   }
 
   emit(*found, encoding);
+  if (chain)
+    for (const auto &issuer : issuers_above(*dbh, *found))
+      emit(issuer, encoding);
   return true;
 }
 

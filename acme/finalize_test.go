@@ -94,7 +94,11 @@ case "$1" in
   get)
     case "$2" in
       nonce)  echo "deadbeefdeadbeef"; exit 0;;
-      server) cat "$dir/leaf.pem"; exit 0;;
+      server)
+        # --chain appends the issuers, the way the real get does.
+        cat "$dir/leaf.pem"
+        case " $* " in *" --chain "*) cat "$dir/ca.pem";; esac
+        exit 0;;
       ca)     cat "$dir/ca.pem"; exit 0;;
     esac;;
   sign)
@@ -215,7 +219,7 @@ func TestRunnerForwardsValid(t *testing.T) {
 
 	args, _ := os.ReadFile(st.args)
 	var signs []string
-	for _, l := range strings.Split(strings.TrimSpace(string(args)), "\n") {
+	for l := range strings.SplitSeq(strings.TrimSpace(string(args)), "\n") {
 		if strings.Contains(l, "sign server") {
 			signs = append(signs, l)
 		}

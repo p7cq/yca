@@ -159,6 +159,30 @@ w get ca --cn root-ca --encoding der 2>/dev/null |
 ) &&
 	ok "get needs no passphrase" || bad "get required passphrase"
 
+# --- get --chain ---
+# The walk must reproduce what a caller would concatenate by hand, and stop
+# below the root: relying parties already hold the anchor.
+w get server --cn foo.ca --chain >"$WORK/chain.pem" 2>/dev/null
+{
+	w get server --cn foo.ca 2>/dev/null
+	w get ca --cn signing-ca 2>/dev/null
+} >"$WORK/chain-manual.pem"
+cmp -s "$WORK/chain.pem" "$WORK/chain-manual.pem" &&
+	ok "get --chain == leaf + signing CA" || bad "get --chain differs from manual concatenation"
+[ "$(grep -c 'BEGIN CERTIFICATE' "$WORK/chain.pem")" = 2 ] &&
+	ok "get --chain stops below the root" || bad "get --chain certificate count"
+openssl verify -CAfile <(w get ca --cn root-ca 2>/dev/null) \
+	-untrusted "$WORK/chain.pem" "$WORK/chain.pem" >/dev/null 2>&1 &&
+	ok "get --chain verifies against the root" || bad "get --chain does not verify"
+[ "$(w get ca --cn signing-ca --chain 2>/dev/null | grep -c 'BEGIN CERTIFICATE')" = 1 ] &&
+	ok "get ca --chain omits the root" || bad "get ca --chain included the root"
+[ "$(w get ca --cn root-ca --chain 2>/dev/null | grep -c 'BEGIN CERTIFICATE')" = 1 ] &&
+	ok "get root --chain is the root alone" || bad "get root --chain count"
+w get server --cn foo.ca --chain --encoding der >/dev/null 2>&1 &&
+	bad "--chain accepted with der" || ok "--chain rejected with der"
+w get crl --cn root-ca --chain >/dev/null 2>&1 &&
+	bad "--chain accepted for crl" || ok "--chain rejected for crl"
+
 # --- revoke ---
 w revoke server --cn foo.ca --reason keyCompromise >/dev/null 2>&1 &&
 	ok "revoke server foo.ca" || bad "revoke server foo.ca"

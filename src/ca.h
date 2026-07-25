@@ -183,10 +183,10 @@ bool crl_entry_prunable(std::size_t prev_this_update,
 // Writes a certificate to stdout. `profile` is "ca", "server", or "client".
 // For "ca", `selector` is an alias ("root-ca"/"signing-ca") or the CA CN; for
 // server/client it is the EE CN and the active cert of that profile is
-// returned. `encoding` is "pem" or "der". Read-only: no passphrase required.
+// returned. `encoding` is "pem" or "der"; `chain` is PEM-only.
 bool get_cert(const cfg::Config &config, const std::filesystem::path &store_dir,
               const std::string &profile, const std::string &selector,
-              const std::string &encoding);
+              const std::string &encoding, bool chain = false);
 
 // Lists certificates via cert_index. `filter` is one of "expiring", "expired",
 // "revoked", "last" (windowed by `days`, ordered) or "cn" (by `cn`, which may

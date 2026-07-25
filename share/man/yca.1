@@ -138,7 +138,7 @@ horizon: a relying party may keep serving a cached root CRL until its
 nextUpdate, so after \fBrevoke\fR \fIca\fR publish the fresh one at once
 instead of waiting for the quarterly timer.
 .TP
-\fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR]
+\fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR] [\fB\-\-chain\fR]
 Write a certificate, CRL, the effective (database) configuration, or an
 enrollment nonce to standard output (default \fBpem\fR). For
 \fIca\fR/\fIcrl\fR, \fB\-\-cn\fR takes \fBroot-ca\fR, \fBsigning-ca\fR, or
@@ -147,6 +147,11 @@ the CA common name; \fIconfig\fR takes no \fB\-\-cn\fR;
 most of its 5-minute validity remains, rotating it otherwise. \fB\-\-cn\fR
 \fB\-\fR reads the CN from standard input (piping from \fBsign\fR). Needs no
 secret.
+.IP
+\fB\-\-chain\fR appends the issuers above the certificate, nearest first,
+stopping below the self\-signed root, which relying parties already hold.
+It applies to \fIserver\fR, \fIclient\fR and \fIca\fR, and only with
+\fBpem\fR: DER cannot be concatenated.
 .TP
 \fBlist\fR \fIfilter\fR [\fB\-\-tsv\fR] [\fB\-\-limit\fR \fIN\fR]
 List certificates matching exactly one filter: \fB\-\-expiring\fR [\fIN\fR],

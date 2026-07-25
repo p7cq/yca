@@ -139,6 +139,9 @@ int main(int argc, char **argv) {
   get->add_option("--id", g_id, "enrolled identity (nonce only)");
   get->add_option("--encoding", g_encoding, "pem|der (default pem)")
       ->check(CLI::IsMember({"pem", "der"}));
+  bool g_chain = false;
+  get->add_flag("--chain", g_chain,
+                "append the issuers, up to but excluding the root (PEM only)");
 
   auto *list = app.add_subcommand("list", "list certificates by filter");
   // The window cap is max_ee_valid_days, not an arbitrary year: `--expiring`
@@ -333,7 +336,20 @@ int main(int argc, char **argv) {
           return 1;
         }
       }
-      return ca::get_cert(*eff, store_dir, g_target, g_cn, g_encoding) ? 0 : 1;
+      if (g_chain) {
+        if (g_target != "server" && g_target != "client" && g_target != "ca") {
+          log::error("--chain applies to server, client or ca");
+          return 1;
+        }
+        // A chain is a concatenation, and DER cannot be concatenated.
+        if (g_encoding == "der") {
+          log::error("--chain requires pem encoding");
+          return 1;
+        }
+      }
+      return ca::get_cert(*eff, store_dir, g_target, g_cn, g_encoding, g_chain)
+                 ? 0
+                 : 1;
     }
 
     if (*list) {

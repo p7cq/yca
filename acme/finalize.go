@@ -1,7 +1,7 @@
 // finalize (RFC 8555 §7.4): the CSR arrives here, and issuance execs the
 // yca CLI - the single owner of the CA store. The pipeline mirrors the
 // manual flow: get nonce -> sign server --csr - (DER on stdin, CN on
-// stdout) -> get server / get ca for the chain. One issuance at a time:
+// stdout) -> get server --chain. One issuance at a time:
 // the enrolled identity holds a single pending nonce, and the PKCS#11
 // login is seconds - a mutex keeps the pipeline honest.
 package main
@@ -86,15 +86,13 @@ func (y *ycaRunner) issue(csrDER []byte) (chain, cn string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	ee, err := y.run(nil, "get", "server", "--cn", cn)
+	// The CA assembles the chain: how deep it goes is a property of the
+	// hierarchy, which yca owns and this side has no business knowing.
+	chain, err = y.run(nil, "get", "server", "--cn", cn, "--chain")
 	if err != nil {
 		return "", "", err
 	}
-	issuer, err := y.run(nil, "get", "ca", "--cn", "signing-ca")
-	if err != nil {
-		return "", "", err
-	}
-	return ee + "\n" + issuer + "\n", cn, nil
+	return chain + "\n", cn, nil
 }
 
 // revoke revokes the exact certificate by serial (uppercase hex).

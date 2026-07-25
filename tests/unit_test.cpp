@@ -769,6 +769,32 @@ TEST_CASE("a leaf may not outlive its issuer") {
   CHECK_FALSE(ca::detail::outlives_issuer(issuer, std::chrono::hours(12)));
 }
 
+TEST_CASE("cert_index records the key identifiers a chain walk follows") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+  REQUIRE(
+      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "ski.ut.ca", {}));
+
+  Botan::Sqlite3_Database h((t.dir / "ca-store.db").string());
+  auto id = [&](const std::string &kind, int col) {
+    auto q = h.new_statement("SELECT ski,aki FROM cert_index WHERE kind=?1 "
+                             "AND status='active' LIMIT 1");
+    q->bind(1, kind);
+    REQUIRE(q->step());
+    return q->get_str(col);
+  };
+
+  CHECK_FALSE(id("root", 0).empty());
+  // The self-signed root is its own issuer: a walk's stop condition.
+  CHECK(id("root", 0) == id("root", 1));
+  // Every other certificate's aki resolves to its issuer's ski.
+  CHECK(id("signing", 1) == id("root", 0));
+  CHECK(id("server", 1) == id("signing", 0));
+  CHECK(id("server", 0) != id("signing", 0));
+}
+
 TEST_CASE("renewal window: a near-expiry active cert may be superseded") {
   TempPki t;
   REQUIRE(ca::init(t.config, t.dir, kPass));
