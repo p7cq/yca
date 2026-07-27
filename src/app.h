@@ -22,16 +22,17 @@ inline constexpr const char *root_pin_env = "CA_HSM_ROOT_PIN";
 inline constexpr std::string_view store_dir = "store";
 inline constexpr std::string_view store_file = "ca-store.db";
 
-// Configuration table name.
+// Configuration table names. `config_table` holds the sections that exist
+// once per store ([pki], [pkcs11], [root]); `purpose_table` holds one row
+// per issuing CA, so a CA declared after init can be locked on its own.
 inline constexpr std::string_view config_table = "ca_config";
+inline constexpr std::string_view purpose_table = "ca_purpose";
 
-// Cap on ee_valid_days: the historic CA/Browser Forum limit on public
-// subscriber certificates, kept deliberately - private trust is exempt from
-// the SC-081 reductions (200 days from 2026, 100 from 2027, 47 from 2029).
-// Also caps the `list` day windows: `--expiring N` should be able to cover a
-// full EE lifetime, so the signing CA shows up no later than the moment
-// issuance starts refusing (a leaf may not outlive its issuer).
-inline constexpr int max_ee_valid_days = 398;
+// The cap on ee_valid_days lives in the profile table (profile.h): it is a
+// property of the certificate shape, not of the deployment, and the
+// profiles no longer share one number. The TLS profiles keep the historic
+// CA/Browser Forum limit deliberately - private trust is exempt from the
+// SC-081 reductions (200 days from 2026, 100 from 2027, 47 from 2029).
 
 // SPIFFE ID limits (SPIFFE-ID standard): a trust domain name has "a
 // maximum length of 255 bytes", and implementations "SHOULD NOT generate

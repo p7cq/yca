@@ -16,23 +16,29 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 CFG="$WORK/config.test.toml"
 cat >"$CFG" <<'EOF'
+[pki]
 org_name = "Load Test"
 country_code = "CA"
 repository_host = "pki.test.ca"
-root_ca_cn = "TTS Root Load Test"
-root_ca_curve = "secp384r1"
-root_ca_digest = "SHA-384"
-root_ca_valid_days = 8192
-root_ca_slug_prefix = "tts-root-load-e"
-signing_ca_cn = "CA Load Test"
-signing_ca_curve = "secp384r1"
-signing_ca_digest = "SHA-384"
-signing_ca_valid_days = 8112
-signing_ca_slug_prefix = "ca-load-e"
+arc_oid = "1.3.6.1.4.1.32473"
+
+[root]
+cn = "TTS Root Load Test"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8192
+slug_prefix = "tts-root-load-e"
+
+[ca.tls]
+profiles = ["server", "client"]
+cn = "CA Load Test"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8112
+slug_prefix = "ca-load-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-root_arc_oid = "1.3.6.1.4.1.32473"
 EOF
 
 export CA_STORE_PASSPHRASE=loadtest

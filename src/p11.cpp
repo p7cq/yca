@@ -56,7 +56,7 @@ std::shared_ptr<Botan::PKCS11::Module> shared_module(const std::string &path) {
 
 Token::Token(const cfg::Config &config, const std::string &label,
              std::string_view pin, bool read_write)
-    : m_module(shared_module(config.pkcs11_module)) {
+    : m_module(shared_module(config.pkcs11.module)) {
   const auto slots = P::Slot::get_available_slots(*m_module, true);
   for (const auto id : slots) {
     P::Slot candidate(*m_module, id);
@@ -68,7 +68,7 @@ Token::Token(const cfg::Config &config, const std::string &label,
   if (!m_slot)
     throw std::runtime_error(
         std::format("no token labeled '{}' found via {} ({} token(s) present)",
-                    label, config.pkcs11_module, slots.size()));
+                    label, config.pkcs11.module, slots.size()));
   m_session.emplace(*m_slot, /*read_only=*/!read_write);
   try {
     m_session->login(P::UserType::User,

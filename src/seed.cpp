@@ -31,7 +31,13 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  if (config.key_backend == "pkcs11") {
+  // The seeder issues server/client leaves, so it is that CA it loads.
+  const cfg::SigningCa *ca_cfg = config.ca_for_profile("server");
+  if (!ca_cfg) {
+    log::error("no configured CA issues the 'server' profile");
+    return false;
+  }
+  if (ca_cfg->key_backend == "pkcs11") {
     // Store/query tuning does not need HSM-real signatures, and millions of
     // on-token operations would take days.
     log::error("the seeder supports key_backend = \"internal\" only");
@@ -46,7 +52,7 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, passphrase, rng);
 
-  const CaGen sign = active_ca(*dbh, config, "signing");
+  const CaGen sign = active_ca(*dbh, config, ca_cfg->purpose);
   auto sign_cert = load_ca_cert(store_dir, sign.slug);
   if (!sign_cert) {
     log::error("signing CA cert not found under {}",
@@ -64,15 +70,15 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
     return false;
 
   ensure_cert_index(*dbh);
-  const std::string &md = config.ee_digest;
+  const std::string &md = ca_cfg->ee_digest;
   Botan::X509_CA issuer(*sign_cert, *sign_key, md, rng);
-  Botan::EC_Group grp = Botan::EC_Group::from_name(config.ee_curve);
+  Botan::EC_Group grp = Botan::EC_Group::from_name(ca_cfg->ee_curve);
   Botan::ECDSA_PrivateKey ee_key(rng, grp); // reused for all seeded certs
 
   const auto now = Clock::now();
   const Botan::X509_Time nb(now - std::chrono::days(2));
   const Botan::X509_Time active_na(now +
-                                   std::chrono::days(config.ee_valid_days));
+                                   std::chrono::days(ca_cfg->ee_valid_days));
   const Botan::X509_Time expired_na(now - std::chrono::days(1));
 
   std::vector<Botan::CRL_Entry> revoked;
@@ -80,7 +86,8 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
   // status: 'a' active, 'e' expired (past not_after), 'r' revoked (future
   // not_after + added to the CRL).
   auto emit_cert = [&](const std::string &cn, bool server, char status) {
-    Botan::X509_Cert_Options o("", util::days_to_seconds(config.ee_valid_days));
+    Botan::X509_Cert_Options o("",
+                               util::days_to_seconds(ca_cfg->ee_valid_days));
     o.common_name = cn;
     o.add_constraints(Botan::Key_Constraints(
         static_cast<uint32_t>(Botan::Key_Constraints::DigitalSignature)));
@@ -90,7 +97,7 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
     auto cert = issuer.sign_request(req, rng, nb,
                                     status == 'e' ? expired_na : active_na);
     store.insert_cert(cert);
-    index_cert(*dbh, cert, server ? "server" : "client",
+    index_cert(*dbh, cert, server ? "server" : "client", sign.purpose,
                status == 'r' ? "revoked" : "active",
                status == 'r' ? now_epoch() : 0);
     if (status == 'r') {
@@ -119,8 +126,7 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
 
   const fs::path crl_path = store_dir / "ca" / (sign.slug + ".crl");
   Botan::X509_CRL prev(crl_path.string());
-  Botan::X509_CA crl_issuer(*sign_cert, *sign_key, config.signing_ca_digest,
-                            rng);
+  Botan::X509_CA crl_issuer(*sign_cert, *sign_key, ca_cfg->digest, rng);
   if (!write_der(crl_path,
                  crl_issuer.update_crl(
                      prev, revoked, rng,

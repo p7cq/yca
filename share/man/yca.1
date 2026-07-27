@@ -12,19 +12,23 @@ certificates, maintains signed CRLs, and exports artifacts. Storage is a
 single SQLite database plus delivered PEM/DER files under the store
 directory. Each CA key lives either software-encrypted in the store
 (\fBinternal\fR backend) or on a PKCS#11 token/HSM (\fBpkcs11\fR backend),
-selected per CA (\fBroot_key_backend\fR/\fBsigning_key_backend\fR, with
-\fBkey_backend\fR as the shorthand for both); with \fBpkcs11\fR the root
-key may sit on its own token (\fBpkcs11_root_token_label\fR: equal to the
-signing label means one token, different means split tokens, and a
-\fBpkcs11\fR root over an \fBinternal\fR signing key is the hybrid
+declared by each CA's own \fBkey_backend\fR; with \fBpkcs11\fR a CA may
+sit on its own token (\fBtoken_label\fR, defaulting to the shared
+\fB[pkcs11] token_label\fR: one label everywhere means a single token,
+a distinct label under \fB[root]\fR means split tokens, and a
+\fBpkcs11\fR root over an \fBinternal\fR issuing key is the hybrid
 layout). See the configuration file.
 .PP
-At
+The configuration is organized in sections, which is also the granularity
+at which it is locked: \fB[pki]\fR, an optional \fB[pkcs11]\fR,
+\fB[root]\fR, and one \fB[ca.<purpose>]\fR per issuing CA. Each CA lists
+the EE profiles it issues, and a profile belongs to exactly one CA: that
+is how issuance picks an issuer. At
 .B yca init
-the configuration is snapshotted into the store database, which becomes the
+each section is snapshotted into the store database, which becomes the
 source of truth; later edits to locked fields in the file are ignored with a
-warning. The configuration is fully locked: re\-initialize to change
-anything. Per\-issuance flexibility is \fB\-\-valid\fR, capped by
+warning. Everything is locked: re\-initialize to change it.
+Per\-issuance flexibility is \fB\-\-valid\fR, capped by
 \fBee_valid_days\fR.
 .SH OPTIONS
 .TP
@@ -45,7 +49,8 @@ Print the release version and exit.
 .SH COMMANDS
 .TP
 .B init
-Initialize the PKI: create the root and signing CA (and empty signed CRLs).
+Initialize the PKI: create the root and every declared issuing CA (with
+empty signed CRLs), in one root ceremony.
 When any CA key uses the \fBinternal\fR backend, a store passphrase is
 generated and shown once if \fBCA_STORE_PASSPHRASE\fR is unset. For every
 key on a \fBpkcs11\fR backend, an existing token keypair must already be
@@ -92,12 +97,14 @@ Revoke a certificate and rewrite the signed CRL. For \fIserver\fR and
 \fIclient\fR the entry goes on the CRL of the generation that issued the
 certificate, not of whichever signs today. \fIca\fR revokes a signing CA
 generation instead, selected by \fB\-\-cn\fR (its common name, or
-\fBsigning-ca\fR for the active one) and never by \fB\-\-serial\fR: the
+\fB<purpose>-ca\fR for that CA's active generation) and never by
+\fB\-\-serial\fR: the
 entry goes on the \fBroot\fR CRL, the only thing that ever writes there,
 and the updated CRL carries a fresh nextUpdate, so only publication is
 left to do. Refused for the root, which relying parties drop from their
-trust stores rather than revoke, and for the active issuer, which
-\fBrenew signing-ca\fR must replace first so issuance never has a gap.
+trust stores rather than revoke, and for the active generation of its own
+purpose, which \fBrenew signing-ca\fR must replace first so that purpose
+never has an issuance gap.
 By \fB\-\-cn\fR the newest
 active certificate for that name is revoked; \fB\-\-serial\fR (hex,
 \fB:\fR separators and leading zeros tolerated) selects the exact
@@ -107,17 +114,30 @@ case-insensitive CRLReason: \fBunspecified\fR (default),
 \fBsuperseded\fR, \fBcessationOfOperation\fR, \fBcertificateHold\fR,
 \fBremoveFromCRL\fR, \fBprivilegeWithdrawn\fR, \fBaACompromise\fR.
 .TP
-\fBrenew\fR \fIsigning\-ca\fR \fB\-\-new\-cn\fR \fIcn\fR
-Create the next generation of the signing CA: a fresh key and the
-configured signing profile under the new display name \fIcn\fR, signed by
+\fBadd\fR \fIsigning\-ca\fR \fB\-\-purpose\fR \fIp\fR
+Create the issuing CA that \fB[ca.\fIp\fB]\fR declares but the store does
+not hold: generation 1, signed by the active root, so this is a root key
+ceremony. The section is locked into the store as it is created, which is
+what lets a CA join an initialized store without re\-initializing it.
+Refused when the file declares no such section, or when the store already
+holds that purpose (rotate it with \fBrenew\fR instead). This is the one
+command that reads \fByca.toml\fR rather than the store's snapshot, since
+the section it creates is by definition not in the snapshot yet. Prints
+the new CN on standard output.
+.TP
+\fBrenew\fR \fIsigning\-ca\fR [\fB\-\-purpose\fR \fIp\fR] \fB\-\-new\-cn\fR \fIcn\fR
+Create the next generation of one issuing CA: a fresh key and that CA's
+configured profile under the new display name \fIcn\fR, signed by
 the active root, so this brings the root key online like a root CRL
-refresh. The slug is derived (\fB<signing_ca_slug_prefix><generation>\fR)
-and with \fBpkcs11\fR the keypair is generated on the token under that
-label. The successor becomes the issuer of every new certificate; the
+refresh. The slug is derived (the CA's \fBslug_prefix\fR plus the
+generation) and with \fBpkcs11\fR the keypair is generated on the token
+under that label. The successor becomes the issuer of every new certificate; the
 incumbent turns retiring and keeps publishing its own CRL until the last
-certificate it signed has expired, so old chains keep validating. Refused
-when \fIcn\fR already names a generation, or when the new CA would
-outlive the root. Prints the new CN on standard output.
+certificate it signed has expired, so old chains keep validating. Every
+other purpose is untouched. \fB\-\-purpose\fR is required once several
+issuing CAs exist; with one it is inferred. Refused when \fIcn\fR already
+names a generation, or when the new CA would outlive the root. Prints the
+new CN on standard output.
 .TP
 \fBrefresh\fR \fIcrl\fR [\fBroot\fR|\fBsigning\fR|\fBall\fR]
 Re-sign the published CRLs selected by the scope (default \fBall\fR) from
@@ -141,7 +161,7 @@ instead of waiting for the quarterly timer.
 \fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR] [\fB\-\-chain\fR]
 Write a certificate, CRL, the effective (database) configuration, or an
 enrollment nonce to standard output (default \fBpem\fR). For
-\fIca\fR/\fIcrl\fR, \fB\-\-cn\fR takes \fBroot-ca\fR, \fBsigning-ca\fR, or
+\fIca\fR/\fIcrl\fR, \fB\-\-cn\fR takes \fBroot-ca\fR, \fB<purpose>-ca\fR, or
 the CA common name; \fIconfig\fR takes no \fB\-\-cn\fR;
 \fInonce\fR takes \fB\-\-id\fR instead and returns the pending nonce while
 most of its 5-minute validity remains, rotating it otherwise. \fB\-\-cn\fR
@@ -157,7 +177,7 @@ It applies to \fIserver\fR, \fIclient\fR and \fIca\fR, and only with
 List certificates matching exactly one filter: \fB\-\-expiring\fR [\fIN\fR],
 \fB\-\-expired\fR [\fIN\fR], \fB\-\-revoked\fR [\fIN\fR], \fB\-\-last\fR
 [\fIN\fR] (window in days, 1\-398, default 30), or \fB\-\-cn\fR
-\fIcn\fR|\fBroot-ca\fR|\fBsigning-ca\fR. Columns: CN, kind, serial
+\fIcn\fR|\fBroot-ca\fR|\fB<purpose>-ca\fR. Columns: CN, kind, serial
 (truncated), expiry, status. \fB\-\-tsv\fR emits tab-separated output.
 At most \fB\-\-limit\fR rows are printed (default 50, \fB0\fR for all); a
 truncated listing says so on standard error.
@@ -183,7 +203,9 @@ layout).
 .SH FILES
 .TP
 .B yca.toml
-Declarative configuration; locked into the store at init.
+Declarative configuration, in sections
+(\fB[pki]\fR, \fB[pkcs11]\fR, \fB[root]\fR, \fB[ca.<purpose>]\fR); each
+section is locked into the store when it is created.
 .TP
 .B <store>/ca-store.db
 SQLite store: certificates, encrypted CA keys (internal backend),

@@ -14,6 +14,7 @@
 #include "ca.h"
 #include "config.h"
 #include "log.h"
+#include "profile.h"
 #include "util.h"
 
 namespace {
@@ -35,6 +36,14 @@ std::optional<ca::San> parse_san(const std::string &spec) {
   if (type == "uri")
     return ca::San{ca::San::Type::Uri, std::move(value)};
   return std::nullopt;
+}
+
+// "server|client|email" for a help string.
+std::string join(const std::vector<std::string> &v) {
+  std::string out;
+  for (const auto &s : v)
+    out += (out.empty() ? "" : "|") + s;
+  return out;
 }
 
 } // namespace
@@ -62,9 +71,17 @@ int main(int argc, char **argv) {
       app.add_subcommand("create", "issue an end-entity certificate");
   std::string c_target, c_cn, c_valid;
   std::vector<std::string> c_sans;
-  create->add_option("target", c_target, "server|client")
+  // `create` offers only the profiles whose key it may generate; the rest
+  // exist but are CSR-only (see profile.h).
+  std::vector<std::string> creatable, signable;
+  for (const auto &p : profile::all()) {
+    signable.emplace_back(p.name);
+    if (!p.csr_only)
+      creatable.emplace_back(p.name);
+  }
+  create->add_option("target", c_target, join(creatable))
       ->required()
-      ->check(CLI::IsMember({"server", "client"}));
+      ->check(CLI::IsMember(creatable));
   create->add_option("--cn", c_cn, "common name");
   create->add_option("--san", c_sans,
                      "SAN as type:name (dns|email|ip|uri), repeatable");
@@ -81,9 +98,9 @@ int main(int argc, char **argv) {
   auto *sign = app.add_subcommand(
       "sign", "issue an end-entity certificate from a PKCS#10 CSR");
   std::string s_target, s_id, s_nonce, s_csr, s_valid;
-  sign->add_option("target", s_target, "server|client")
+  sign->add_option("target", s_target, join(signable))
       ->required()
-      ->check(CLI::IsMember({"server", "client"}));
+      ->check(CLI::IsMember(signable));
   sign->add_option("--id", s_id, "enrolled identity")->required();
   sign->add_option("--nonce", s_nonce, "nonce from 'get nonce --id'")
       ->required();
@@ -96,9 +113,11 @@ int main(int argc, char **argv) {
 
   auto *revoke = app.add_subcommand("revoke", "revoke a certificate");
   std::string rev_target, r_cn, r_reason = "unspecified", r_serial;
-  revoke->add_option("target", rev_target, "server|client|ca")
+  std::vector<std::string> revokable = signable;
+  revokable.emplace_back("ca");
+  revoke->add_option("target", rev_target, join(revokable))
       ->required()
-      ->check(CLI::IsMember({"server", "client", "ca"}));
+      ->check(CLI::IsMember(revokable));
   revoke->add_option("--cn", r_cn,
                      "common name; for ca, a generation's CN or signing-ca");
   revoke->add_option("--serial", r_serial,
@@ -107,12 +126,23 @@ int main(int argc, char **argv) {
   revoke->add_option("--reason", r_reason,
                      "CRLReason name (default unspecified)");
 
+  auto *add = app.add_subcommand(
+      "add", "create a declared but not yet existing CA (root key ceremony)");
+  std::string a_target, a_purpose;
+  add->add_option("target", a_target, "signing-ca")
+      ->required()
+      ->check(CLI::IsMember({"signing-ca"}));
+  add->add_option("--purpose", a_purpose,
+                  "the [ca.<purpose>] section to create")
+      ->required();
+
   auto *renew = app.add_subcommand(
       "renew", "create the next generation of a CA (root key ceremony)");
-  std::string n_target, n_new_cn;
+  std::string n_target, n_purpose, n_new_cn;
   renew->add_option("target", n_target, "signing-ca")
       ->required()
       ->check(CLI::IsMember({"signing-ca"}));
+  renew->add_option("--purpose", n_purpose, "which issuing CA to rotate");
   renew->add_option("--new-cn", n_new_cn, "the new generation's common name")
       ->required();
 
@@ -128,10 +158,13 @@ int main(int argc, char **argv) {
   auto *get = app.add_subcommand(
       "get", "export a certificate, CRL, nonce or the config to stdout");
   std::string g_target, g_cn, g_id, g_encoding = "pem";
-  get->add_option("target", g_target, "server|client|ca|crl|config|nonce")
+  // Every profile is exportable, plus the CA-level and store-level targets.
+  std::vector<std::string> gettable = signable;
+  for (const char *t : {"ca", "crl", "config", "nonce"})
+    gettable.emplace_back(t);
+  get->add_option("target", g_target, join(gettable))
       ->required()
-      ->check(
-          CLI::IsMember({"server", "client", "ca", "crl", "config", "nonce"}));
+      ->check(CLI::IsMember(gettable));
   get->add_option(
       "--cn", g_cn,
       "CN ('-' reads it from stdin); root-ca|signing-ca for ca/crl; "
@@ -144,10 +177,11 @@ int main(int argc, char **argv) {
                 "append the issuers, up to but excluding the root (PEM only)");
 
   auto *list = app.add_subcommand("list", "list certificates by filter");
-  // The window cap is max_ee_valid_days, not an arbitrary year: `--expiring`
-  // must be able to cover a full EE lifetime, so the signing CA becomes
-  // visible no later than the moment issuance starts refusing.
-  const CLI::Range window(1, app::max_ee_valid_days);
+  // The window cap is the longest life any profile allows, not an
+  // arbitrary year: `--expiring` must be able to cover a full EE lifetime,
+  // so the issuing CA becomes visible no later than the moment issuance
+  // starts refusing.
+  const CLI::Range window(1, profile::max_valid_days());
   int l_expiring = app::default_list_window_days;
   int l_expired = app::default_list_window_days;
   int l_revoked = app::default_list_window_days;
@@ -182,8 +216,8 @@ int main(int argc, char **argv) {
   CLI11_PARSE(app, argc, argv);
 
   // No subcommand: show help.
-  if (!*init && !*create && !*enroll && !*sign && !*revoke && !*renew &&
-      !*refresh && !*get && !*list) {
+  if (!*init && !*create && !*enroll && !*sign && !*revoke && !*add &&
+      !*renew && !*refresh && !*get && !*list) {
     std::fputs(app.help().c_str(), stdout);
     return 0;
   }
@@ -241,8 +275,6 @@ int main(int argc, char **argv) {
         log::error("--cn is required for create {}", c_target);
         return 1;
       }
-      const ca::Profile profile =
-          (c_target == "server") ? ca::Profile::Server : ca::Profile::Client;
       std::vector<ca::San> sans;
       for (const auto &s : c_sans) {
         if (auto san = parse_san(s)) {
@@ -261,7 +293,7 @@ int main(int argc, char **argv) {
           return 1;
         }
       }
-      return ca::issue_ee(*eff, store_dir, secrets, profile, c_cn, sans, valid)
+      return ca::issue_ee(*eff, store_dir, secrets, c_target, c_cn, sans, valid)
                  ? 0
                  : 1;
     }
@@ -271,8 +303,6 @@ int main(int argc, char **argv) {
 
     if (*sign) {
       ca::reconcile(*config, *eff);
-      const ca::Profile profile =
-          (s_target == "server") ? ca::Profile::Server : ca::Profile::Client;
       std::optional<std::chrono::seconds> valid;
       if (!s_valid.empty()) {
         valid = util::parse_duration(s_valid);
@@ -282,7 +312,7 @@ int main(int argc, char **argv) {
           return 1;
         }
       }
-      return ca::sign_csr(*eff, store_dir, secrets, profile, s_id, s_nonce,
+      return ca::sign_csr(*eff, store_dir, secrets, s_target, s_id, s_nonce,
                           s_csr, valid)
                  ? 0
                  : 1;
@@ -307,8 +337,26 @@ int main(int argc, char **argv) {
                  : 1;
     }
 
-    if (*renew)
-      return ca::renew_signing_ca(*eff, store_dir, secrets, n_new_cn) ? 0 : 1;
+    if (*add) {
+      // `add` reads the FILE: the section it creates is by definition not in
+      // the store's snapshot yet. Everything else runs off `eff`.
+      ca::reconcile(*config, *eff);
+      return ca::add_signing_ca(*config, store_dir, secrets, a_purpose) ? 0 : 1;
+    }
+
+    if (*renew) {
+      // One issuing CA needs no naming; several do.
+      if (n_purpose.empty()) {
+        if (eff->cas.size() != 1) {
+          log::error("--purpose is required with several issuing CAs");
+          return 1;
+        }
+        n_purpose = eff->cas.begin()->first;
+      }
+      return ca::renew_signing_ca(*eff, store_dir, secrets, n_purpose, n_new_cn)
+                 ? 0
+                 : 1;
+    }
 
     if (*refresh) {
       const ca::CrlScope scope = f_scope == "root"      ? ca::CrlScope::Root

@@ -15,6 +15,7 @@
 #include "config.h"
 #include "log.h"
 #include "util.h"
+#include "x509ext.h"
 
 TEST_CASE("slug lowercases and hyphenates") {
   CHECK(util::slug("ETS Root E1") == "ets-root-e1");
@@ -114,27 +115,92 @@ TEST_CASE("parse_duration") {
   CHECK_FALSE(util::parse_duration("1h30m")); // single unit only
 }
 
+// --- hand-encoded X.509 extensions (x509ext) ---
+
+TEST_CASE("x509ext: nameConstraints encode and read back through Botan") {
+  // Botan cannot emit this extension but decodes it correctly, so the
+  // encoder is checked against Botan's own parser: build a certificate
+  // carrying the extension, then read the constraints back off it.
+  Botan::AutoSeeded_RNG rng;
+  Botan::ECDSA_PrivateKey key(rng, Botan::EC_Group::from_name("secp256r1"));
+  Botan::X509_Cert_Options o("", 86400);
+  o.common_name = "NC Test CA";
+  o.CA_key(0);
+  o.extensions.add_new(
+      std::make_unique<x509ext::Name_Constraints>(x509ext::NameConstraints{
+          {"example.ca", "b.test"}, {"mail.example.ca"}}),
+      true);
+  const auto cert =
+      Botan::X509::create_self_signed_cert(o, key, "SHA-256", rng);
+
+  const auto &nc = cert.name_constraints();
+  const auto &permitted = nc.permitted();
+  REQUIRE(permitted.size() == 3);
+  // Order is the encoder's: dNSName subtrees, then rfc822Name.
+  CHECK(permitted[0].base().type_code() == Botan::GeneralName::NameType::DNS);
+  CHECK(permitted[1].base().type_code() == Botan::GeneralName::NameType::DNS);
+  CHECK(permitted[2].base().type_code() ==
+        Botan::GeneralName::NameType::RFC822);
+  // The values arrive intact, checked through the matcher rather than a
+  // deprecated accessor: RFC 5280 dNSName matching is by label suffix.
+  CHECK(permitted[0].base().matches_dns("example.ca"));
+  CHECK(permitted[0].base().matches_dns("www.example.ca"));
+  CHECK_FALSE(permitted[0].base().matches_dns("notexample.ca"));
+  CHECK(permitted[1].base().matches_dns("b.test"));
+  CHECK(nc.excluded().empty());
+
+  // RFC 5280 requires the extension to be critical: a verifier that cannot
+  // apply the limit must reject the chain, not ignore it.
+  const auto nc_oid = Botan::OID::from_string("X509v3.NameConstraints");
+  CHECK(cert.v3_extensions().critical_extension_set(nc_oid));
+}
+
+TEST_CASE("x509ext: an empty nameConstraints emits nothing") {
+  // A SEQUENCE with no subtrees would permit everything while looking like
+  // a constraint, so the extension is omitted instead.
+  Botan::AutoSeeded_RNG rng;
+  Botan::ECDSA_PrivateKey key(rng, Botan::EC_Group::from_name("secp256r1"));
+  Botan::X509_Cert_Options o("", 86400);
+  o.common_name = "NC Empty CA";
+  o.CA_key(0);
+  o.extensions.add_new(
+      std::make_unique<x509ext::Name_Constraints>(x509ext::NameConstraints{}),
+      true);
+  const auto cert =
+      Botan::X509::create_self_signed_cert(o, key, "SHA-256", rng);
+  CHECK(cert.name_constraints().permitted().empty());
+}
+
 namespace {
 
-const std::string VALID = R"(org_name = "Example"
+const std::string VALID = R"([pki]
+org_name = "Example"
 country_code = "CA"
 repository_host = "pki.example.ca"
-root_ca_cn = "ETS Root E1"
-root_ca_curve = "secp384r1"
-root_ca_digest = "SHA-384"
-root_ca_valid_days = 8192
-root_ca_slug_prefix = "ets-root-e"
-signing_ca_cn = "CA E1"
-signing_ca_curve = "secp384r1"
-signing_ca_digest = "SHA-384"
-signing_ca_valid_days = 8112
-signing_ca_slug_prefix = "ca-e"
+arc_oid = "1.3.6.1.4.1.32473"
+
+[root]
+cn = "ETS Root E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8192
+slug_prefix = "ets-root-e"
+
+[ca.tls]
+profiles = ["server", "client"]
+cn = "CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8112
+slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-root_arc_oid = "1.3.6.1.4.1.32473"
 )";
 
+// Replaces the FIRST occurrence, so a key spelled the same in two sections
+// ("curve", "digest") reaches [root]; the CA's own are anchored on values
+// unique to it.
 std::string with(const std::string &from, const std::string &to,
                  std::string s = VALID) { // nest calls for multi-field edits
   const auto p = s.find(from);
@@ -143,39 +209,61 @@ std::string with(const std::string &from, const std::string &to,
   return s;
 }
 
-bool loads(const std::string &toml) {
+// Insert a line into a section, anchored on that section's unique cn.
+std::string in_root(const std::string &line, const std::string &s = VALID) {
+  return with("cn = \"ETS Root E1\"", line + "\ncn = \"ETS Root E1\"", s);
+}
+std::string in_ca(const std::string &line, const std::string &s = VALID) {
+  return with("cn = \"CA E1\"", line + "\ncn = \"CA E1\"", s);
+}
+
+std::expected<cfg::Config, std::vector<std::string>>
+parse(const std::string &toml) {
   const auto path = std::filesystem::temp_directory_path() / "yca_unit.toml";
   std::ofstream(path) << toml;
-  const bool ok = cfg::load(path).has_value();
+  auto c = cfg::load(path);
   std::filesystem::remove(path);
-  return ok;
+  return c;
+}
+
+bool loads(const std::string &toml) { return parse(toml).has_value(); }
+
+// Rejection alone is a weak assertion once a file can break several rules at
+// once: this pins which rule fired.
+bool rejected_for(const std::string &toml, std::string_view needle) {
+  const auto c = parse(toml);
+  if (c)
+    return false;
+  for (const auto &e : c.error())
+    if (e.find(needle) != std::string::npos)
+      return true;
+  return false;
 }
 
 } // namespace
 
 TEST_CASE("cfg::load accepts a valid config") { CHECK(loads(VALID)); }
 
-TEST_CASE("cfg::load: root_arc_oid is optional") {
-  CHECK(loads(with("root_arc_oid = \"1.3.6.1.4.1.32473\"\n", "")));
+TEST_CASE("cfg::load: arc_oid is optional") {
+  CHECK(loads(with("arc_oid = \"1.3.6.1.4.1.32473\"\n", "")));
   // Present means valid: empty or malformed values are still rejected.
-  CHECK_FALSE(loads(
-      with("root_arc_oid = \"1.3.6.1.4.1.32473\"", "root_arc_oid = \"\"")));
+  CHECK_FALSE(loads(with("arc_oid = \"1.3.6.1.4.1.32473\"", "arc_oid = \"\"")));
 }
 
 TEST_CASE("cfg::load parses values") {
-  const auto path = std::filesystem::temp_directory_path() / "yca_unit2.toml";
-  std::ofstream(path) << VALID;
-  const auto c = cfg::load(path);
-  std::filesystem::remove(path);
+  const auto c = parse(VALID);
   REQUIRE(c.has_value());
-  CHECK(c->repository_host == "pki.example.ca");
-  CHECK(c->ee_valid_days == 397);
-  CHECK(c->root_arc_oid == "1.3.6.1.4.1.32473");
-  CHECK(c->ee_curve == "secp256r1");
-  CHECK(c->root_ca_curve == "secp384r1");
+  CHECK(c->pki.repository_host == "pki.example.ca");
+  CHECK(c->pki.arc_oid == "1.3.6.1.4.1.32473");
+  CHECK(c->root.curve == "secp384r1");
+  CHECK(c->cas.at("tls").purpose == "tls");
+  CHECK(c->cas.at("tls").profiles ==
+        std::vector<std::string>{"server", "client"});
+  CHECK(c->cas.at("tls").ee_valid_days == 397);
+  CHECK(c->cas.at("tls").ee_curve == "secp256r1");
   // Slugs derive from the prefixes at generation 1; never parsed.
-  CHECK(c->root_ca_slug == "ets-root-e1");
-  CHECK(c->signing_ca_slug == "ca-e1");
+  CHECK(c->root.slug == "ets-root-e1");
+  CHECK(c->cas.at("tls").slug == "ca-e1");
 }
 
 TEST_CASE("cfg::load: only Botan curve names, no prime256v1 alias") {
@@ -184,139 +272,166 @@ TEST_CASE("cfg::load: only Botan curve names, no prime256v1 alias") {
 }
 
 TEST_CASE("cfg::load rejects invalid configs") {
-  CHECK_FALSE(loads(
-      with("root_ca_digest = \"SHA-384\"", "root_ca_digest = \"sha999\"")));
+  // Bare "digest"/"curve" hit [root]: it is the first section spelling them.
+  CHECK_FALSE(loads(with("digest = \"SHA-384\"", "digest = \"sha999\"")));
   // Digests are Botan's names verbatim; the old lowercase forms are rejected.
-  CHECK_FALSE(loads(
-      with("root_ca_digest = \"SHA-384\"", "root_ca_digest = \"sha384\"")));
+  CHECK_FALSE(loads(with("digest = \"SHA-384\"", "digest = \"sha384\"")));
   CHECK_FALSE(loads(with("ee_digest = \"SHA-256\"", "ee_digest = \"sha256\"")));
-  CHECK_FALSE(loads(
-      with("root_ca_curve = \"secp384r1\"", "root_ca_curve = \"rsa2048\"")));
+  CHECK_FALSE(loads(with("curve = \"secp384r1\"", "curve = \"rsa2048\"")));
   CHECK_FALSE(loads(with("1.3.6.1.4.1.32473", "1.a.b")));
   CHECK_FALSE(loads(with("country_code = \"CA\"", "country_code = \"CAN\"")));
   CHECK_FALSE(loads(with("ee_valid_days = 397", "ee_valid_days = 500")));
   CHECK_FALSE(loads(with("org_name = \"Example\"", "org_name = \"\"")));
-  CHECK_FALSE(loads(with("signing_ca_cn = \"CA E1\"\n", "")));
+  CHECK_FALSE(loads(with("cn = \"CA E1\"\n", "")));
 
-  // The EE validity must sit under the signing CA's lifetime.
+  // The EE validity must sit under its own CA's lifetime.
   const std::string short_ca =
       with("ee_valid_days = 397", "ee_valid_days = 20",
-           with("signing_ca_valid_days = 8112", "signing_ca_valid_days = 30"));
+           with("valid_days = 8112", "valid_days = 30"));
   CHECK(loads(short_ca)); // ee 20 < 30: fine
   CHECK_FALSE(loads(with("ee_valid_days = 20", "ee_valid_days = 30",
-                         short_ca))); // no longer under the signing CA
+                         short_ca))); // no longer under its CA
   CHECK_FALSE(loads(with("ee_valid_days = 397", "ee_valid_days = 8112")));
+  // ...and the CA's under the root's.
+  CHECK(rejected_for(with("valid_days = 8192", "valid_days = 8000"),
+                     "must be < [root] valid_days"));
+}
+
+TEST_CASE("cfg::load: sections are required") {
+  CHECK(rejected_for(with("[pki]\n", ""), "missing section [pki]"));
+  CHECK(rejected_for(with("[root]\n", ""), "missing section [root]"));
+  // No issuing CA at all: nothing could ever be issued. Truncating rather
+  // than dropping the header, which would fold the CA's keys into [root].
+  CHECK(rejected_for(VALID.substr(0, VALID.find("[ca.tls]")), "no issuing CA"));
+}
+
+TEST_CASE("cfg::load: the purpose names the [ca.*] section") {
+  CHECK(loads(with("[ca.tls]", "[ca.email-sign]")));
+  // 'root' names the anchor, declared in its own section.
+  CHECK(rejected_for(with("[ca.tls]", "[ca.root]"), "[ca.root]"));
+  // The purpose ends up in messages and selectors: same charset as a slug.
+  CHECK(
+      rejected_for(with("[ca.tls]", "[ca.\"TLS Certs\"]"), "lowercase ASCII"));
+}
+
+TEST_CASE("cfg::load: profiles are declared, known and owned by one CA") {
+  CHECK(rejected_for(with("profiles = [\"server\", \"client\"]\n", ""),
+                     "profiles: missing"));
+  CHECK(
+      rejected_for(with("profiles = [\"server\", \"client\"]", "profiles = []"),
+                   "at least one profile"));
+  CHECK(
+      rejected_for(with("\"client\"", "\"smoke-signals\""), "unknown profile"));
+  // A second CA claiming a profile the first already owns: the profile
+  // decides the issuer, so two owners would make issuance ambiguous.
+  const std::string second = R"(
+[ca.other]
+profiles = ["server"]
+cn = "Other CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8112
+slug_prefix = "other-e"
+ee_curve = "secp256r1"
+ee_digest = "SHA-256"
+ee_valid_days = 397
+)";
+  CHECK(rejected_for(VALID + second, "belongs to exactly one CA"));
+
+  // Split across two CAs it loads, and each profile routes to its own.
+  const auto split = parse(
+      with("profiles = [\"server\", \"client\"]", "profiles = [\"client\"]") +
+      second);
+  REQUIRE(split.has_value());
+  CHECK(split->cas.size() == 2);
+  REQUIRE(split->ca_for_profile("server"));
+  REQUIRE(split->ca_for_profile("client"));
+  CHECK(split->ca_for_profile("server")->purpose == "other");
+  CHECK(split->ca_for_profile("client")->purpose == "tls");
+  // A profile nobody claims is not a config error: that PKI simply does
+  // not issue it, and issuance says so.
+  CHECK_FALSE(split->ca_for_profile("email"));
 }
 
 TEST_CASE("cfg::load: names are free-form UTF-8, slugs are strict ASCII") {
-  // *_cn fields are DN-only (UTF8String): any script is legal.
+  // cn fields are DN-only (UTF8String): any script is legal.
   CHECK(loads(with("org_name = \"Example\"", "org_name = \"Компания 株\"")));
-  CHECK(loads(
-      with("root_ca_cn = \"ETS Root E1\"", "root_ca_cn = \"ETS 株 Root E1\"")));
-  CHECK(
-      loads(with("signing_ca_cn = \"CA E1\"", "signing_ca_cn = \"CA ﺵﺮﻛﺓ\"")));
+  CHECK(loads(with("cn = \"ETS Root E1\"", "cn = \"ETS 株 Root E1\"")));
+  CHECK(loads(with("cn = \"CA E1\"", "cn = \"CA ﺵﺮﻛﺓ\"")));
   // Declared slug prefixes go verbatim into URLs/file names (as
   // <prefix><generation>): lowercase ASCII only.
-  CHECK_FALSE(loads(with("root_ca_slug_prefix = \"ets-root-e\"",
-                         "root_ca_slug_prefix = \"ets-株\"")));
   CHECK_FALSE(
-      loads(with("root_ca_slug_prefix = \"ets-root-e\"",
-                 "root_ca_slug_prefix = \"ETS Root E\""))); // case + spaces
-  CHECK_FALSE(
-      loads(with("root_ca_slug_prefix = \"ets-root-e\"",
-                 "root_ca_slug_prefix = \"ets_root_e\""))); // kebab-case only
-  CHECK_FALSE(
-      loads(with("signing_ca_slug_prefix = \"ca-e\"",
-                 "signing_ca_slug_prefix = \"ets-root-e\""))); // collision
-  CHECK_FALSE(
-      loads(with("signing_ca_slug_prefix = \"ca-e\"",
-                 "signing_ca_slug_prefix = \"ets-root-e1\""))); // digits apart
-  CHECK_FALSE(
-      loads(with("signing_ca_slug_prefix = \"ca-e\"\n", ""))); // required
+      loads(with("slug_prefix = \"ets-root-e\"", "slug_prefix = \"ets-株\"")));
+  CHECK_FALSE(loads(with("slug_prefix = \"ets-root-e\"",
+                         "slug_prefix = \"ETS Root E\""))); // case + spaces
+  CHECK_FALSE(loads(with("slug_prefix = \"ets-root-e\"",
+                         "slug_prefix = \"ets_root_e\""))); // kebab-case only
+  CHECK(rejected_for(
+      with("slug_prefix = \"ca-e\"", "slug_prefix = \"ets-root-e\""),
+      "share the same slug_prefix"));
+  CHECK(rejected_for(
+      with("slug_prefix = \"ca-e\"", "slug_prefix = \"ets-root-e1\""),
+      "differ only by digits"));
+  CHECK_FALSE(loads(with("slug_prefix = \"ca-e\"\n", ""))); // required
+  // Two CAs must not share a CN either: it identifies a generation in
+  // cert_index and in a CRL's issuer field.
+  CHECK(rejected_for(with("cn = \"CA E1\"", "cn = \"ETS Root E1\""),
+                     "share the same cn"));
 }
 
-TEST_CASE("cfg::load: key_backend defaults to internal") {
-  const auto path = std::filesystem::temp_directory_path() / "yca_unit3.toml";
-  std::ofstream(path) << VALID;
-  const auto c = cfg::load(path);
-  std::filesystem::remove(path);
+TEST_CASE("cfg::load: key_backend defaults to internal per CA") {
+  const auto c = parse(VALID);
   REQUIRE(c.has_value());
-  CHECK(c->key_backend == "internal");
+  CHECK(c->root.key_backend == "internal");
+  CHECK(c->cas.at("tls").key_backend == "internal");
+  CHECK(c->root.token_label.empty());
 }
 
-TEST_CASE("cfg::load: pkcs11 backend requires module and token label") {
-  const std::string P11 = VALID +
-                          "key_backend = \"pkcs11\"\n"
-                          "pkcs11_module = \"/usr/lib/opensc-pkcs11.so\"\n";
-  CHECK(loads(P11 + "pkcs11_token_label = \"yts\"\n"));
-  CHECK_FALSE(loads(VALID + "key_backend = \"pkcs11\"\n")); // missing pkcs11_*
-  CHECK_FALSE(loads(VALID + "key_backend = \"tpm\"\n"));    // unknown backend
-  // pkcs11_* without the pkcs11 backend is a mistake, not silently ignored.
-  CHECK_FALSE(loads(VALID + "pkcs11_module = \"/usr/lib/x.so\"\n"));
-  // PKCS#11 caps the token label at 32 bytes.
-  CHECK_FALSE(loads(P11 + "pkcs11_token_label = "
-                          "\"012345678901234567890123456789012\"\n"));
-}
+TEST_CASE("cfg::load: pkcs11 layouts") {
+  const std::string P11 =
+      "\n[pkcs11]\nmodule = \"/usr/lib/opensc-pkcs11.so\"\n";
+  const std::string LABEL = "token_label = \"yts\"\n";
+  const std::string ON_TOKEN = "key_backend = \"pkcs11\"";
 
-TEST_CASE("cfg::load: per-CA key backends and the layout matrix") {
-  const auto path = std::filesystem::temp_directory_path() / "yca_unit4.toml";
-  auto load = [&](const std::string &body) {
-    std::ofstream(path) << body;
-    auto c = cfg::load(path);
-    std::filesystem::remove(path);
-    return c;
-  };
-  const std::string MOD = "pkcs11_module = \"/usr/lib/opensc-pkcs11.so\"\n";
+  // Single token: both CAs on the shared default label.
+  const auto single = parse(in_ca(ON_TOKEN, in_root(ON_TOKEN)) + P11 + LABEL);
+  REQUIRE(single.has_value());
+  CHECK(single->root.token_label == "yts");
+  CHECK(single->cas.at("tls").token_label == "yts");
 
-  // key_backend is the shorthand default for both per-CA backends.
-  auto def = load(VALID);
-  REQUIRE(def.has_value());
-  CHECK(def->root_key_backend == "internal");
-  CHECK(def->signing_key_backend == "internal");
-  auto p11 = load(VALID + "key_backend = \"pkcs11\"\n" + MOD +
-                  "pkcs11_token_label = \"yts\"\n");
-  REQUIRE(p11.has_value());
-  CHECK(p11->root_key_backend == "pkcs11");
-  CHECK(p11->signing_key_backend == "pkcs11");
-  // Single-token layout: the root label defaults to the signing label.
-  CHECK(p11->pkcs11_root_token_label == "yts");
-
-  // Split tokens: an explicit, different root label.
-  auto split = load(VALID + "key_backend = \"pkcs11\"\n" + MOD +
-                    "pkcs11_token_label = \"yts\"\n"
-                    "pkcs11_root_token_label = \"yts-root\"\n");
+  // Split tokens: the root declares a label of its own.
+  const auto split = parse(
+      in_ca(ON_TOKEN, in_root(ON_TOKEN + "\ntoken_label = \"yts-root\"")) +
+      P11 + LABEL);
   REQUIRE(split.has_value());
-  CHECK(split->pkcs11_root_token_label == "yts-root");
+  CHECK(split->root.token_label == "yts-root");
+  CHECK(split->cas.at("tls").token_label == "yts");
 
-  // Hybrid: pkcs11 root, internal signing; the root label is required
-  // explicitly (nothing to default from) and the signing label is rejected.
-  const std::string HYBRID = VALID + "root_key_backend = \"pkcs11\"\n" + MOD;
-  CHECK(load(HYBRID + "pkcs11_root_token_label = \"yts-root\"\n"));
-  CHECK_FALSE(load(HYBRID));
-  CHECK_FALSE(load(HYBRID + "pkcs11_token_label = \"yts\"\n"
-                            "pkcs11_root_token_label = \"yts-root\"\n"));
-  // Explicit per-CA backends may also spell the hybrid from key_backend.
-  CHECK(load(VALID +
-             "key_backend = \"pkcs11\"\n"
-             "signing_key_backend = \"internal\"\n" +
-             MOD + "pkcs11_root_token_label = \"yts-root\"\n"));
+  // Hybrid: only the root on a token. No [pkcs11] token_label is needed,
+  // since the root carries its own and no other CA asks for one.
+  const auto hybrid =
+      parse(in_root(ON_TOKEN + "\ntoken_label = \"yts-root\"") + P11);
+  REQUIRE(hybrid.has_value());
+  CHECK(hybrid->cas.at("tls").key_backend == "internal");
 
-  // The rejected layout: internal root under a pkcs11 signing key would
-  // protect the replaceable key better than the anchor.
-  CHECK_FALSE(load(VALID + "signing_key_backend = \"pkcs11\"\n" + MOD +
-                   "pkcs11_token_label = \"yts\"\n"));
-  CHECK_FALSE(load(VALID +
-                   "key_backend = \"pkcs11\"\n"
-                   "root_key_backend = \"internal\"\n" +
-                   MOD + "pkcs11_token_label = \"yts\"\n"));
-
-  // Unknown backend values and orphan pkcs11_* fields.
-  CHECK_FALSE(load(VALID + "root_key_backend = \"tpm\"\n"));
-  CHECK_FALSE(load(VALID + "signing_key_backend = \"tpm\"\n"));
-  CHECK_FALSE(load(VALID + "pkcs11_root_token_label = \"yts-root\"\n"));
-  // The root label obeys the same 32-byte PKCS#11 cap.
-  CHECK_FALSE(load(HYBRID + "pkcs11_root_token_label = "
-                            "\"012345678901234567890123456789012\"\n"));
+  // A token-held CA with no label anywhere to fall back on.
+  CHECK(rejected_for(in_root(ON_TOKEN) + P11, "sets no default"));
+  // The module is required as soon as any key is on a token.
+  CHECK(
+      rejected_for(in_ca(ON_TOKEN, in_root(ON_TOKEN)) + "\n[pkcs11]\n" + LABEL,
+                   "module: required"));
+  // The rejected layout: an internal root under a token-held issuing key
+  // would protect the replaceable key better than the anchor.
+  CHECK(rejected_for(in_ca(ON_TOKEN) + P11 + LABEL, "misplaced trust"));
+  // Unknown backend, orphan label, orphan section, oversized label.
+  CHECK(rejected_for(in_root("key_backend = \"tpm\""), "key_backend"));
+  CHECK(rejected_for(in_root("token_label = \"yts\""),
+                     "key_backend is not \"pkcs11\""));
+  CHECK(rejected_for(VALID + P11 + LABEL, "no CA key uses the pkcs11"));
+  CHECK(
+      rejected_for(in_root(ON_TOKEN) + P11 +
+                       "token_label = \"012345678901234567890123456789012\"\n",
+                   "PKCS#11"));
 }
 
 TEST_CASE("cfg::load validates repository_host as a DNS host, optional :port") {
@@ -353,25 +468,29 @@ struct TempPki {
     log::config().default_level = log::Level::OFF; // keep test output clean
     dir = std::filesystem::temp_directory_path() / "yca_ca_ut";
     std::filesystem::remove_all(dir);
-    config.org_name = "Example";
-    config.country_code = "CA";
-    config.repository_host = "pki.unit.ca";
-    config.root_arc_oid = "1.3.6.1.4.1.32473";
-    config.root_ca_cn = "UT Root E1";
-    config.root_ca_curve = "secp256r1"; // canonical (Config built by hand,
-    config.root_ca_digest = "SHA-256";  // no cfg::load validation here)
-    config.root_ca_valid_days = 3650;
-    config.root_ca_slug_prefix = "ut-root-e";
-    config.root_ca_slug = "ut-root-e1";
-    config.signing_ca_cn = "UT CA E1";
-    config.signing_ca_curve = "secp256r1";
-    config.signing_ca_digest = "SHA-256";
-    config.signing_ca_valid_days = 3000;
-    config.signing_ca_slug_prefix = "ut-ca-e";
-    config.signing_ca_slug = "ut-ca-e1";
-    config.ee_curve = "secp256r1";
-    config.ee_digest = "SHA-256";
-    config.ee_valid_days = 90;
+    config.pki.org_name = "Example";
+    config.pki.country_code = "CA";
+    config.pki.repository_host = "pki.unit.ca";
+    config.pki.arc_oid = "1.3.6.1.4.1.32473";
+    config.root.cn = "UT Root E1";
+    config.root.curve = "secp256r1"; // canonical (Config built by hand,
+    config.root.digest = "SHA-256";  // no cfg::load validation here)
+    config.root.valid_days = 3650;
+    config.root.slug_prefix = "ut-root-e";
+    config.root.slug = "ut-root-e1";
+    cfg::SigningCa ca;
+    ca.purpose = "tls";
+    ca.profiles = {"server", "client"};
+    ca.cn = "UT CA E1";
+    ca.curve = "secp256r1";
+    ca.digest = "SHA-256";
+    ca.valid_days = 3000;
+    ca.slug_prefix = "ut-ca-e";
+    ca.slug = "ut-ca-e1";
+    ca.ee_curve = "secp256r1";
+    ca.ee_digest = "SHA-256";
+    ca.ee_valid_days = 90;
+    config.cas.emplace(ca.purpose, std::move(ca));
   }
   ~TempPki() { std::filesystem::remove_all(dir); }
 };
@@ -394,12 +513,13 @@ TEST_CASE("ca::detail::active_ca resolves the generation from the store") {
     // init records generation 1 of both CAs.
     auto h = ca::detail::open_store(db);
     const auto root = ca::detail::active_ca(*h, *eff, "root");
-    const auto sign = ca::detail::active_ca(*h, *eff, "signing");
+    const auto sign =
+        ca::detail::active_ca(*h, *eff, eff->cas.at("tls").purpose);
     CHECK(root.gen == 1);
-    CHECK(root.slug == eff->root_ca_slug);
-    CHECK(root.cn == eff->root_ca_cn);
+    CHECK(root.slug == eff->root.slug);
+    CHECK(root.cn == eff->root.cn);
     CHECK(sign.gen == 1);
-    CHECK(sign.slug == eff->signing_ca_slug);
+    CHECK(sign.slug == eff->cas.at("tls").slug);
   }
   {
     // A later generation wins over the config: the store is the answer.
@@ -407,10 +527,12 @@ TEST_CASE("ca::detail::active_ca resolves the generation from the store") {
     h.new_statement("UPDATE ca_cert_index SET status='retiring' "
                     "WHERE kind='signing' AND gen=1")
         ->spin();
-    h.new_statement("INSERT INTO ca_cert_index (kind,gen,cn,slug,status) "
-                    "VALUES ('signing',2,'UT CA E2','ut-ca-e2','active')")
+    h.new_statement("INSERT INTO ca_cert_index "
+                    "(kind,purpose,gen,cn,slug,status) "
+                    "VALUES ('signing','tls',2,'UT CA E2','ut-ca-e2','active')")
         ->spin();
-    const auto sign = ca::detail::active_ca(h, *eff, "signing");
+    const auto sign =
+        ca::detail::active_ca(h, *eff, eff->cas.at("tls").purpose);
     CHECK(sign.gen == 2);
     CHECK(sign.cn == "UT CA E2");
     CHECK(sign.slug == "ut-ca-e2");
@@ -421,10 +543,38 @@ TEST_CASE("ca::detail::active_ca resolves the generation from the store") {
     // Without the index the ceremony's own generation is the answer.
     Botan::Sqlite3_Database h(db.string());
     h.new_statement("DROP TABLE ca_cert_index")->spin();
-    const auto sign = ca::detail::active_ca(h, *eff, "signing");
+    const auto sign =
+        ca::detail::active_ca(h, *eff, eff->cas.at("tls").purpose);
     CHECK(sign.gen == 1);
-    CHECK(sign.slug == eff->signing_ca_slug);
+    CHECK(sign.slug == eff->cas.at("tls").slug);
   }
+}
+
+TEST_CASE("ca: every indexed row carries the purpose of its CA") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "p.ut.ca", {}));
+  Botan::Sqlite3_Database h((t.dir / "ca-store.db").string());
+
+  auto one = [&](const std::string &sql) {
+    auto q = h.new_statement(sql);
+    REQUIRE(q->step());
+    return q->get_str(0);
+  };
+  // The anchor is its own purpose; the issuing CA and the leaf it signed
+  // both carry the issuing CA's, so a leaf is attributable to its issuer
+  // without walking the chain.
+  CHECK(one("SELECT purpose FROM ca_cert_index WHERE kind='root'") == "root");
+  CHECK(one("SELECT purpose FROM ca_cert_index WHERE kind='signing'") == "tls");
+  CHECK(one("SELECT purpose FROM cert_index WHERE kind='root'") == "root");
+  CHECK(one("SELECT purpose FROM cert_index WHERE kind='signing'") == "tls");
+  CHECK(one("SELECT purpose FROM cert_index WHERE cn='p.ut.ca'") == "tls");
+  auto blanks = h.new_statement("SELECT COUNT(*) FROM cert_index "
+                                "WHERE purpose=''");
+  REQUIRE(blanks->step());
+  CHECK(blanks->get_size_t(0) == 0);
 }
 
 TEST_CASE("ca::detail::live_cas selects the generations that publish CRLs") {
@@ -441,17 +591,18 @@ TEST_CASE("ca::detail::live_cas selects the generations that publish CRLs") {
       v.push_back(g.slug);
     return v;
   };
-  CHECK(slugs("signing") == std::vector<std::string>{eff->signing_ca_slug});
+  CHECK(slugs("signing") == std::vector<std::string>{eff->cas.at("tls").slug});
 
   // A retiring predecessor keeps publishing: both generations, oldest first.
   h.new_statement("UPDATE ca_cert_index SET status='retiring' "
                   "WHERE kind='signing' AND gen=1")
       ->spin();
-  h.new_statement("INSERT INTO ca_cert_index (kind,gen,cn,slug,status) "
-                  "VALUES ('signing',2,'UT CA E2','ut-ca-e2','active')")
+  h.new_statement("INSERT INTO ca_cert_index "
+                  "(kind,purpose,gen,cn,slug,status) "
+                  "VALUES ('signing','tls',2,'UT CA E2','ut-ca-e2','active')")
       ->spin();
   CHECK(slugs("signing") ==
-        std::vector<std::string>{eff->signing_ca_slug, "ut-ca-e2"});
+        std::vector<std::string>{eff->cas.at("tls").slug, "ut-ca-e2"});
 
   // A revoked generation drops out: its CRL is moot.
   h.new_statement("UPDATE ca_cert_index SET status='revoked' "
@@ -459,7 +610,7 @@ TEST_CASE("ca::detail::live_cas selects the generations that publish CRLs") {
       ->spin();
   CHECK(slugs("signing") == std::vector<std::string>{"ut-ca-e2"});
   // The root is untouched by any of it.
-  CHECK(slugs("root") == std::vector<std::string>{eff->root_ca_slug});
+  CHECK(slugs("root") == std::vector<std::string>{eff->root.slug});
 }
 
 TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
@@ -467,10 +618,9 @@ TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
   REQUIRE(ca::init(t.config, t.dir, kPass));
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
-  REQUIRE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "old.ut.ca", {}));
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "old.ut.ca", {}));
 
-  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E2"));
+  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "tls", "UT CA E2"));
   const auto gen2 = t.dir / "ca" / "ut-ca-e2.pem";
   CHECK(std::filesystem::exists(gen2));
   CHECK(std::filesystem::exists(t.dir / "ca" / "ut-ca-e2.crt"));
@@ -478,7 +628,8 @@ TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
 
   {
     auto h = ca::detail::open_store(t.dir / "ca-store.db");
-    const auto active = ca::detail::active_ca(*h, *eff, "signing");
+    const auto active =
+        ca::detail::active_ca(*h, *eff, eff->cas.at("tls").purpose);
     CHECK(active.gen == 2);
     CHECK(active.cn == "UT CA E2");
     CHECK(active.slug == "ut-ca-e2");
@@ -496,8 +647,7 @@ TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
   CHECK(e2.check_signature(*root.subject_public_key()));
 
   // New issuance chains to the successor; the old leaf still names E1.
-  REQUIRE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "new.ut.ca", {}));
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "new.ut.ca", {}));
   Botan::X509_Certificate fresh((t.dir / "ee" / "new.ut.ca.crt").string());
   CHECK(fresh.issuer_dn() == e2.subject_dn());
   Botan::X509_Certificate old((t.dir / "ee" / "old.ut.ca.crt").string());
@@ -511,14 +661,16 @@ TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
   CHECK(e2_crl.get_revoked().empty());
 
   // A generation's name is taken, and so is the root's.
-  CHECK_FALSE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E2"));
-  CHECK_FALSE(ca::renew_signing_ca(*eff, t.dir, kPass, t.config.root_ca_cn));
-  CHECK_FALSE(ca::renew_signing_ca(*eff, t.dir, kPass, ""));
+  CHECK_FALSE(ca::renew_signing_ca(*eff, t.dir, kPass, "tls", "UT CA E2"));
+  CHECK_FALSE(
+      ca::renew_signing_ca(*eff, t.dir, kPass, "tls", t.config.root.cn));
+  CHECK_FALSE(ca::renew_signing_ca(*eff, t.dir, kPass, "tls", ""));
 
   // Generation 3 follows generation 2.
-  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E3"));
+  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "tls", "UT CA E3"));
   auto h = ca::detail::open_store(t.dir / "ca-store.db");
-  CHECK(ca::detail::active_ca(*h, *eff, "signing").slug == "ut-ca-e3");
+  CHECK(ca::detail::active_ca(*h, *eff, eff->cas.at("tls").purpose).slug ==
+        "ut-ca-e3");
   CHECK(ca::detail::live_cas(*h, *eff, "signing").size() == 3);
 }
 
@@ -533,11 +685,11 @@ TEST_CASE("ca::revoke_ca puts a signing generation on the root CRL") {
   CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "signing-ca", "cacompromise"));
   CHECK(Botan::X509_CRL(root_crl).get_revoked().empty());
 
-  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "UT CA E2"));
+  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "tls", "UT CA E2"));
   // The root is not revocable, and neither is a name nobody carries.
   CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "root-ca", "cacompromise"));
   CHECK_FALSE(
-      ca::revoke_ca(*eff, t.dir, kPass, t.config.root_ca_cn, "cacompromise"));
+      ca::revoke_ca(*eff, t.dir, kPass, t.config.root.cn, "cacompromise"));
   CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "UT CA E9", "cacompromise"));
   // Nor is the successor, now that it is the active issuer.
   CHECK_FALSE(ca::revoke_ca(*eff, t.dir, kPass, "signing-ca", "cacompromise"));
@@ -571,8 +723,7 @@ TEST_CASE("ca::revoke_ca puts a signing generation on the root CRL") {
   CHECK(live[0].slug == "ut-ca-e2");
   CHECK(ca::is_initialized(t.dir));
   // Issuance is unaffected: the active generation never moved.
-  CHECK(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "after.ut.ca", {}));
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "after.ut.ca", {}));
 }
 
 TEST_CASE("ca::is_initialized: active anchors must match the locked config") {
@@ -586,7 +737,7 @@ TEST_CASE("ca::is_initialized: active anchors must match the locked config") {
     // Locked-config drift: cert_index anchors no longer match ca_config.
     Botan::Sqlite3_Database h(db.string());
     h.new_statement("UPDATE ca_config SET value='Other CN' "
-                    "WHERE key='root_ca_cn'")
+                    "WHERE key='root.cn'")
         ->spin();
   }
   CHECK_FALSE(ca::is_initialized(t.dir));
@@ -623,7 +774,7 @@ TEST_CASE("ca::init wants an absent or empty store_dir") {
   std::filesystem::remove_all(aside);
 }
 
-TEST_CASE("ca: CertificatePolicies present only when root_arc_oid is set") {
+TEST_CASE("ca: CertificatePolicies present only when arc_oid is set") {
   {
     TempPki t;
     REQUIRE(ca::init(t.config, t.dir, kPass));
@@ -632,7 +783,7 @@ TEST_CASE("ca: CertificatePolicies present only when root_arc_oid is set") {
   }
   {
     TempPki t;
-    t.config.root_arc_oid.clear();
+    t.config.pki.arc_oid.clear();
     REQUIRE(ca::init(t.config, t.dir, kPass));
     Botan::X509_Certificate sign((t.dir / "ca" / "ut-ca-e1.pem").string());
     CHECK(sign.certificate_policy_oids().empty());
@@ -652,8 +803,7 @@ TEST_CASE("ca: revocation is CRL-only - no OCSP pointers anywhere") {
   CHECK(sign.ca_issuers().size() == 1);
   CHECK_FALSE(sign.crl_distribution_points().empty());
 
-  REQUIRE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "aia.ut.ca", {}));
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "aia.ut.ca", {}));
   Botan::X509_Certificate ee((t.dir / "ee" / "aia.ut.ca.crt").string());
   CHECK(ee.ocsp_responders().empty());
   CHECK(ee.ca_issuers().size() == 1);
@@ -668,25 +818,22 @@ TEST_CASE("ca: init + issuance + revocation rules") {
 
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
-  CHECK(eff->signing_ca_cn == "UT CA E1"); // DB snapshot round-trips
-  CHECK(eff->ee_valid_days == 90);
+  CHECK(eff->cas.at("tls").cn == "UT CA E1"); // DB snapshot round-trips
+  CHECK(eff->cas.at("tls").ee_valid_days == 90);
 
   // Server: issue; duplicate active rejected; same CN other profile fine.
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "s.ut.ca", {}));
-  CHECK_FALSE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "s.ut.ca", {}));
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "s.ut.ca",
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "s.ut.ca", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "s.ut.ca", {}));
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "client", "s.ut.ca",
                      {{ca::San::Type::Dns, "s.ut.ca"}}));
 
   // Client requires a SAN; a malformed IPv4 SAN is rejected.
-  CHECK_FALSE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "c.ut.ca", {}));
-  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "ip.ut.ca",
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "client", "c.ut.ca", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "ip.ut.ca",
                            {{ca::San::Type::Ip, "999.1.1.1"}}));
 
   // Signing requires the right passphrase.
-  CHECK_FALSE(
-      ca::issue_ee(*eff, t.dir, "wrong", ca::Profile::Server, "w.ut.ca", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, "wrong", "server", "w.ut.ca", {}));
 
   // Revoke: unknown reason rejected; reason names are case-insensitive;
   // nothing left active afterwards; re-issue is then allowed.
@@ -694,47 +841,46 @@ TEST_CASE("ca: init + issuance + revocation rules") {
   CHECK(ca::revoke(*eff, t.dir, kPass, "server", "s.ut.ca", "KeyCompromise"));
   CHECK_FALSE(
       ca::revoke(*eff, t.dir, kPass, "server", "s.ut.ca", "superseded"));
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "s.ut.ca", {}));
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "s.ut.ca", {}));
 
   // ASCII rules at issuance: server CN feeds a dNSName SAN (IA5), so it must
   // be a hostname; dns/email SANs likewise. A client CN is DN-only: UTF-8 ok.
-  CHECK_FALSE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "srv★.ut.ca", {}));
-  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "u.ut.ca",
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "srv★.ut.ca", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "u.ut.ca",
                            {{ca::San::Type::Dns, "株.ca"}}));
-  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "Ivan",
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "client", "Ivan",
                            {{ca::San::Type::Email, "иван@ut.ca"}}));
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "Иван Петров",
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "client", "Иван Петров",
                      {{ca::San::Type::Email, "ivan@ut.ca"}}));
 
   // uri SANs: both profiles, and a lone uri satisfies the client rule.
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "workload",
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "client", "workload",
                      {{ca::San::Type::Uri, "spiffe://ut.ca/ns/prod/sa/web"}}));
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "svc.ut.ca",
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "svc.ut.ca",
                      {{ca::San::Type::Uri, "spiffe://ut.ca/svc"}}));
-  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "bad-uri",
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "client", "bad-uri",
                            {{ca::San::Type::Uri, "not-absolute"}}));
-  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "bad-sid",
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "client", "bad-sid",
                            {{ca::San::Type::Uri, "spiffe://UT.ca/wl"}}));
   // At most one URI SAN (an X509-SVID carries exactly one).
-  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Client, "two-uris",
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "client", "two-uris",
                            {{ca::San::Type::Uri, "spiffe://ut.ca/a"},
                             {ca::San::Type::Uri, "spiffe://ut.ca/b"}}));
 
   // --valid override: [5m, ee_valid_days] - the policy is the ceiling,
   // shorter is always allowed (ee_valid_days here: 90).
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "short.ut.ca", {},
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "short.ut.ca", {},
                      std::chrono::hours(1)));
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "min.ut.ca", {},
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "min.ut.ca", {},
                      std::chrono::minutes(5)));
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "month.ut.ca", {},
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "month.ut.ca", {},
                      std::chrono::days(30)));
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "cap.ut.ca", {},
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "cap.ut.ca", {},
                      std::chrono::days(90))); // exactly the ceiling
-  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server,
-                           "fast.ut.ca", {}, std::chrono::minutes(4)));
-  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server,
-                           "over.ut.ca", {}, std::chrono::days(91)));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "fast.ut.ca", {},
+                           std::chrono::minutes(4)));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "over.ut.ca", {},
+                           std::chrono::days(91)));
 }
 
 TEST_CASE("ca::reconcile warns and ignores every changed field (locked)") {
@@ -744,17 +890,42 @@ TEST_CASE("ca::reconcile warns and ignores every changed field (locked)") {
   REQUIRE(eff.has_value());
 
   cfg::Config file = t.config;
-  file.ee_valid_days = 45; // locked like everything else: ignored
-  file.org_name = "Other"; // ignored
+  // One field from a global section, one from the CA's own: both locked.
+  file.pki.org_name = "Other";
+  file.cas.at("tls").ee_valid_days = 45;
   ca::reconcile(file, *eff);
-  CHECK(eff->ee_valid_days == 90);
-  CHECK(eff->org_name == "Example");
+  CHECK(eff->pki.org_name == "Example");
+  CHECK(eff->cas.at("tls").ee_valid_days == 90);
 
   // Nothing was persisted either: the DB snapshot is untouched.
   auto reloaded = ca::load_config(t.dir);
   REQUIRE(reloaded.has_value());
-  CHECK(reloaded->ee_valid_days == 90);
-  CHECK(reloaded->org_name == "Example");
+  CHECK(reloaded->pki.org_name == "Example");
+  CHECK(reloaded->cas.at("tls").ee_valid_days == 90);
+}
+
+TEST_CASE("ca::reconcile: a CA is locked as its own section") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+
+  // The store locked exactly the CA the ceremony created.
+  CHECK(eff->cas.size() == 1);
+  CHECK(eff->cas.contains("tls"));
+  CHECK(eff->cas.at("tls").profiles ==
+        std::vector<std::string>{"server", "client"});
+
+  // A purpose declared but never created, and one created but no longer
+  // declared: both are reported, neither changes the effective config.
+  cfg::Config file = t.config;
+  cfg::SigningCa added = file.cas.at("tls");
+  added.purpose = "email";
+  file.cas.erase("tls");
+  file.cas.emplace("email", std::move(added));
+  ca::reconcile(file, *eff);
+  CHECK(eff->cas.size() == 1);
+  CHECK(eff->cas.contains("tls"));
 }
 
 TEST_CASE("a leaf may not outlive its issuer") {
@@ -774,8 +945,7 @@ TEST_CASE("cert_index records the key identifiers a chain walk follows") {
   REQUIRE(ca::init(t.config, t.dir, kPass));
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
-  REQUIRE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "ski.ut.ca", {}));
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "ski.ut.ca", {}));
 
   Botan::Sqlite3_Database h((t.dir / "ca-store.db").string());
   auto id = [&](const std::string &kind, int col) {
@@ -800,11 +970,9 @@ TEST_CASE("renewal window: a near-expiry active cert may be superseded") {
   REQUIRE(ca::init(t.config, t.dir, kPass));
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
-  REQUIRE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "rw.ut.ca", {}));
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "rw.ut.ca", {}));
   // Fresh cert (100% of its life left): the singleton rule holds.
-  CHECK_FALSE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "rw.ut.ca", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "rw.ut.ca", {}));
 
   // Age the active cert via cert_index (the uniqueness source of truth):
   // pretend a 90-day cert with `left` days remaining.
@@ -822,13 +990,11 @@ TEST_CASE("renewal window: a near-expiry active cert may be superseded") {
     u->spin();
   };
   age(40); // 44% left: not yet renewable
-  CHECK_FALSE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "rw.ut.ca", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "rw.ut.ca", {}));
   age(10); // 11% < 33%: the overlapping successor issues
-  CHECK(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "rw.ut.ca", {}));
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "rw.ut.ca", {}));
   // The fresh successor blocks a third one (no runaway chain).
-  CHECK_FALSE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "rw.ut.ca", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "rw.ut.ca", {}));
 
   // --serial picks the EXACT cert: revoke the old one, the successor stays.
   auto serial_of = [&](bool oldest) {
@@ -868,7 +1034,7 @@ TEST_CASE("ca::refresh_crl re-signs the scoped CRLs in place") {
   REQUIRE(ca::init(t.config, t.dir, kPass));
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
-  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "r.ut.ca", {}));
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "r.ut.ca", {}));
   REQUIRE(ca::revoke(*eff, t.dir, kPass, "server", "r.ut.ca", "superseded"));
 
   const auto root_path = (t.dir / "ca" / "ut-root-e1.crl").string();
@@ -923,10 +1089,8 @@ TEST_CASE("CRL pruning: an expired entry leaves after its final appearance") {
   REQUIRE(ca::init(t.config, t.dir, kPass));
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
-  REQUIRE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "p1.ut.ca", {}));
-  REQUIRE(
-      ca::issue_ee(*eff, t.dir, kPass, ca::Profile::Server, "p2.ut.ca", {}));
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "p1.ut.ca", {}));
+  REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "p2.ut.ca", {}));
   REQUIRE(ca::revoke(*eff, t.dir, kPass, "server", "p1.ut.ca", "superseded"));
   REQUIRE(ca::revoke(*eff, t.dir, kPass, "server", "p2.ut.ca", "superseded"));
 

@@ -57,28 +57,48 @@ if command -v pkcs11-tool >/dev/null 2>&1 &&
   exit 77
 fi
 
-cat >"$CFG" <<EOF
+# Each layout gets its own file rather than a sed over a base one: with the
+# sections, "cn" and "key_backend" are spelled the same in [root] and
+# [ca.*], so a line-anchored substitution could not tell them apart.
+# $1 name prefix, $2 root slug prefix, $3 CA slug prefix, $4 [root] extra
+# lines, $5 [ca.tls] extra lines, $6 [pkcs11] extra lines.
+gen_cfg() {
+	cat <<EOF
+[pki]
 org_name = "Example"
 country_code = "CA"
 repository_host = "pki.example.ca"
-root_ca_cn = "ETS Root E1"
-root_ca_curve = "secp384r1"
-root_ca_digest = "SHA-384"
-root_ca_valid_days = 8192
-root_ca_slug_prefix = "ets-root-e"
-signing_ca_cn = "CA E1"
-signing_ca_curve = "secp384r1"
-signing_ca_digest = "SHA-384"
-signing_ca_valid_days = 8112
-signing_ca_slug_prefix = "ca-e"
+arc_oid = "1.3.6.1.4.1.32473"
+
+[pkcs11]
+module = "$MODULE"
+$6
+
+[root]
+$4
+cn = "$1 Root E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8192
+slug_prefix = "$2"
+
+[ca.tls]
+$5
+profiles = ["server", "client"]
+cn = "$1 CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8112
+slug_prefix = "$3"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-root_arc_oid = "1.3.6.1.4.1.32473"
-key_backend = "pkcs11"
-pkcs11_module = "$MODULE"
-pkcs11_token_label = "yca-hsm"
 EOF
+}
+
+# Single-token layout: both CA keys on one token, via the shared default.
+gen_cfg ETS ets-root-e ca-e 'key_backend = "pkcs11"' 'key_backend = "pkcs11"' \
+	'token_label = "yca-hsm"' >"$CFG"
 
 PASS=0
 FAIL=0
@@ -157,12 +177,10 @@ softhsm2-util --init-token --free --label yca-split-root \
   --pin "$RPIN" --so-pin 87654321 >/dev/null
 
 CFG2="$WORK/split.toml"
-sed -e 's/^root_ca_cn = .*/root_ca_cn = "SR Root E1"/' \
-  -e 's/^signing_ca_cn = .*/signing_ca_cn = "SR CA E1"/' \
-  -e 's/^root_ca_slug_prefix = .*/root_ca_slug_prefix = "sr-root-e"/' \
-  -e 's/^signing_ca_slug_prefix = .*/signing_ca_slug_prefix = "sr-ca-e"/' \
-  "$CFG" >"$CFG2"
-echo 'pkcs11_root_token_label = "yca-split-root"' >>"$CFG2"
+gen_cfg SR sr-root-e sr-ca-e \
+  'key_backend = "pkcs11"
+token_label = "yca-split-root"' \
+  'key_backend = "pkcs11"' 'token_label = "yca-hsm"' >"$CFG2"
 SPKI="$WORK/pki-split"
 w2() { "$BIN" --config "$CFG2" --store "$SPKI" "$@"; }
 
@@ -251,16 +269,10 @@ softhsm2-util --init-token --free --label yca-hy-root \
   --pin "$HPIN" --so-pin 87654321 >/dev/null
 
 CFG3="$WORK/hybrid.toml"
-sed -e 's/^root_ca_cn = .*/root_ca_cn = "HY Root E1"/' \
-  -e 's/^signing_ca_cn = .*/signing_ca_cn = "HY CA E1"/' \
-  -e 's/^root_ca_slug_prefix = .*/root_ca_slug_prefix = "hy-root-e"/' \
-  -e 's/^signing_ca_slug_prefix = .*/signing_ca_slug_prefix = "hy-ca-e"/' \
-  -e '/^key_backend/d' -e '/^pkcs11_token_label/d' \
-  "$CFG" >"$CFG3"
-{
-  echo 'root_key_backend = "pkcs11"'
-  echo 'pkcs11_root_token_label = "yca-hy-root"'
-} >>"$CFG3"
+gen_cfg HY hy-root-e hy-ca-e \
+  'key_backend = "pkcs11"
+token_label = "yca-hy-root"' \
+  '' '' >"$CFG3"
 HPKI="$WORK/pki-hy"
 w3() { "$BIN" --config "$CFG3" --store "$HPKI" "$@"; }
 

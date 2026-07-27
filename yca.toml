@@ -1,27 +1,45 @@
-# Config is locked at 'yca init'; later edits here are warned and ignored.
+# Each section is locked at 'yca init'; later edits are warned and ignored.
 
+[pki]
 org_name = "Example 会社"
 country_code = "CA"
 repository_host = "pki.example.ca"
+# Optional: omit to skip the CP extension entirely, or replace the PEN
+# below. 1.3.6.1.4.1.32473 is the IANA documentation PEN (RFC 5612).
+arc_oid = "1.3.6.1.4.1.32473"
 
-root_ca_cn = "ETS Root E1"
-root_ca_curve = "secp384r1"
-root_ca_digest = "SHA-384"
-root_ca_valid_days = 7164
-root_ca_slug_prefix = "root-e"
-signing_ca_cn = "CA E1"
-signing_ca_curve = "secp384r1"
-signing_ca_digest = "SHA-384"
-signing_ca_valid_days = 1194
-signing_ca_slug_prefix = "ca-e"
+[root]
+cn = "ETS Root E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 7164
+slug_prefix = "root-e"
+
+[ca.tls]
+profiles = ["server", "client"]
+cn = "CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 1194
+slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 398
-# Optional: omit to skip the CP extension entirely
-# or replace the PEN below.
-root_arc_oid = "1.3.6.1.4.1.32473"
+# Optional: bound a CA by who it may issue to, not only by what its
+# certificates may be used for. Emitted as a critical nameConstraints
+# extension, enforced by the relying party.
+# permitted_dns = ["example.ca"]       # also covers www.example.ca
+# permitted_email = ["example.ca"]     # every mailbox at that host;
+#                                      # ".example.ca" means subdomains only
 
-# HSM-held CA keys (optional; default internal). PIN from CA_HSM_PIN.
-# key_backend = "pkcs11"
-# pkcs11_module = "/usr/lib/opensc-pkcs11.so"
-# pkcs11_token_label = "yts"
+# HSM-held CA keys (optional; default internal). PIN from CA_HSM_PIN, and
+# CA_HSM_ROOT_PIN for the root token.
+# [pkcs11]
+# module = "/usr/lib/opensc-pkcs11.so"
+# token_label = "yts"
+#
+# Then per CA, in the sections above:
+#   [root]    key_backend = "pkcs11"
+#             token_label = "yts-root"   # split layout; omit to share
+#   [ca.tls]  key_backend = "pkcs11"     # omitted token_label -> "yts"
+# Hybrid layout: only [root] on a token, issuing keys internal.

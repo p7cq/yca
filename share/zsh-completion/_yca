@@ -10,11 +10,12 @@ _yca() {
   typeset -A opt_args
 
   local -a commands=(
-    'init:initialize the PKI (create root + signing CA)'
+    'init:initialize the PKI (root + every declared issuing CA)'
     'create:issue a certificate (server|client)'
     'enroll:enroll an identity for CSR signing'
     'sign:issue a certificate from a PKCS#10 CSR (server|client)'
     'revoke:revoke a certificate'
+    'add:create a declared but not yet existing CA (root key ceremony)'
     'renew:create the next generation of a CA (root key ceremony)'
     'refresh:re-sign the CRLs with a fresh nextUpdate'
     'get:export a certificate, CRL, nonce or the config to stdout'
@@ -63,12 +64,18 @@ _yca() {
     revoke)
       _arguments \
         '1:target:(server client ca)' \
-        '(--serial)--cn[common name; for ca a generation CN or signing-ca]:common name:' \
+        '(--serial)--cn[common name; for ca a generation CN or <purpose>-ca]:common name:' \
         '(--cn)--serial[serial (hex) - selects the exact certificate]:serial:' \
         "--reason[CRLReason name (default unspecified)]:reason:(${reasons[*]})"
       ;;
+    add)
+      _arguments \
+        '1:target:(signing-ca)' \
+        '--purpose[the [ca.<purpose>] section to create]:purpose:'
+      ;;
     renew)
       _arguments \
+        '--purpose[which issuing CA to rotate]:purpose:' \
         '1:target:(signing-ca)' \
         '--new-cn[the new generation'"'"'s common name]:common name:'
       ;;

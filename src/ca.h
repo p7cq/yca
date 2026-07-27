@@ -12,7 +12,8 @@
 
 namespace ca {
 
-enum class Profile { Server, Client };
+// Profiles are named, not enumerated: the shape each name dictates lives in
+// profile.h, and the CA that issues it is whichever one lists it.
 
 // The CA secrets, one per backend/token; which ones an operation needs
 // depends on the layout (per-CA key backends, see config.h). `passphrase`
@@ -61,15 +62,27 @@ bool is_initialized(const std::filesystem::path &store_dir);
 bool init(const cfg::Config &config, const std::filesystem::path &store_dir,
           const Secrets &secrets);
 
-// Creates the next generation of the signing CA: a fresh key and the
-// configured signing profile under a new display name `new_cn`, signed by
-// the active root (the ceremony that brings the root key online). The
-// successor becomes the active issuer; the incumbent turns `retiring` and
-// keeps publishing its CRL until the last certificate it signed expires.
-// Prints the new CN on stdout. See docs/ca-rotation.md.
+// Creates an issuing CA that `config` declares but the store does not hold
+// yet: generation 1 of `purpose`, signed by the active root, so this is a
+// root key ceremony like a rotation. The CA's section is locked into the
+// store as it is created, which is what lets a purpose be added to an
+// initialized store without re-initializing it. Fails if the store already
+// holds that purpose, or if the file does not declare it.
+bool add_signing_ca(const cfg::Config &config,
+                    const std::filesystem::path &store_dir,
+                    const Secrets &secrets, const std::string &purpose);
+
+// Creates the next generation of the issuing CA named by `purpose`: a fresh
+// key and that CA's configured profile under a new display name `new_cn`,
+// signed by the active root (the ceremony that brings the root key online).
+// The successor becomes the active issuer for that purpose alone; the
+// incumbent turns `retiring` and keeps publishing its CRL until the last
+// certificate it signed expires. Other purposes are untouched. Prints the
+// new CN on stdout.
 bool renew_signing_ca(const cfg::Config &config,
                       const std::filesystem::path &store_dir,
-                      const Secrets &secrets, const std::string &new_cn);
+                      const Secrets &secrets, const std::string &purpose,
+                      const std::string &new_cn);
 
 // Loads the effective config from the DB (ca_config snapshot) - the source of
 // truth after init. Returns nullopt if not initialized.
@@ -80,20 +93,22 @@ std::optional<cfg::Config> load_config(const std::filesystem::path &store_dir);
 // changed field is warned and ignored (re-init to change anything).
 void reconcile(const cfg::Config &file, const cfg::Config &eff);
 
-// Issues an end-entity certificate (server/client) signed by the signing CA.
-// Server always includes DNS:CN plus any extra SANs; client requires at least
-// one SAN. Fails if a certificate for the same CN is still active - unless
-// that cert is inside the renewal window (less than app::renew_window_pct of
-// its lifetime left): then an overlapping successor is issued and the old
-// cert is left to expire. The cert is stored and, together with its
-// (unencrypted) key, written under <store>/ee/.
+// Issues an end-entity certificate of `profile`, signed by the CA that
+// lists that profile. The profile dictates the certificate's shape (EKU,
+// key usage, subject rules, policy OID, validity ceiling) - see profile.h.
+// Refused for a profile no configured CA claims, and for one the CA may
+// only sign from a CSR. Fails if a certificate for the same CN is still active
+// - unless that cert is inside the renewal window (less than
+// app::renew_window_pct of its lifetime left): then an overlapping successor is
+// issued and the old cert is left to expire. The cert is stored and, together
+// with its (unencrypted) key, written under <store>/ee/.
 //
 // `valid_override` (CLI --valid) replaces the ee_valid_days validity
 // for this one issuance; range [5m, ee_valid_days] - the policy is the
 // ceiling, shorter is always allowed - and not persisted anywhere.
 bool issue_ee(
     const cfg::Config &config, const std::filesystem::path &store_dir,
-    const Secrets &secrets, Profile profile, const std::string &cn,
+    const Secrets &secrets, const std::string &profile, const std::string &cn,
     const std::vector<San> &extra_sans,
     std::optional<std::chrono::seconds> valid_override = std::nullopt);
 
@@ -127,7 +142,7 @@ bool get_nonce(const std::filesystem::path &store_dir, const std::string &id);
 // issue_ee ([5m, ee_valid_days], one-shot).
 bool sign_csr(
     const cfg::Config &config, const std::filesystem::path &store_dir,
-    const Secrets &secrets, Profile profile, const std::string &id,
+    const Secrets &secrets, const std::string &profile, const std::string &id,
     const std::string &nonce, const std::string &csr_src,
     std::optional<std::chrono::seconds> valid_override = std::nullopt);
 

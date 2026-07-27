@@ -32,23 +32,29 @@ PKI="$WORK/pki"
 cd "$WORK" || exit 1
 
 cat >"$CFG" <<'EOF'
+[pki]
 org_name = "Example"
 country_code = "CA"
 repository_host = "pki.example.ca"
-root_ca_cn = "ETS Root E1"
-root_ca_curve = "secp384r1"
-root_ca_digest = "SHA-384"
-root_ca_valid_days = 8192
-root_ca_slug_prefix = "ets-root-e"
-signing_ca_cn = "CA E1"
-signing_ca_curve = "secp384r1"
-signing_ca_digest = "SHA-384"
-signing_ca_valid_days = 8112
-signing_ca_slug_prefix = "ca-e"
+arc_oid = "1.3.6.1.4.1.32473"
+
+[root]
+cn = "ETS Root E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8192
+slug_prefix = "ets-root-e"
+
+[ca.tls]
+profiles = ["server", "client"]
+cn = "CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8112
+slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-root_arc_oid = "1.3.6.1.4.1.32473"
 EOF
 
 PASS=0

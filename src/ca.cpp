@@ -28,7 +28,9 @@
 #include "ca_detail.h"
 #include "log.h"
 #include "p11.h"
+#include "profile.h"
 #include "util.h"
+#include "x509ext.h"
 
 namespace ca {
 namespace {
@@ -123,41 +125,72 @@ std::optional<Botan::X509_Certificate> load_ca_cert(const fs::path &store_dir,
 }
 
 // The generation-1 identity, straight from the locked config.
-CaGen config_gen(const cfg::Config &config, const std::string &kind) {
-  return kind == "root"
-             ? CaGen{1, config.root_ca_cn, config.root_ca_slug}
-             : CaGen{1, config.signing_ca_cn, config.signing_ca_slug};
+CaGen config_gen(const cfg::Config &config, const std::string &purpose) {
+  if (purpose == "root")
+    return CaGen{"root", 1, config.root.cn, config.root.slug};
+  if (const cfg::SigningCa *ca = config.ca(purpose))
+    return CaGen{purpose, 1, ca->cn, ca->slug};
+  // A purpose the config does not describe: name it and let the caller
+  // fail on the missing artifacts, rather than quietly using another CA.
+  return CaGen{purpose, 1, "", ""};
+}
+
+// "root" for the anchor, "signing" for every issuing CA: the axis the CRL
+// cadences, the refresh scopes and the revoke-ca refusal are about.
+std::string kind_of(const std::string &purpose) {
+  return purpose == "root" ? "root" : "signing";
+}
+
+bool has_table(Botan::SQL_Database &db, const std::string &name) {
+  auto s = db.new_statement(
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1");
+  s->bind(1, name);
+  return s->step();
 }
 
 bool has_ca_index(Botan::SQL_Database &db) {
-  auto s = db.new_statement("SELECT 1 FROM sqlite_master WHERE type='table' "
-                            "AND name='ca_cert_index'");
-  return s->step();
+  return has_table(db, "ca_cert_index");
 }
 
 void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config) {
   db.create_table("CREATE TABLE IF NOT EXISTS ca_cert_index ("
-                  "kind TEXT NOT NULL, gen INTEGER NOT NULL, cn TEXT NOT NULL, "
+                  "kind TEXT NOT NULL, purpose TEXT NOT NULL, "
+                  "gen INTEGER NOT NULL, cn TEXT NOT NULL, "
                   "slug TEXT NOT NULL, status TEXT NOT NULL, "
-                  "PRIMARY KEY (kind, gen))");
-  db.new_statement("CREATE INDEX IF NOT EXISTS cai_ks ON "
-                   "ca_cert_index(kind, status)")
+                  "PRIMARY KEY (kind, purpose, gen))");
+  db.new_statement("CREATE INDEX IF NOT EXISTS cai_kps ON "
+                   "ca_cert_index(kind, purpose, status)")
       ->spin();
-  // Generation 1 is what the ceremony created; record it so later
-  // generations have a predecessor to succeed.
-  for (const char *kind : {"root", "signing"}) {
-    auto q = db.new_statement("SELECT 1 FROM ca_cert_index WHERE kind=?1");
-    q->bind(1, kind);
+  // Generation 1 of every CA the ceremony created; record it so later
+  // generations have a predecessor to succeed. Backfilled only for CAs
+  // whose certificate the store actually holds: the file may declare a
+  // purpose that no ceremony has created yet (see add_signing_ca), and
+  // that one must not appear here as an active generation.
+  const bool indexed = has_table(db, "cert_index");
+  std::vector<std::string> purposes{"root"};
+  for (const auto &[purpose, ca] : config.cas)
+    purposes.push_back(purpose);
+  for (const std::string &purpose : purposes) {
+    auto q = db.new_statement("SELECT 1 FROM ca_cert_index WHERE purpose=?1");
+    q->bind(1, purpose);
     if (q->step())
       continue;
-    const CaGen g = config_gen(config, kind);
+    const CaGen g = config_gen(config, purpose);
+    if (!indexed)
+      continue;
+    auto issued = db.new_statement("SELECT 1 FROM cert_index WHERE cn=?1 AND "
+                                   "kind IN ('root','signing') LIMIT 1");
+    issued->bind(1, g.cn);
+    if (!issued->step())
+      continue;
     auto ins = db.new_statement("INSERT INTO ca_cert_index "
-                                "(kind,gen,cn,slug,status) "
-                                "VALUES (?1,?2,?3,?4,'active')");
-    ins->bind(1, kind);
-    ins->bind(2, static_cast<std::size_t>(g.gen));
-    ins->bind(3, g.cn);
-    ins->bind(4, g.slug);
+                                "(kind,purpose,gen,cn,slug,status) "
+                                "VALUES (?1,?2,?3,?4,?5,'active')");
+    ins->bind(1, kind_of(purpose));
+    ins->bind(2, purpose);
+    ins->bind(3, static_cast<std::size_t>(g.gen));
+    ins->bind(4, g.cn);
+    ins->bind(5, g.slug);
     ins->spin();
   }
 }
@@ -166,45 +199,52 @@ std::optional<CaGen> gen_by_cn(Botan::SQL_Database &db, const std::string &kind,
                                const std::string &cn) {
   if (!has_ca_index(db))
     return std::nullopt;
-  auto q = db.new_statement("SELECT gen,cn,slug FROM ca_cert_index WHERE "
-                            "kind=?1 AND cn=?2 LIMIT 1");
+  auto q = db.new_statement("SELECT purpose,gen,cn,slug FROM ca_cert_index "
+                            "WHERE kind=?1 AND cn=?2 LIMIT 1");
   q->bind(1, kind);
   q->bind(2, cn);
   if (!q->step())
     return std::nullopt;
-  return CaGen{static_cast<int>(q->get_size_t(0)), q->get_str(1),
-               q->get_str(2)};
+  return CaGen{q->get_str(0), static_cast<int>(q->get_size_t(1)), q->get_str(2),
+               q->get_str(3)};
 }
 
 std::vector<CaGen> live_cas(Botan::SQL_Database &db, const cfg::Config &config,
                             const std::string &kind) {
   std::vector<CaGen> out;
   if (has_ca_index(db)) {
-    auto q = db.new_statement("SELECT gen,cn,slug FROM ca_cert_index WHERE "
-                              "kind=?1 AND status IN ('active','retiring') "
-                              "ORDER BY gen");
+    // Ordered by purpose then generation: a scope covering several issuing
+    // CAs walks each one's lineage oldest first.
+    auto q = db.new_statement("SELECT purpose,gen,cn,slug FROM ca_cert_index "
+                              "WHERE kind=?1 AND status IN "
+                              "('active','retiring') ORDER BY purpose, gen");
     q->bind(1, kind);
     while (q->step())
-      out.push_back(
-          {static_cast<int>(q->get_size_t(0)), q->get_str(1), q->get_str(2)});
+      out.push_back({q->get_str(0), static_cast<int>(q->get_size_t(1)),
+                     q->get_str(2), q->get_str(3)});
   }
-  if (out.empty())
-    out.push_back(config_gen(config, kind));
+  if (out.empty()) {
+    if (kind == "root")
+      out.push_back(config_gen(config, "root"));
+    else
+      for (const auto &[purpose, ca] : config.cas)
+        out.push_back(config_gen(config, purpose));
+  }
   return out;
 }
 
 CaGen active_ca(Botan::SQL_Database &db, const cfg::Config &config,
-                const std::string &kind) {
+                const std::string &purpose) {
   if (!has_ca_index(db))
-    return config_gen(config, kind);
-  auto q = db.new_statement("SELECT gen,cn,slug FROM ca_cert_index WHERE "
-                            "kind=?1 AND status='active' "
+    return config_gen(config, purpose);
+  auto q = db.new_statement("SELECT purpose,gen,cn,slug FROM ca_cert_index "
+                            "WHERE purpose=?1 AND status='active' "
                             "ORDER BY gen DESC LIMIT 1");
-  q->bind(1, kind);
+  q->bind(1, purpose);
   if (!q->step())
-    return config_gen(config, kind);
-  return CaGen{static_cast<int>(q->get_size_t(0)), q->get_str(1),
-               q->get_str(2)};
+    return config_gen(config, purpose);
+  return CaGen{q->get_str(0), static_cast<int>(q->get_size_t(1)), q->get_str(2),
+               q->get_str(3)};
 }
 
 void ensure_cert_index(Botan::SQL_Database &db) {
@@ -215,6 +255,7 @@ void ensure_cert_index(Botan::SQL_Database &db) {
       "not_after INTEGER NOT NULL, status TEXT NOT NULL, "
       "revoked_at INTEGER NOT NULL DEFAULT 0, "
       "reason INTEGER NOT NULL DEFAULT 0, "
+      "purpose TEXT NOT NULL DEFAULT '', "
       // Subject/authority key identifiers: the issuer link a chain walk
       // follows. Empty when the certificate carries no such extension.
       "ski TEXT NOT NULL DEFAULT '', "
@@ -235,13 +276,13 @@ void ensure_cert_index(Botan::SQL_Database &db) {
 }
 
 void index_cert(Botan::SQL_Database &db, const Botan::X509_Certificate &c,
-                const std::string &kind, const std::string &status,
-                std::size_t revoked_at) {
+                const std::string &kind, const std::string &purpose,
+                const std::string &status, std::size_t revoked_at) {
   auto s = db.new_statement(
       "INSERT OR REPLACE INTO cert_index "
       "(fingerprint,cn,kind,serial,not_before,not_after,status,revoked_at,"
-      "ski,aki) "
-      "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)");
+      "ski,aki,purpose) "
+      "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)");
   s->bind(1, c.fingerprint("SHA-256"));
   s->bind(2, c.subject_dn().get_first_attribute("X520.CommonName"));
   s->bind(3, kind);
@@ -252,6 +293,7 @@ void index_cert(Botan::SQL_Database &db, const Botan::X509_Certificate &c,
   s->bind(8, revoked_at);
   s->bind(9, Botan::hex_encode(c.subject_key_id()));
   s->bind(10, Botan::hex_encode(c.authority_key_id()));
+  s->bind(11, purpose);
   s->spin();
 }
 
@@ -390,8 +432,8 @@ Botan::X509_Cert_Options ca_options(const cfg::Config &config,
                                     std::optional<size_t> path_limit) {
   Botan::X509_Cert_Options o("", util::days_to_seconds(valid_days));
   o.common_name = cn;
-  o.country = config.country_code;
-  o.organization = config.org_name;
+  o.country = config.pki.country_code;
+  o.organization = config.pki.org_name;
   if (path_limit) {
     o.CA_key(*path_limit);
   } else {
@@ -413,7 +455,7 @@ Botan::X509_Cert_Options ca_options(const cfg::Config &config,
 void add_signing_pointer_extensions(Botan::X509_Cert_Options &o,
                                     const cfg::Config &config,
                                     const std::string &root_slug) {
-  const std::string base = "http://" + config.repository_host;
+  const std::string base = "http://" + config.pki.repository_host;
   const std::string &root = root_slug;
 
   o.extensions.add_new(
@@ -428,22 +470,23 @@ void add_signing_pointer_extensions(Botan::X509_Cert_Options &o,
       std::make_unique<Botan::Cert_Extension::CRL_Distribution_Points>(
           std::vector<DP>{DP(cdp)}));
 
-  if (!config.root_arc_oid.empty())
+  if (!config.pki.arc_oid.empty())
     o.extensions.add_new(
         std::make_unique<Botan::Cert_Extension::Certificate_Policies>(
-            std::vector<Botan::OID>{Botan::OID(config.root_arc_oid + ".1.1"),
-                                    Botan::OID(config.root_arc_oid + ".1.2")}));
+            std::vector<Botan::OID>{Botan::OID(config.pki.arc_oid + ".1.1"),
+                                    Botan::OID(config.pki.arc_oid + ".1.2")}));
 }
 
-// EE pointers reference the signing CA (issuer of the leaf). Single policy per
-// profile: server -> <arc>.1.1, client -> <arc>.1.2. Works on Extensions
-// directly so the CSR path (no X509_Cert_Options) can use it too.
-// Revocation is CRL-only in this PKI (no OCSP), so AIA carries only
-// caIssuers; the leaf's status channel is the signing CRL (CDP).
+// EE pointers reference the issuing CA (issuer of the leaf), plus the one
+// policy OID the profile carries. Works on Extensions directly so the CSR
+// path (no X509_Cert_Options) can use it too. Revocation is CRL-only in
+// this PKI (no OCSP), so AIA carries only caIssuers; the leaf's status
+// channel is the issuing CRL (CDP).
 void add_ee_pointer_extensions(Botan::Extensions &ext,
-                               const cfg::Config &config, Profile profile,
+                               const cfg::Config &config,
+                               const profile::Def &prof,
                                const std::string &issuer_slug) {
-  const std::string base = "http://" + config.repository_host;
+  const std::string base = "http://" + config.pki.repository_host;
   const std::string &ca = issuer_slug;
 
   ext.add_new(
@@ -457,15 +500,29 @@ void add_ee_pointer_extensions(Botan::Extensions &ext,
   ext.add_new(std::make_unique<Botan::Cert_Extension::CRL_Distribution_Points>(
       std::vector<DP>{DP(cdp)}));
 
-  if (!config.root_arc_oid.empty()) {
-    const std::string suffix = profile == Profile::Server ? ".1.1" : ".1.2";
+  if (!config.pki.arc_oid.empty())
     ext.add_new(std::make_unique<Botan::Cert_Extension::Certificate_Policies>(
-        std::vector<Botan::OID>{Botan::OID(config.root_arc_oid + suffix)}));
-  }
+        std::vector<Botan::OID>{
+            Botan::OID(config.pki.arc_oid + std::string(prof.policy_suffix))}));
 }
 
-const char *profile_name(Profile p) {
-  return p == Profile::Server ? "server" : "client";
+// The key usage a profile's leaf carries: always digitalSignature, plus
+// keyAgreement for a profile whose key also does ECDH.
+Botan::Key_Constraints ee_constraints(const profile::Def &prof) {
+  uint32_t bits =
+      static_cast<uint32_t>(Botan::Key_Constraints::DigitalSignature);
+  if (prof.key_agreement)
+    bits |= static_cast<uint32_t>(Botan::Key_Constraints::KeyAgreement);
+  return Botan::Key_Constraints(bits);
+}
+
+// The profile a request names, or nullptr with the error logged. Unknown
+// names cannot reach here from the CLI, but the API is public.
+const profile::Def *profile_def(const std::string &name) {
+  const profile::Def *p = profile::find(name);
+  if (!p)
+    log::error("unknown profile '{}'", name);
+  return p;
 }
 
 void emit(const Botan::X509_Object &obj, const std::string &encoding) {
@@ -616,39 +673,116 @@ issuers_above(Botan::SQL_Database &db, Botan::X509_Certificate cert) {
   }
 }
 
-// The full config, recorded at init and enforced on every later run: every
-// field is locked, re-init to change anything. ee_valid_days is issuance
+using KeyValues = std::vector<std::pair<std::string, std::string>>;
+
+std::string join_profiles(const std::vector<std::string> &profiles) {
+  std::string out;
+  for (const auto &p : profiles) {
+    if (!out.empty())
+      out += ',';
+    out += p;
+  }
+  return out;
+}
+
+std::vector<std::string> split_profiles(const std::string &s) {
+  std::vector<std::string> out;
+  for (std::size_t i = 0; i < s.size();) {
+    const std::size_t end = s.find(',', i);
+    out.push_back(s.substr(i, end - i));
+    if (end == std::string::npos)
+      break;
+    i = end + 1;
+  }
+  return out;
+}
+
+// The sections that exist once per store, recorded at init and enforced on
+// every later run: locked, re-init to change any of them. Keys are dotted
+// section paths so a warning names the section the operator has to look at.
+KeyValues locked_global(const cfg::Config &c) {
+  return {
+      {"pki.org_name", c.pki.org_name},
+      {"pki.country_code", c.pki.country_code},
+      {"pki.repository_host", c.pki.repository_host},
+      {"pki.arc_oid", c.pki.arc_oid},
+      {"pkcs11.module", c.pkcs11.module},
+      {"pkcs11.token_label", c.pkcs11.token_label},
+      {"root.cn", c.root.cn},
+      {"root.curve", c.root.curve},
+      {"root.digest", c.root.digest},
+      {"root.valid_days", std::to_string(c.root.valid_days)},
+      {"root.slug_prefix", c.root.slug_prefix},
+      {"root.slug", c.root.slug},
+      {"root.key_backend", c.root.key_backend},
+      {"root.token_label", c.root.token_label},
+  };
+}
+
+// One issuing CA's locked fields. Stored as its own row rather than folded
+// into the global snapshot, so a CA declared after init can be locked when
+// it is created instead of forcing a re-init. ee_valid_days is issuance
 // policy but locked too - per-issuance flexibility is --valid, which may
 // request anything up to it (the policy is the ceiling).
-std::vector<std::pair<std::string, std::string>>
-locked_config(const cfg::Config &c) {
+KeyValues locked_purpose(const cfg::SigningCa &ca) {
   return {
-      {"org_name", c.org_name},
-      {"country_code", c.country_code},
-      {"repository_host", c.repository_host},
-      {"root_arc_oid", c.root_arc_oid},
-      {"root_ca_cn", c.root_ca_cn},
-      {"root_ca_curve", c.root_ca_curve},
-      {"root_ca_digest", c.root_ca_digest},
-      {"root_ca_valid_days", std::to_string(c.root_ca_valid_days)},
-      {"root_ca_slug_prefix", c.root_ca_slug_prefix},
-      {"root_ca_slug", c.root_ca_slug},
-      {"signing_ca_cn", c.signing_ca_cn},
-      {"signing_ca_curve", c.signing_ca_curve},
-      {"signing_ca_digest", c.signing_ca_digest},
-      {"signing_ca_valid_days", std::to_string(c.signing_ca_valid_days)},
-      {"signing_ca_slug_prefix", c.signing_ca_slug_prefix},
-      {"signing_ca_slug", c.signing_ca_slug},
-      {"ee_curve", c.ee_curve},
-      {"ee_digest", c.ee_digest},
-      {"key_backend", c.key_backend},
-      {"root_key_backend", c.root_key_backend},
-      {"signing_key_backend", c.signing_key_backend},
-      {"pkcs11_module", c.pkcs11_module},
-      {"pkcs11_token_label", c.pkcs11_token_label},
-      {"pkcs11_root_token_label", c.pkcs11_root_token_label},
-      {"ee_valid_days", std::to_string(c.ee_valid_days)},
+      {"profiles", join_profiles(ca.profiles)},
+      {"cn", ca.cn},
+      {"curve", ca.curve},
+      {"digest", ca.digest},
+      {"valid_days", std::to_string(ca.valid_days)},
+      {"slug_prefix", ca.slug_prefix},
+      {"slug", ca.slug},
+      {"key_backend", ca.key_backend},
+      {"token_label", ca.token_label},
+      {"ee_curve", ca.ee_curve},
+      {"ee_digest", ca.ee_digest},
+      {"ee_valid_days", std::to_string(ca.ee_valid_days)},
+      {"permitted_dns", join_profiles(ca.permitted_dns)},
+      {"permitted_email", join_profiles(ca.permitted_email)},
   };
+}
+
+void ensure_purpose_table(Botan::SQL_Database &db) {
+  db.create_table(std::format("CREATE TABLE IF NOT EXISTS {} ("
+                              "purpose TEXT PRIMARY KEY, profiles TEXT NOT "
+                              "NULL, cn TEXT NOT NULL, curve TEXT NOT NULL, "
+                              "digest TEXT NOT NULL, valid_days INTEGER NOT "
+                              "NULL, slug_prefix TEXT NOT NULL, slug TEXT NOT "
+                              "NULL, key_backend TEXT NOT NULL, token_label "
+                              "TEXT NOT NULL, ee_curve TEXT NOT NULL, "
+                              "ee_digest TEXT NOT NULL, ee_valid_days INTEGER "
+                              "NOT NULL, permitted_dns TEXT NOT NULL "
+                              "DEFAULT '', permitted_email TEXT NOT NULL "
+                              "DEFAULT '')",
+                              app::purpose_table));
+}
+
+// Locks one issuing CA. Called for each CA the ceremony creates, and later
+// for each one added to an initialized store.
+void lock_purpose(Botan::SQL_Database &db, const cfg::SigningCa &ca) {
+  auto ins = db.new_statement(
+      std::format("INSERT INTO {} (purpose,profiles,cn,curve,digest,valid_days,"
+                  "slug_prefix,slug,key_backend,token_label,ee_curve,ee_digest,"
+                  "ee_valid_days,permitted_dns,permitted_email) "
+                  "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                  app::purpose_table));
+  ins->bind(1, ca.purpose);
+  ins->bind(2, join_profiles(ca.profiles));
+  ins->bind(3, ca.cn);
+  ins->bind(4, ca.curve);
+  ins->bind(5, ca.digest);
+  ins->bind(6, static_cast<std::size_t>(ca.valid_days));
+  ins->bind(7, ca.slug_prefix);
+  ins->bind(8, ca.slug);
+  ins->bind(9, ca.key_backend);
+  ins->bind(10, ca.token_label);
+  ins->bind(11, ca.ee_curve);
+  ins->bind(12, ca.ee_digest);
+  ins->bind(13, static_cast<std::size_t>(ca.ee_valid_days));
+  ins->bind(14, join_profiles(ca.permitted_dns));
+  ins->bind(15, join_profiles(ca.permitted_email));
+  ins->spin();
 }
 
 // Which CA a key operation is about: the parameters that stay constant
@@ -664,24 +798,41 @@ struct CaSpec {
   bool root = false;
 };
 
-// The two CAs the locked config describes. Parallel issuing CAs turn
-// signing_spec into a lookup by purpose.
 CaSpec root_spec(const cfg::Config &c) {
   return {"root",
-          c.root_ca_curve,
-          c.root_ca_digest,
-          c.root_key_backend,
-          c.pkcs11_root_token_label,
+          c.root.curve,
+          c.root.digest,
+          c.root.key_backend,
+          c.root.token_label,
           true};
 }
 
-CaSpec signing_spec(const cfg::Config &c) {
-  return {"signing",
-          c.signing_ca_curve,
-          c.signing_ca_digest,
-          c.signing_key_backend,
-          c.pkcs11_token_label,
-          false};
+// A declared issuing CA's spec. Total by construction: the caller has
+// already resolved which CA it means (by purpose, or by the profile being
+// issued) and owns the error message when there is none.
+CaSpec spec_of(const cfg::SigningCa &ca) {
+  return {ca.purpose,     ca.curve,       ca.digest,
+          ca.key_backend, ca.token_label, false};
+}
+
+// The CA that issues `profile`, or nullptr with the error already logged.
+const cfg::SigningCa *issuer_for(const cfg::Config &config,
+                                 const std::string &profile) {
+  const cfg::SigningCa *ca = config.ca_for_profile(profile);
+  if (!ca)
+    log::error("no configured CA issues the '{}' profile", profile);
+  return ca;
+}
+
+// The configuration of the CA a stored generation belongs to. Absent when
+// the store holds a purpose the file no longer declares - reconcile warns
+// about that, and every operation on that CA has to stop here.
+const cfg::SigningCa *config_of(const cfg::Config &config, const CaGen &gen) {
+  const cfg::SigningCa *ca = config.ca(gen.purpose);
+  if (!ca)
+    log::error("the store holds CA '{}' but no [ca.{}] section describes it",
+               gen.cn, gen.purpose);
+  return ca;
 }
 
 std::string_view ca_secret(const CaSpec &ca, const ca::Secrets &s) {
@@ -762,46 +913,102 @@ ca_key(const cfg::Config &config, const ca::Secrets &secrets,
   return store.find_key(cert);
 }
 
+// Adopt-or-generate one CA key per its backend: token-resident (adopted by
+// label, or generated on that CA's token), or in-memory ECDSA that the
+// caller persists encrypted into the store.
+std::shared_ptr<const Botan::Private_Key>
+make_ca_key(const cfg::Config &config, const ca::Secrets &secrets,
+            TokenSessions &tokens, const CaSpec &spec, const std::string &slug,
+            Botan::RandomNumberGenerator &rng) {
+  if (spec.key_backend == "pkcs11")
+    return token_ca_key(
+        open_token(config, secrets, tokens, spec, /*read_write=*/true), slug,
+        spec.curve);
+  return std::make_shared<Botan::ECDSA_PrivateKey>(
+      rng, Botan::EC_Group::from_name(spec.curve));
+}
+
+// The certificate profile of an issuing CA: pathlen 0, the EKUs it may
+// issue - so the CA can never be broader than its purpose - and the
+// pointers at the root that signed it. Shared by the init ceremony,
+// `add signing-ca` and the rotation, which mint the same shape and differ
+// only in the generation and in what they record afterwards.
+Botan::X509_Cert_Options signing_ca_options(const cfg::Config &config,
+                                            const cfg::SigningCa &ca,
+                                            const std::string &cn,
+                                            const std::string &root_slug) {
+  auto opts = ca_options(config, cn, ca.valid_days, size_t{0});
+  // The union of what its profiles need, plus each profile's companion EKU
+  // (profile.h), and nothing else: verifiers that intersect the EKU sets
+  // along a chain refuse a leaf this CA had no business signing, and they
+  // refuse it at the CA's depth even when the leaf itself looks fine.
+  std::vector<Botan::OID> ekus;
+  for (const auto &name : ca.profiles)
+    if (const profile::Def *p = profile::find(name)) {
+      ekus.emplace_back(std::string(p->eku));
+      if (!p->ca_companion_eku.empty())
+        ekus.emplace_back(std::string(p->ca_companion_eku));
+    }
+  for (const auto &oid : ekus)
+    opts.add_ex_constraint(oid);
+  // nameConstraints, when declared: the EKU bounds what a certificate may
+  // be used for, this bounds who it may be issued to. Critical, as RFC
+  // 5280 requires - a verifier that cannot understand the limit must
+  // refuse the chain rather than ignore it.
+  if (!ca.permitted_dns.empty() || !ca.permitted_email.empty())
+    opts.extensions.add_new(
+        std::make_unique<x509ext::Name_Constraints>(
+            x509ext::NameConstraints{ca.permitted_dns, ca.permitted_email}),
+        true);
+  add_signing_pointer_extensions(opts, config, root_slug);
+  return opts;
+}
+
+// The published artifacts of one CA generation: certificate (PEM for the
+// store's own lookups, DER for the repository) plus an empty signed CRL, so
+// the CDP URL resolves before any revocation.
+bool write_ca_artifacts(const fs::path &ca_dir, const std::string &slug,
+                        const Botan::X509_Certificate &cert,
+                        Botan::X509_CA &issuer, int crl_horizon,
+                        Botan::RandomNumberGenerator &rng) {
+  return write_pem(ca_dir / (slug + ".pem"), cert) &&
+         write_der(ca_dir / (slug + ".crt"), cert) &&
+         write_der(ca_dir / (slug + ".crl"),
+                   issuer.new_crl(rng, crl_next_update(cert, crl_horizon)));
+}
+
 bool create(const cfg::Config &config, const fs::path &db_path,
             const ca::Secrets &secrets) {
   Botan::AutoSeeded_RNG rng;
 
-  // Keys per CA and backend: token-resident (adopted by label, or
-  // generated on that CA's token), or in-memory ECDSA later persisted
-  // encrypted into the store.
   const CaSpec root_ca = root_spec(config);
-  const CaSpec sign_ca = signing_spec(config);
   TokenSessions tokens;
-  auto make_key = [&](const CaSpec &ca, const std::string &slug)
-      -> std::shared_ptr<const Botan::Private_Key> {
-    if (ca.key_backend == "pkcs11")
-      return token_ca_key(
-          open_token(config, secrets, tokens, ca, /*read_write=*/true), slug,
-          ca.curve);
-    return std::make_shared<Botan::ECDSA_PrivateKey>(
-        rng, Botan::EC_Group::from_name(ca.curve));
-  };
-  auto root_key = make_key(root_ca, config.root_ca_slug);
-  auto sign_key = make_key(sign_ca, config.signing_ca_slug);
-
-  auto root_opts = ca_options(config, config.root_ca_cn,
-                              config.root_ca_valid_days, std::nullopt);
+  auto root_key =
+      make_ca_key(config, secrets, tokens, root_ca, config.root.slug, rng);
+  auto root_opts =
+      ca_options(config, config.root.cn, config.root.valid_days, std::nullopt);
   auto root_cert = Botan::X509::create_self_signed_cert(
-      root_opts, *root_key, config.root_ca_digest, rng);
+      root_opts, *root_key, config.root.digest, rng);
 
-  auto sign_opts = ca_options(config, config.signing_ca_cn,
-                              config.signing_ca_valid_days, size_t{0});
-  sign_opts.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.1")); // serverAuth
-  sign_opts.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.2")); // clientAuth
-  add_signing_pointer_extensions(sign_opts, config, config.root_ca_slug);
-  auto sign_req = Botan::X509::create_cert_req(sign_opts, *sign_key,
-                                               config.signing_ca_digest, rng);
-
-  Botan::X509_CA issuer(root_cert, *root_key, config.root_ca_digest, rng);
-  auto now = Clock::now();
-  Botan::X509_Time nb(now);
-  Botan::X509_Time na(now + std::chrono::days(config.signing_ca_valid_days));
-  auto sign_cert = issuer.sign_request(sign_req, rng, nb, na);
+  // One generation-1 certificate per declared issuing CA, all signed in
+  // this single root ceremony.
+  struct Minted {
+    const cfg::SigningCa *cfg;
+    std::shared_ptr<const Botan::Private_Key> key;
+    Botan::X509_Certificate cert;
+  };
+  Botan::X509_CA issuer(root_cert, *root_key, config.root.digest, rng);
+  const auto now = Clock::now();
+  std::vector<Minted> minted;
+  for (const auto &[purpose, ca] : config.cas) {
+    auto key = make_ca_key(config, secrets, tokens, spec_of(ca), ca.slug, rng);
+    auto opts = signing_ca_options(config, ca, ca.cn, config.root.slug);
+    auto req = Botan::X509::create_cert_req(opts, *key, ca.digest, rng);
+    auto cert = issuer.sign_request(
+        req, rng, Botan::X509_Time(now),
+        Botan::X509_Time(now + std::chrono::days(ca.valid_days)));
+    minted.push_back({&ca, std::move(key), std::move(cert)});
+  }
 
   auto db = open_store(db_path);
   // 0600: holds the encrypted CA keys, and the store must stay writable.
@@ -810,59 +1017,188 @@ bool create(const cfg::Config &config, const fs::path &db_path,
   db->new_statement("PRAGMA journal_mode=WAL")->spin();
   Botan::Certificate_Store_In_SQL store(db, secrets.passphrase, rng);
   store.insert_cert(root_cert);
-  store.insert_cert(sign_cert);
   // pkcs11 keys never leave their token; internal keys persist encrypted.
   if (root_ca.key_backend == "internal")
     store.insert_key(root_cert, *root_key);
-  if (sign_ca.key_backend == "internal")
-    store.insert_key(sign_cert, *sign_key);
+  for (const Minted &m : minted) {
+    store.insert_cert(m.cert);
+    if (m.cfg->key_backend == "internal")
+      store.insert_key(m.cert, *m.key);
+  }
 
   db->create_table(std::format("CREATE TABLE IF NOT EXISTS {} ("
                                "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
                                app::config_table));
-  for (const auto &[k, v] : locked_config(config)) {
+  for (const auto &[k, v] : locked_global(config)) {
     auto cins = db->new_statement(std::format(
         "INSERT INTO {} (key, value) VALUES (?1, ?2)", app::config_table));
     cins->bind(1, k);
     cins->bind(2, v);
     cins->spin();
   }
+  // Every issuing CA the ceremony creates is locked as its own section.
+  ensure_purpose_table(*db);
+  for (const auto &[purpose, ca] : config.cas)
+    lock_purpose(*db, ca);
 
   ensure_cert_index(*db);
-  index_cert(*db, root_cert, "root");
-  index_cert(*db, sign_cert, "signing");
+  index_cert(*db, root_cert, "root", "root");
+  for (const Minted &m : minted)
+    index_cert(*db, m.cert, "signing", m.cfg->purpose);
   // Generation 1 of each CA; generation is signed from the store.
   ensure_ca_index(*db, config);
 
   const fs::path ca_dir = db_path.parent_path() / "ca";
   fs::create_directories(ca_dir);
   set_perms(ca_dir, fs::perms::owner_all);
-  const std::string &root_s = config.root_ca_slug;
-  const std::string &sign_s = config.signing_ca_slug;
-  if (!write_pem(ca_dir / (root_s + ".pem"), root_cert) ||
-      !write_pem(ca_dir / (sign_s + ".pem"), sign_cert) ||
-      !write_der(ca_dir / (root_s + ".crt"), root_cert) ||
-      !write_der(ca_dir / (sign_s + ".crt"), sign_cert))
-    log::warn("could not write CA cert exports under {}", ca_dir.string());
+  if (!write_ca_artifacts(ca_dir, config.root.slug, root_cert, issuer,
+                          app::root_crl_next_update_days, rng))
+    log::warn("could not write the root artifacts under {}", ca_dir.string());
+  std::string names;
+  for (const Minted &m : minted) {
+    Botan::X509_CA self(m.cert, *m.key, m.cfg->digest, rng);
+    if (!write_ca_artifacts(ca_dir, m.cfg->slug, m.cert, self,
+                            app::crl_next_update_days, rng))
+      log::warn("could not write the artifacts of '{}' under {}", m.cfg->cn,
+                ca_dir.string());
+    names += std::format("{}'{}' ({})", names.empty() ? "" : ", ", m.cfg->cn,
+                         m.cfg->purpose);
+  }
 
-  // Empty signed CRLs so the CDP URLs resolve before any revocation.
-  // Named like the root's `issuer` above; `sign_ca` is the CaSpec here.
-  Botan::X509_CA sign_issuer(sign_cert, *sign_key, config.signing_ca_digest,
-                             rng);
-  const fs::path root_crl = ca_dir / (root_s + ".crl");
-  const fs::path sign_crl = ca_dir / (sign_s + ".crl");
-  if (!write_der(root_crl,
-                 issuer.new_crl(
-                     rng, crl_next_update(root_cert,
-                                          app::root_crl_next_update_days))) ||
-      !write_der(sign_crl, sign_issuer.new_crl(
-                               rng, crl_next_update(
-                                        sign_cert, app::crl_next_update_days))))
-    log::warn("could not write CRLs under {}", ca_dir.string());
-
-  log::info("created 2-tier CA: root '{}' + signing '{}'", config.root_ca_cn,
-            config.signing_ca_cn);
+  log::info("created 2-tier CA: root '{}' + issuing {}", config.root.cn, names);
   return true;
+}
+
+// Both root ceremonies need the root key and the new CA's own secret.
+bool ceremony_secrets_ok(const cfg::Config &config, const Secrets &secrets,
+                         const cfg::SigningCa &ca_cfg, const char *what) {
+  const CaSpec root_ca = root_spec(config);
+  const CaSpec sign_ca = spec_of(ca_cfg);
+  if (ca_secret(root_ca, secrets).empty()) {
+    log::error("{} not set (the root key signs {})", secret_env(root_ca), what);
+    return false;
+  }
+  if (ca_secret(sign_ca, secrets).empty()) {
+    log::error("{} not set (the new CA key needs it)", secret_env(sign_ca));
+    return false;
+  }
+  return true;
+}
+
+struct MintedGen {
+  Botan::X509_Certificate cert;
+  std::shared_ptr<const Botan::Private_Key> key;
+};
+
+// One root ceremony minting generation `next` of the issuing CA described
+// by `ca_cfg`: brings the root key online, creates the new CA key, signs
+// the certificate and publishes its artifacts. Shared by `add signing-ca`
+// (generation 1 of a new purpose) and `renew signing-ca` (the successor of
+// an existing one) - the same ceremony, differing only in what the caller
+// records afterwards, so the caller owns the transaction.
+std::optional<MintedGen>
+mint_ca_generation(const cfg::Config &config, const fs::path &store_dir,
+                   const Secrets &secrets, const cfg::SigningCa &ca_cfg,
+                   const CaGen &root, const CaGen &next,
+                   Botan::Certificate_Store_In_SQL &store,
+                   Botan::RandomNumberGenerator &rng) {
+  const CaSpec root_ca = root_spec(config);
+  const CaSpec sign_ca = spec_of(ca_cfg);
+  const fs::path ca_dir = store_dir / "ca";
+
+  auto root_cert = load_ca_cert(store_dir, root.slug);
+  if (!root_cert) {
+    log::error("root CA cert not found under {}", ca_dir.string());
+    return std::nullopt;
+  }
+  // A CA may no more outlive its issuer than a leaf may: a root too close
+  // to its own notAfter must itself be rotated first.
+  if (outlives_issuer(*root_cert, std::chrono::seconds(
+                                      std::chrono::days(ca_cfg.valid_days))))
+    return std::nullopt;
+
+  TokenSessions tokens;
+  std::shared_ptr<const Botan::Private_Key> root_key, new_key;
+  try {
+    // Read-write sessions: with a pkcs11 backend the new generation's
+    // keypair is generated on its token under its own label (adopted if a
+    // previous attempt left it there).
+    if (root_ca.key_backend == "pkcs11")
+      root_key = token_ca_key(
+          open_token(config, secrets, tokens, root_ca, /*read_write=*/true),
+          root.slug, root_ca.curve);
+    else
+      root_key = store.find_key(*root_cert);
+    new_key = make_ca_key(config, secrets, tokens, sign_ca, next.slug, rng);
+  } catch (const std::exception &e) {
+    log::error("cannot load the CA keys (wrong {}?): {}",
+               secret_word_both(root_ca, sign_ca), e.what());
+    return std::nullopt;
+  }
+  if (!root_key || !new_key) {
+    log::error("root key missing from store");
+    return std::nullopt;
+  }
+
+  auto opts = signing_ca_options(config, ca_cfg, next.cn, root.slug);
+  auto req = Botan::X509::create_cert_req(opts, *new_key, ca_cfg.digest, rng);
+  Botan::X509_CA issuer(*root_cert, *root_key, config.root.digest, rng);
+  const auto tp = Clock::now();
+  auto cert = issuer.sign_request(
+      req, rng, Botan::X509_Time(tp),
+      Botan::X509_Time(tp + std::chrono::days(ca_cfg.valid_days)));
+
+  // Artifacts before the database: an interrupted ceremony that leaves
+  // files behind is recoverable (the next run replaces them), while an
+  // active generation without a published certificate would break issuance.
+  Botan::X509_CA self(cert, *new_key, ca_cfg.digest, rng);
+  if (!write_ca_artifacts(ca_dir, next.slug, cert, self,
+                          app::crl_next_update_days, rng)) {
+    log::error("could not write the new CA artifacts under {}",
+               ca_dir.string());
+    return std::nullopt;
+  }
+  return MintedGen{std::move(cert), std::move(new_key)};
+}
+
+// Resolves a CA selector to a generation CN: a literal CN passes through,
+// "root-ca" and "<purpose>-ca" name that CA's active generation.
+// "signing-ca" keeps working while exactly one issuing CA exists; with
+// several it names nothing in particular and the aliases are listed
+// instead. Empty on failure, with the error already logged.
+std::string resolve_ca_cn(Botan::SQL_Database &db, const cfg::Config &config,
+                          const std::string &selector) {
+  if (selector == "root-ca")
+    return active_ca(db, config, "root").cn;
+  if (selector.ends_with("-ca")) {
+    const std::string purpose = selector.substr(0, selector.size() - 3);
+    if (config.ca(purpose))
+      return active_ca(db, config, purpose).cn;
+  }
+  if (selector == "signing-ca") {
+    if (config.cas.size() == 1)
+      return active_ca(db, config, config.cas.begin()->first).cn;
+    std::string aliases;
+    for (const auto &[purpose, ca] : config.cas)
+      aliases += std::format("{}{}-ca", aliases.empty() ? "" : ", ", purpose);
+    log::error("'signing-ca' is ambiguous with several issuing CAs; use one "
+               "of: {}",
+               aliases);
+    return {};
+  }
+  return selector; // a literal generation CN
+}
+
+// A CN identifies a generation in cert_index and in a CRL's issuer field,
+// so no two CAs, of any purpose or generation, may share one.
+bool cn_is_taken(Botan::SQL_Database &db, const CaGen &root,
+                 const std::string &cn) {
+  if (cn == root.cn || gen_by_cn(db, "signing", cn) ||
+      gen_by_cn(db, "root", cn)) {
+    log::error("CN '{}' already names a CA generation; pick another", cn);
+    return true;
+  }
+  return false;
 }
 
 } // namespace
@@ -885,10 +1221,8 @@ bool is_initialized(const fs::path &store_dir) {
       s->bind(1, key);
       return s->step() ? s->get_str(0) : std::string();
     };
-    const std::string root_cn = locked("root_ca_cn");
-    const std::string sign_cn = locked("signing_ca_cn");
-
-    if (root_cn.empty() || sign_cn.empty())
+    const std::string root_cn = locked("root.cn");
+    if (root_cn.empty())
       return false;
     // Initialization is a historical fact about the ceremony, what
     // later became of an anchor does not unmake it. What still
@@ -900,7 +1234,19 @@ bool is_initialized(const fs::path &store_dir) {
       s->bind(2, cn);
       return s->step();
     };
-    return anchor("root", root_cn) && anchor("signing", sign_cn);
+    if (!anchor("root", root_cn))
+      return false;
+    // Every locked issuing CA must have been issued too; a store with no
+    // issuing CA at all never finished a ceremony.
+    auto cas =
+        h->new_statement(std::format("SELECT cn FROM {}", app::purpose_table));
+    bool any = false;
+    while (cas->step()) {
+      any = true;
+      if (!anchor("signing", cas->get_str(0)))
+        return false;
+    }
+    return any;
   } catch (const std::exception &) {
     return false; // unreadable store => not initialized
   }
@@ -931,17 +1277,20 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
 
   // The CA secrets are settled before anything touches the filesystem: a
   // failed precondition must not leave a store_dir (or a log file) behind.
-  const CaSpec root_ca = root_spec(config);
-  const CaSpec sign_ca = signing_spec(config);
+  std::vector<CaSpec> specs{root_spec(config)};
+  for (const auto &[purpose, ca] : config.cas)
+    specs.push_back(spec_of(ca));
   Secrets eff = secrets;
-  for (const CaSpec &ca : {root_ca, sign_ca}) // a token PIN cannot be invented
+  for (const CaSpec &ca : specs) // a token PIN cannot be invented
     if (ca.key_backend == "pkcs11" && ca_secret(ca, eff).empty()) {
       log::error("{} not set (token user PIN)", secret_env(ca));
       return false;
     }
   std::string generated;
   const bool any_internal =
-      root_ca.key_backend == "internal" || sign_ca.key_backend == "internal";
+      std::any_of(specs.begin(), specs.end(), [](const CaSpec &ca) {
+        return ca.key_backend == "internal";
+      });
   if (any_internal && eff.passphrase.empty()) {
     Botan::AutoSeeded_RNG rng;
     std::vector<uint8_t> raw(app::passphrase_bytes);
@@ -964,26 +1313,95 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
   }
 }
 
-bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
-                      const Secrets &secrets, const std::string &new_cn) {
+bool add_signing_ca(const cfg::Config &config, const fs::path &store_dir,
+                    const Secrets &secrets, const std::string &purpose) {
   const fs::path db = store_path(store_dir);
   if (!fs::exists(db)) {
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  // The ceremony needs both CA keys: the root signs the new generation.
-  const CaSpec root_ca = root_spec(config);
-  const CaSpec sign_ca = signing_spec(config);
-  if (ca_secret(root_ca, secrets).empty()) {
-    log::error("{} not set (the root key signs the new generation)",
-               secret_env(root_ca));
+  if (purpose.empty()) {
+    log::error("--purpose is required (the [ca.<purpose>] section to create)");
     return false;
   }
-  if (ca_secret(sign_ca, secrets).empty()) {
-    log::error("{} not set (the new signing key needs it)",
-               secret_env(sign_ca));
+  // The file declares what may exist; the store records what does. This
+  // command is exactly the gap between the two.
+  const cfg::SigningCa *ca_cfg = config.ca(purpose);
+  if (!ca_cfg) {
+    log::error("no [ca.{}] section in {}.toml; declare it first", purpose,
+               app::name);
     return false;
   }
+  if (!ceremony_secrets_ok(config, secrets, *ca_cfg, "the new CA"))
+    return false;
+
+  Botan::AutoSeeded_RNG rng;
+  auto dbh = open_store(db);
+  Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
+  ensure_ca_index(*dbh, config);
+  ensure_purpose_table(*dbh);
+
+  auto held = dbh->new_statement(
+      std::format("SELECT 1 FROM {} WHERE purpose=?1", app::purpose_table));
+  held->bind(1, purpose);
+  if (held->step()) {
+    log::error("the store already holds CA '{}'; use '{} renew signing-ca "
+               "--purpose {}' to rotate it",
+               purpose, app::name, purpose);
+    return false;
+  }
+
+  const CaGen root = active_ca(*dbh, config, "root");
+  const CaGen next{purpose, 1, ca_cfg->cn, ca_cfg->slug};
+  if (cn_is_taken(*dbh, root, next.cn))
+    return false;
+
+  auto minted = mint_ca_generation(config, store_dir, secrets, *ca_cfg, root,
+                                   next, store, rng);
+  if (!minted)
+    return false;
+
+  begin_write(*dbh);
+  store.insert_cert(minted->cert);
+  if (ca_cfg->key_backend == "internal")
+    store.insert_key(minted->cert, *minted->key);
+  ensure_cert_index(*dbh);
+  index_cert(*dbh, minted->cert, "signing", purpose);
+  // The section is locked as it is created, which is the whole point: the
+  // rest of the config stays frozen and this one joins it.
+  lock_purpose(*dbh, *ca_cfg);
+  auto ins = dbh->new_statement("INSERT INTO ca_cert_index "
+                                "(kind,purpose,gen,cn,slug,status) "
+                                "VALUES ('signing',?1,1,?2,?3,'active')");
+  ins->bind(1, purpose);
+  ins->bind(2, next.cn);
+  ins->bind(3, next.slug);
+  ins->spin();
+  commit_write(*dbh);
+
+  log::info("added issuing CA '{}' ({}) as {}, issuing {}", next.cn, purpose,
+            next.slug, join_profiles(ca_cfg->profiles));
+  log::to_stdout("{}", next.cn);
+  return true;
+}
+
+bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
+                      const Secrets &secrets, const std::string &purpose,
+                      const std::string &new_cn) {
+  const fs::path db = store_path(store_dir);
+  if (!fs::exists(db)) {
+    log::error("not initialized; run '{} init'", app::name);
+    return false;
+  }
+  const cfg::SigningCa *ca_cfg = config.ca(purpose);
+  if (!ca_cfg) {
+    log::error("no CA named '{}'; run '{} get config' for the purposes this "
+               "store holds",
+               purpose, app::name);
+    return false;
+  }
+  if (!ceremony_secrets_ok(config, secrets, *ca_cfg, "the new generation"))
+    return false;
   if (new_cn.empty()) {
     log::error("--new-cn is required (the new generation's common name)");
     return false;
@@ -995,110 +1413,42 @@ bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
   ensure_ca_index(*dbh, config);
 
   const CaGen root = active_ca(*dbh, config, "root");
-  const CaGen incumbent = active_ca(*dbh, config, "signing");
-  const CaGen next{incumbent.gen + 1, new_cn,
-                   config.signing_ca_slug_prefix +
-                       std::to_string(incumbent.gen + 1)};
-
-  // A CN identifies a generation in `cert_index` and in the CRL's issuer
-  // field, so generations must not share one.
-  if (new_cn == root.cn || gen_by_cn(*dbh, "signing", new_cn) ||
-      gen_by_cn(*dbh, "root", new_cn)) {
-    log::error("CN '{}' already names a CA generation; pick another", new_cn);
+  const CaGen incumbent = active_ca(*dbh, config, purpose);
+  const CaGen next{purpose, incumbent.gen + 1, new_cn,
+                   ca_cfg->slug_prefix + std::to_string(incumbent.gen + 1)};
+  if (cn_is_taken(*dbh, root, new_cn))
     return false;
-  }
 
-  const fs::path ca_dir = store_dir / "ca";
-  const fs::path pem = ca_dir / (next.slug + ".pem");
+  const fs::path pem = store_dir / "ca" / (next.slug + ".pem");
   if (fs::exists(pem))
     log::warn("{} exists from an unfinished renewal; replacing it",
               pem.string());
 
-  auto root_cert = load_ca_cert(store_dir, root.slug);
-  if (!root_cert) {
-    log::error("root CA cert not found under {}", ca_dir.string());
+  auto minted = mint_ca_generation(config, store_dir, secrets, *ca_cfg, root,
+                                   next, store, rng);
+  if (!minted)
     return false;
-  }
-  // The new generation gets the configured signing validity, and a CA may
-  // no more outlive its issuer than a leaf may: a root too close to its
-  // own notAfter must itself be rotated first.
-  if (outlives_issuer(*root_cert, std::chrono::seconds(std::chrono::days(
-                                      config.signing_ca_valid_days))))
-    return false;
-
-  TokenSessions tokens;
-  std::shared_ptr<const Botan::Private_Key> root_key, new_key;
-  try {
-    // Read-write sessions: with a pkcs11 signing backend the new
-    // generation's keypair is generated on its token under its own label
-    // (adopted if a previous attempt left it there).
-    if (root_ca.key_backend == "pkcs11")
-      root_key = token_ca_key(
-          open_token(config, secrets, tokens, root_ca, /*read_write=*/true),
-          root.slug, root_ca.curve);
-    else
-      root_key = store.find_key(*root_cert);
-    if (sign_ca.key_backend == "pkcs11")
-      new_key = token_ca_key(
-          open_token(config, secrets, tokens, sign_ca, /*read_write=*/true),
-          next.slug, sign_ca.curve);
-    else
-      new_key = std::make_shared<Botan::ECDSA_PrivateKey>(
-          rng, Botan::EC_Group::from_name(sign_ca.curve));
-  } catch (const std::exception &e) {
-    log::error("cannot load the CA keys (wrong {}?): {}",
-               secret_word_both(root_ca, sign_ca), e.what());
-    return false;
-  }
-  if (!root_key || !new_key) {
-    log::error("root key missing from store");
-    return false;
-  }
-
-  // Same profile as the generation the ceremony created, pointing at the
-  // active root: only the name, the key and the generation change.
-  auto opts =
-      ca_options(config, next.cn, config.signing_ca_valid_days, size_t{0});
-  opts.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.1")); // serverAuth
-  opts.add_ex_constraint(Botan::OID("1.3.6.1.5.5.7.3.2")); // clientAuth
-  add_signing_pointer_extensions(opts, config, root.slug);
-  auto req = Botan::X509::create_cert_req(opts, *new_key,
-                                          config.signing_ca_digest, rng);
-  Botan::X509_CA issuer(*root_cert, *root_key, config.root_ca_digest, rng);
-  const auto tp = Clock::now();
-  auto cert = issuer.sign_request(
-      req, rng, Botan::X509_Time(tp),
-      Botan::X509_Time(tp + std::chrono::days(config.signing_ca_valid_days)));
-
-  // Artifacts before the database: an interrupted renewal that leaves
-  // files behind is recoverable (the next run replaces them), while an
-  // active generation without a published certificate would break issuance.
-  Botan::X509_CA new_ca(cert, *new_key, config.signing_ca_digest, rng);
-  if (!write_pem(pem, cert) ||
-      !write_der(ca_dir / (next.slug + ".crt"), cert) ||
-      !write_der(ca_dir / (next.slug + ".crl"),
-                 new_ca.new_crl(
-                     rng, crl_next_update(cert, app::crl_next_update_days)))) {
-    log::error("could not write the new CA artifacts under {}",
-               ca_dir.string());
-    return false;
-  }
+  const Botan::X509_Certificate &cert = minted->cert;
 
   begin_write(*dbh);
   store.insert_cert(cert);
-  if (sign_ca.key_backend == "internal")
-    store.insert_key(cert, *new_key);
+  if (ca_cfg->key_backend == "internal")
+    store.insert_key(cert, *minted->key);
   ensure_cert_index(*dbh);
-  index_cert(*dbh, cert, "signing");
+  index_cert(*dbh, cert, "signing", next.purpose);
+  // Only this CA's lineage retires: a rotation of one issuing CA leaves
+  // every other purpose alone.
   auto retire = dbh->new_statement("UPDATE ca_cert_index SET status='retiring' "
-                                   "WHERE kind='signing' AND status='active'");
+                                   "WHERE purpose=?1 AND status='active'");
+  retire->bind(1, next.purpose);
   retire->spin();
   auto ins = dbh->new_statement("INSERT INTO ca_cert_index "
-                                "(kind,gen,cn,slug,status) "
-                                "VALUES ('signing',?1,?2,?3,'active')");
-  ins->bind(1, static_cast<std::size_t>(next.gen));
-  ins->bind(2, next.cn);
-  ins->bind(3, next.slug);
+                                "(kind,purpose,gen,cn,slug,status) "
+                                "VALUES ('signing',?1,?2,?3,?4,'active')");
+  ins->bind(1, next.purpose);
+  ins->bind(2, static_cast<std::size_t>(next.gen));
+  ins->bind(3, next.cn);
+  ins->bind(4, next.slug);
   ins->spin();
   commit_write(*dbh);
 
@@ -1131,47 +1481,84 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
     return it != m.end() ? std::stoi(it->second) : 0;
   };
   cfg::Config c;
-  c.org_name = S("org_name");
-  c.country_code = S("country_code");
-  c.repository_host = S("repository_host");
-  c.root_arc_oid = S("root_arc_oid");
-  c.root_ca_cn = S("root_ca_cn");
-  c.root_ca_curve = S("root_ca_curve");
-  c.root_ca_digest = S("root_ca_digest");
-  c.root_ca_valid_days = I("root_ca_valid_days");
+  c.pki.org_name = S("pki.org_name");
+  c.pki.country_code = S("pki.country_code");
+  c.pki.repository_host = S("pki.repository_host");
+  c.pki.arc_oid = S("pki.arc_oid");
+  c.pkcs11.module = S("pkcs11.module");
+  c.pkcs11.token_label = S("pkcs11.token_label");
+  c.root.cn = S("root.cn");
+  c.root.curve = S("root.curve");
+  c.root.digest = S("root.digest");
+  c.root.valid_days = I("root.valid_days");
   // The prefix is the rotation baseline; the
   // derived slug is the operative identity for files, URLs and key
   // labels. Both are snapshotted at init and read back here.
-  c.root_ca_slug_prefix = S("root_ca_slug_prefix");
-  c.root_ca_slug = S("root_ca_slug");
-  c.signing_ca_cn = S("signing_ca_cn");
-  c.signing_ca_curve = S("signing_ca_curve");
-  c.signing_ca_digest = S("signing_ca_digest");
-  c.signing_ca_valid_days = I("signing_ca_valid_days");
-  c.signing_ca_slug_prefix = S("signing_ca_slug_prefix");
-  c.signing_ca_slug = S("signing_ca_slug");
-  c.ee_curve = S("ee_curve");
-  c.ee_digest = S("ee_digest");
-  c.ee_valid_days = I("ee_valid_days");
-  c.key_backend = S("key_backend");
-  c.root_key_backend = S("root_key_backend");
-  c.signing_key_backend = S("signing_key_backend");
-  c.pkcs11_module = S("pkcs11_module");
-  c.pkcs11_token_label = S("pkcs11_token_label");
-  c.pkcs11_root_token_label = S("pkcs11_root_token_label");
+  c.root.slug_prefix = S("root.slug_prefix");
+  c.root.slug = S("root.slug");
+  c.root.key_backend = S("root.key_backend");
+  c.root.token_label = S("root.token_label");
+
+  auto cas = dbh->new_statement(std::format(
+      "SELECT purpose,profiles,cn,curve,digest,valid_days,slug_prefix,slug,"
+      "key_backend,token_label,ee_curve,ee_digest,ee_valid_days,"
+      "permitted_dns,permitted_email FROM {}",
+      app::purpose_table));
+  while (cas->step()) {
+    cfg::SigningCa ca;
+    ca.purpose = cas->get_str(0);
+    ca.profiles = split_profiles(cas->get_str(1));
+    ca.cn = cas->get_str(2);
+    ca.curve = cas->get_str(3);
+    ca.digest = cas->get_str(4);
+    ca.valid_days = static_cast<int>(cas->get_size_t(5));
+    ca.slug_prefix = cas->get_str(6);
+    ca.slug = cas->get_str(7);
+    ca.key_backend = cas->get_str(8);
+    ca.token_label = cas->get_str(9);
+    ca.ee_curve = cas->get_str(10);
+    ca.ee_digest = cas->get_str(11);
+    ca.ee_valid_days = static_cast<int>(cas->get_size_t(12));
+    ca.permitted_dns = split_profiles(cas->get_str(13));
+    ca.permitted_email = split_profiles(cas->get_str(14));
+    c.cas.emplace(ca.purpose, std::move(ca));
+  }
+  // An initialized store always holds at least one issuing CA; without one
+  // nothing downstream (config.signing()) has an issuer to name.
+  if (c.cas.empty())
+    return std::nullopt;
   return c;
 }
 
 void reconcile(const cfg::Config &file, const cfg::Config &eff) {
-  // The whole config is locked: warn and ignore any change; DB stays
-  // authoritative. Re-init to change anything.
-  const auto fk = locked_config(file);
-  const auto ek = locked_config(eff);
-  for (std::size_t i = 0; i < fk.size(); ++i)
-    if (fk[i].second != ek[i].second)
-      log::warn("ignoring readonly params changed in {}.toml ({}), check "
-                "against 'get config'",
-                app::name, fk[i].first);
+  // Every materialized section is locked: warn and ignore any change, the
+  // DB stays authoritative. Re-init to change a locked section.
+  auto compare = [](const std::string &section, const KeyValues &fk,
+                    const KeyValues &ek) {
+    for (std::size_t i = 0; i < fk.size(); ++i)
+      if (fk[i].second != ek[i].second)
+        log::warn("ignoring readonly params changed in {}.toml ([{}] {}), "
+                  "check against 'get config'",
+                  app::name, section, fk[i].first);
+  };
+  compare("pki/pkcs11/root", locked_global(file), locked_global(eff));
+
+  // Per section from here: a purpose the file declares but the store has
+  // never created is not a change to ignore, it is work not done yet.
+  for (const auto &[purpose, ca] : file.cas) {
+    auto it = eff.cas.find(purpose);
+    if (it == eff.cas.end()) {
+      log::to_stderr("[ca.{}] is declared but not created in the store",
+                     purpose);
+      continue;
+    }
+    compare("ca." + purpose, locked_purpose(ca), locked_purpose(it->second));
+  }
+  for (const auto &[purpose, ca] : eff.cas)
+    if (!file.cas.contains(purpose))
+      log::warn("[ca.{}] exists in the store but is missing from {}.toml; it "
+                "keeps issuing and publishing its CRL",
+                purpose, app::name);
 }
 
 namespace {
@@ -1179,39 +1566,72 @@ namespace {
 // --valid must sit inside the policy: at least the 5-minute floor (below
 // it clock skew kills the certificate on arrival), at most the effective
 // ee_valid_days ceiling - shorter than policy is always allowed.
-bool check_valid_override(const cfg::Config &config, std::chrono::seconds v) {
+bool check_valid_override(const cfg::SigningCa &ca, std::chrono::seconds v) {
   if (v >= std::chrono::minutes(app::min_valid_override_minutes) &&
-      v <= std::chrono::days(config.ee_valid_days))
+      v <= std::chrono::days(ca.ee_valid_days))
     return true;
   log::error("--valid must be in [{}m, {}d] (ee_valid_days is the ceiling)",
-             app::min_valid_override_minutes, config.ee_valid_days);
+             app::min_valid_override_minutes, ca.ee_valid_days);
   return false;
 }
 
 } // namespace
 
 bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
-              const Secrets &secrets, Profile profile, const std::string &cn,
-              const std::vector<San> &extra_sans,
+              const Secrets &secrets, const std::string &profile,
+              const std::string &cn, const std::vector<San> &extra_sans,
               std::optional<std::chrono::seconds> valid_override) {
+  const profile::Def *prof = profile_def(profile);
+  if (!prof)
+    return false;
+  // A profile whose key must never reach the CA is CSR-only: `create`
+  // would generate it here and leave it on disk.
+  if (prof->csr_only) {
+    log::error("the '{}' profile is issued from a CSR only; the CA must "
+               "never hold its private key",
+               profile);
+    return false;
+  }
+  // The profile picks the issuer, and with it the EE policy: curve, digest
+  // and validity ceiling all belong to the CA that will sign.
+  const cfg::SigningCa *ca_cfg = issuer_for(config, profile);
+  if (!ca_cfg)
+    return false;
   const std::chrono::seconds validity = valid_override.value_or(
-      std::chrono::seconds(std::chrono::days(config.ee_valid_days)));
-  if (valid_override && !check_valid_override(config, *valid_override))
+      std::chrono::seconds(std::chrono::days(ca_cfg->ee_valid_days)));
+  if (valid_override && !check_valid_override(*ca_cfg, *valid_override))
     return false;
 
   std::vector<San> sans;
-  if (profile == Profile::Server) {
-    // The CN becomes a dNSName SAN (IA5String): hostname ASCII only. A client
-    // CN stays DN-only (UTF8String), so it is free-form.
+  switch (prof->subject) {
+  case profile::Subject::DnsCn:
+    // The CN becomes a dNSName SAN (IA5String): hostname ASCII only. Other
+    // profiles keep the CN DN-only (UTF8String), so it is free-form.
     if (!dns_safe(cn)) {
-      log::error("server CN must be an ASCII hostname [A-Za-z0-9.*-]: '{}'",
-                 cn);
+      log::error("{} CN must be an ASCII hostname [A-Za-z0-9.*-]: '{}'",
+                 profile, cn);
       return false;
     }
-    sans.push_back({San::Type::Dns, cn}); // server always gets DNS:CN
-  } else if (extra_sans.empty()) {
-    log::error("client profile requires at least one --san");
-    return false;
+    sans.push_back({San::Type::Dns, cn});
+    break;
+  case profile::Subject::RequireSan:
+    if (extra_sans.empty()) {
+      log::error("the '{}' profile requires at least one --san", profile);
+      return false;
+    }
+    break;
+  case profile::Subject::EmailMatchingCn:
+    // The mailbox is the identity: it must be in the certificate as an
+    // rfc822Name, and the CN must name the same mailbox.
+    if (std::none_of(extra_sans.begin(), extra_sans.end(), [&](const San &s) {
+          return s.type == San::Type::Email && s.value == cn;
+        })) {
+      log::error("the '{}' profile requires --san email:<cn>, so that the "
+                 "CN names a mailbox the certificate actually carries",
+                 profile);
+      return false;
+    }
+    break;
   }
   sans.insert(sans.end(), extra_sans.begin(), extra_sans.end());
 
@@ -1246,7 +1666,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  const CaSpec sign_ca = signing_spec(config);
+  const CaSpec sign_ca = spec_of(*ca_cfg);
   if (ca_secret(sign_ca, secrets).empty()) {
     log::error("{} not set (required to sign with the CA)",
                secret_env(sign_ca));
@@ -1257,7 +1677,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
 
-  const CaGen sign = active_ca(*dbh, config, "signing");
+  const CaGen sign = active_ca(*dbh, config, ca_cfg->purpose);
   auto sign_cert = load_ca_cert(store_dir, sign.slug);
   if (!sign_cert) {
     log::error("signing CA cert not found under {}",
@@ -1270,9 +1690,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   // Fail fast before the signing key lookup (seconds on NK HSM): uniqueness
   // is answerable from cert_index alone. The write lock below repeats the
   // check authoritatively.
-  auto duplicate = [&] {
-    return blocking_duplicate(*dbh, cn, profile_name(profile));
-  };
+  auto duplicate = [&] { return blocking_duplicate(*dbh, cn, profile); };
   if (duplicate())
     return false;
 
@@ -1298,15 +1716,13 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   if (duplicate())
     return false;
 
-  Botan::EC_Group grp = Botan::EC_Group::from_name(config.ee_curve);
+  Botan::EC_Group grp = Botan::EC_Group::from_name(ca_cfg->ee_curve);
   Botan::ECDSA_PrivateKey ee_key(rng, grp);
 
   Botan::X509_Cert_Options o("", static_cast<uint32_t>(validity.count()));
   o.common_name = cn; // leaf DN: CN only
-  o.add_constraints(Botan::Key_Constraints(
-      static_cast<uint32_t>(Botan::Key_Constraints::DigitalSignature)));
-  o.add_ex_constraint(Botan::OID(
-      profile == Profile::Server ? "1.3.6.1.5.5.7.3.1" : "1.3.6.1.5.5.7.3.2"));
+  o.add_constraints(ee_constraints(*prof));
+  o.add_ex_constraint(Botan::OID(std::string(prof->eku)));
 
   Botan::AlternativeName an;
   for (const auto &s : sans) {
@@ -1332,16 +1748,16 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   }
   o.extensions.add_new(
       std::make_unique<Botan::Cert_Extension::Subject_Alternative_Name>(an));
-  add_ee_pointer_extensions(o.extensions, config, profile, sign.slug);
+  add_ee_pointer_extensions(o.extensions, config, *prof, sign.slug);
 
-  auto req = Botan::X509::create_cert_req(o, ee_key, config.ee_digest, rng);
-  Botan::X509_CA issuer(*sign_cert, *sign_key, config.ee_digest, rng);
+  auto req = Botan::X509::create_cert_req(o, ee_key, ca_cfg->ee_digest, rng);
+  Botan::X509_CA issuer(*sign_cert, *sign_key, ca_cfg->ee_digest, rng);
   const auto tp = Clock::now();
   auto ee_cert = issuer.sign_request(req, rng, Botan::X509_Time(tp),
                                      Botan::X509_Time(tp + validity));
 
   store.insert_cert(ee_cert);
-  index_cert(*dbh, ee_cert, profile_name(profile));
+  index_cert(*dbh, ee_cert, profile, sign.purpose);
   commit_write(*dbh);
 
   const fs::path ee_dir = store_dir / "ee";
@@ -1354,7 +1770,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   if (!ok)
     log::warn("could not write EE artifacts under {}", ee_dir.string());
 
-  log::info("issued {} certificate for CN '{}'", profile_name(profile), cn);
+  log::info("issued {} certificate for CN '{}'", profile, cn);
   return true;
 }
 
@@ -1497,10 +1913,17 @@ bool get_nonce(const fs::path &store_dir, const std::string &id) {
 }
 
 bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
-              const Secrets &secrets, Profile profile, const std::string &id,
-              const std::string &nonce, const std::string &csr_src,
+              const Secrets &secrets, const std::string &profile,
+              const std::string &id, const std::string &nonce,
+              const std::string &csr_src,
               std::optional<std::chrono::seconds> valid_override) {
-  if (valid_override && !check_valid_override(config, *valid_override))
+  const profile::Def *prof = profile_def(profile);
+  if (!prof)
+    return false;
+  const cfg::SigningCa *ca_cfg = issuer_for(config, profile);
+  if (!ca_cfg)
+    return false;
+  if (valid_override && !check_valid_override(*ca_cfg, *valid_override))
     return false;
   // Parse and police the CSR first: cheap failures before any store or key
   // access. PKCS#10 decode already verifies the CSR's self-signature
@@ -1521,8 +1944,8 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   auto pub = req->subject_public_key();
   const auto *ec = dynamic_cast<const Botan::EC_PublicKey *>(pub.get());
   if (pub->algo_name() != "ECDSA" || !ec ||
-      ec->domain() != Botan::EC_Group::from_name(config.ee_curve)) {
-    log::error("CSR public key must be ECDSA on {}", config.ee_curve);
+      ec->domain() != Botan::EC_Group::from_name(ca_cfg->ee_curve)) {
+    log::error("CSR public key must be ECDSA on {}", ca_cfg->ee_curve);
     return false;
   }
 
@@ -1582,18 +2005,34 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
       return false;
 
   Botan::AlternativeName an;
-  if (profile == Profile::Server) {
+  switch (prof->subject) {
+  case profile::Subject::DnsCn:
     // Same CN rules as issue_ee: hostname CN, always present as DNS:CN (the
     // set-backed AlternativeName dedups if the CSR listed it too).
     if (!dns_safe(cn)) {
-      log::error("server CN must be an ASCII hostname [A-Za-z0-9.*-]: '{}'",
-                 cn);
+      log::error("{} CN must be an ASCII hostname [A-Za-z0-9.*-]: '{}'",
+                 profile, cn);
       return false;
     }
     an.add_dns(cn);
-  } else if (supported == 0) {
-    log::error("client profile requires at least one SAN in the CSR");
-    return false;
+    break;
+  case profile::Subject::RequireSan:
+    if (supported == 0) {
+      log::error("the '{}' profile requires at least one SAN in the CSR",
+                 profile);
+      return false;
+    }
+    break;
+  case profile::Subject::EmailMatchingCn: {
+    const auto &mails = csr_san.email();
+    if (std::find(mails.begin(), mails.end(), cn) == mails.end()) {
+      log::error("the '{}' profile requires the CSR to carry an rfc822Name "
+                 "SAN equal to the CN",
+                 profile);
+      return false;
+    }
+    break;
+  }
   }
   for (const auto &d : csr_san.dns())
     an.add_dns(d);
@@ -1609,7 +2048,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  const CaSpec sign_ca = signing_spec(config);
+  const CaSpec sign_ca = spec_of(*ca_cfg);
   if (ca_secret(sign_ca, secrets).empty()) {
     log::error("{} not set (required to sign with the CA)",
                secret_env(sign_ca));
@@ -1620,7 +2059,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
 
-  const CaGen sign = active_ca(*dbh, config, "signing");
+  const CaGen sign = active_ca(*dbh, config, ca_cfg->purpose);
   auto sign_cert = load_ca_cert(store_dir, sign.slug);
   if (!sign_cert) {
     log::error("signing CA cert not found under {}",
@@ -1628,7 +2067,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
   const std::chrono::seconds validity = valid_override.value_or(
-      std::chrono::seconds(std::chrono::days(config.ee_valid_days)));
+      std::chrono::seconds(std::chrono::days(ca_cfg->ee_valid_days)));
   if (outlives_issuer(*sign_cert, validity))
     return false;
 
@@ -1657,9 +2096,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     }
     return false;
   };
-  auto duplicate = [&] {
-    return blocking_duplicate(*dbh, cn, profile_name(profile));
-  };
+  auto duplicate = [&] { return blocking_duplicate(*dbh, cn, profile); };
   if (nonce_rejected() || duplicate())
     return false;
 
@@ -1695,25 +2132,22 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   ext.add_new(std::make_unique<Botan::Cert_Extension::Basic_Constraints>(false),
               true);
   ext.add_new(
-      std::make_unique<Botan::Cert_Extension::Key_Usage>(Botan::Key_Constraints(
-          static_cast<uint32_t>(Botan::Key_Constraints::DigitalSignature))),
+      std::make_unique<Botan::Cert_Extension::Key_Usage>(ee_constraints(*prof)),
       true);
   ext.add_new(std::make_unique<Botan::Cert_Extension::Extended_Key_Usage>(
-      std::vector<Botan::OID>{Botan::OID(profile == Profile::Server
-                                             ? "1.3.6.1.5.5.7.3.1"
-                                             : "1.3.6.1.5.5.7.3.2")}));
+      std::vector<Botan::OID>{Botan::OID(std::string(prof->eku))}));
   ext.add_new(std::make_unique<Botan::Cert_Extension::Authority_Key_ID>(
       sign_cert->subject_key_id()));
   ext.add_new(std::make_unique<Botan::Cert_Extension::Subject_Key_ID>(
-      req->raw_public_key(), config.ee_digest));
+      req->raw_public_key(), ca_cfg->ee_digest));
   ext.add_new(
       std::make_unique<Botan::Cert_Extension::Subject_Alternative_Name>(an));
-  add_ee_pointer_extensions(ext, config, profile, sign.slug);
+  add_ee_pointer_extensions(ext, config, *prof, sign.slug);
 
   Botan::X509_DN subject;
   subject.add_attribute("X520.CommonName", cn); // leaf DN: CN only
 
-  Botan::X509_CA issuer(*sign_cert, *sign_key, config.ee_digest, rng);
+  Botan::X509_CA issuer(*sign_cert, *sign_key, ca_cfg->ee_digest, rng);
   const auto tp = Clock::now();
   auto ee_cert = Botan::X509_CA::make_cert(
       issuer.signature_op(), rng, issuer.algorithm_identifier(),
@@ -1721,7 +2155,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
       Botan::X509_Time(tp + validity), sign_cert->subject_dn(), subject, ext);
 
   store.insert_cert(ee_cert);
-  index_cert(*dbh, ee_cert, profile_name(profile));
+  index_cert(*dbh, ee_cert, profile, sign.purpose);
   auto consume =
       dbh->new_statement("UPDATE enrollment SET consumed=1 WHERE id=?1");
   consume->bind(1, id);
@@ -1732,7 +2166,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   // and delivery is `get <profile> --cn`. stdout carries just the CN so the
   // output pipes into it.
   log::info("issued {} certificate for CN '{}' from CSR (requested by '{}')",
-            profile_name(profile), cn, id);
+            profile, cn, id);
   log::to_stdout("{}", cn);
   return true;
 }
@@ -1752,12 +2186,6 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
     log::error("not initialized; run '{} init'", app::name);
     return false;
   }
-  const CaSpec sign_ca = signing_spec(config);
-  if (ca_secret(sign_ca, secrets).empty()) {
-    log::error("{} not set (required to sign the CRL)", secret_env(sign_ca));
-    return false;
-  }
-
   Botan::AutoSeeded_RNG rng;
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
@@ -1794,13 +2222,23 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   }
   const std::string issuer_cn =
       issued_by->issuer_dn().get_first_attribute("X520.CommonName");
-  CaGen sign = active_ca(*dbh, config, "signing");
-  if (auto g = gen_by_cn(*dbh, "signing", issuer_cn)) {
-    sign = *g;
-  } else if (issuer_cn != sign.cn) {
+  auto issuing = gen_by_cn(*dbh, "signing", issuer_cn);
+  if (!issuing) {
     log::error("no CA generation matches the issuer of this certificate "
                "(issuer CN '{}')",
                issuer_cn);
+    return false;
+  }
+  const CaGen sign = *issuing;
+  // The entry goes on the issuing generation's CRL, so it is that CA's key
+  // and secret that matter - not those of whichever CA issues the profile
+  // today.
+  const cfg::SigningCa *ca_cfg = config_of(config, sign);
+  if (!ca_cfg)
+    return false;
+  const CaSpec sign_ca = spec_of(*ca_cfg);
+  if (ca_secret(sign_ca, secrets).empty()) {
+    log::error("{} not set (required to sign the CRL)", secret_env(sign_ca));
     return false;
   }
 
@@ -1845,7 +2283,7 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  Botan::X509_CA ca(*sign_cert, *sign_key, config.signing_ca_digest, rng);
+  Botan::X509_CA ca(*sign_cert, *sign_key, ca_cfg->digest, rng);
   // Carry forward only the unexpired entries (RFC 5280 3.3 pruning), plus
   // the new one; make_crl continues the crlNumber that update_crl would.
   auto entries = prune_crl_entries(*dbh, prev);
@@ -1900,8 +2338,8 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
   if (selector.empty()) {
-    log::error("revoke ca needs --cn (a signing CA generation, or "
-               "signing-ca for the active one)");
+    log::error("revoke ca needs --cn (an issuing CA generation's name, or "
+               "<purpose>-ca for that CA's active generation)");
     return false;
   }
 
@@ -1911,7 +2349,6 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
   ensure_ca_index(*dbh, config);
 
   const CaGen root = active_ca(*dbh, config, "root");
-  const CaGen active = active_ca(*dbh, config, "signing");
 
   // A self-signed root cannot be revoked by anything below it: dropping a
   // trust anchor is the relying parties' job, not the CA's.
@@ -1920,18 +2357,22 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
                "and re-initialize");
     return false;
   }
-  const std::string cn = selector == "signing-ca" ? active.cn : selector;
+  const std::string cn = resolve_ca_cn(*dbh, config, selector);
+  if (cn.empty())
+    return false;
   const auto victim = gen_by_cn(*dbh, "signing", cn);
   if (!victim) {
-    log::error("no signing CA generation named '{}'", cn);
+    log::error("no issuing CA generation named '{}'", cn);
     return false;
   }
-  // Revoking the issuer of record would leave nothing to issue with, and
-  // the successor is one command away with the root key already in hand.
+  // Revoking the issuer of record would leave that purpose with nothing to
+  // issue with, and the successor is one command away with the root key
+  // already in hand. Only the victim's own lineage matters here.
+  const CaGen active = active_ca(*dbh, config, victim->purpose);
   if (victim->gen == active.gen) {
-    log::error("'{}' is the active issuer; run '{} renew signing-ca "
-               "--new-cn <name>' first, then revoke it",
-               cn, app::name);
+    log::error("'{}' is the active issuer for '{}'; run '{} renew signing-ca "
+               "--purpose {} --new-cn <name>' first, then revoke it",
+               cn, victim->purpose, app::name, victim->purpose);
     return false;
   }
 
@@ -1979,7 +2420,7 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
   ensure_cert_index(*dbh);
   Botan::X509_CRL prev(root_crl_path.string());
   // `root_ca` is the CaSpec here, so the CRL issuer is named for its role.
-  Botan::X509_CA root_issuer(*root_cert, *root_key, config.root_ca_digest, rng);
+  Botan::X509_CA root_issuer(*root_cert, *root_key, config.root.digest, rng);
   // Same RFC 5280 3.3 pruning as the signing CRL: an expired signing CA
   // generation leaves the root CRL after its final scheduled appearance.
   auto entries = prune_crl_entries(*dbh, prev);
@@ -2030,11 +2471,12 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
 
   const bool do_root = scope != CrlScope::Signing;
   const bool do_sign = scope != CrlScope::Root;
-  const CaSpec root_ca = root_spec(config);
-  const CaSpec sign_ca = signing_spec(config);
-  // Each scope needs only its own CA's secret; that is the point of the
+  std::vector<CaSpec> specs{root_spec(config)};
+  for (const auto &[purpose, ca] : config.cas)
+    specs.push_back(spec_of(ca));
+  // Each scope needs only its own CAs' secrets; that is the point of the
   // separate cadences (a signing run works with the root token in the safe).
-  for (const CaSpec &ca : {root_ca, sign_ca})
+  for (const CaSpec &ca : specs)
     if ((ca.root ? do_root : do_sign) && ca_secret(ca, secrets).empty()) {
       log::error("{} not set (required to sign the CRL)", secret_env(ca));
       return false;
@@ -2057,15 +2499,21 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
   };
   std::vector<Job> jobs;
   const std::size_t now = now_epoch();
-  // A CA's purpose and its ca_cert_index kind coincide today ("root",
-  // "signing"); the multi-CA work splits them (kind stays, purpose gains
-  // tls/email/...).
-  auto collect = [&](const CaSpec &spec, int horizon) {
-    for (const CaGen &g : live_cas(*dbh, config, spec.purpose)) {
+  // A scope is a kind ("root" or every issuing CA), so each generation
+  // carries the purpose that says which CA's key and digest sign it.
+  auto collect = [&](const std::string &kind, int horizon) {
+    for (const CaGen &g : live_cas(*dbh, config, kind)) {
+      CaSpec spec = root_spec(config);
+      if (kind != "root") {
+        const cfg::SigningCa *ca_cfg = config_of(config, g);
+        if (!ca_cfg)
+          return false;
+        spec = spec_of(*ca_cfg);
+      }
       auto cert = load_ca_cert(store_dir, g.slug);
       const fs::path crl_path = ca_dir / (g.slug + ".crl");
       if (!cert || !fs::exists(crl_path)) {
-        log::error("{} CA artifacts not found for {} under {}", spec.purpose,
+        log::error("{} CA artifacts not found for {} under {}", g.purpose,
                    g.slug, ca_dir.string());
         return false;
       }
@@ -2081,9 +2529,9 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
     }
     return true;
   };
-  if (do_root && !collect(root_ca, app::root_crl_next_update_days))
+  if (do_root && !collect("root", app::root_crl_next_update_days))
     return false;
-  if (do_sign && !collect(sign_ca, app::crl_next_update_days))
+  if (do_sign && !collect("signing", app::crl_next_update_days))
     return false;
   if (jobs.empty()) {
     log::warn("no CA in scope has a CRL to refresh");
@@ -2101,7 +2549,7 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
       j.key = ca_key(config, secrets, store, j.cert, j.spec, j.ca.slug, tokens);
   } catch (const std::exception &e) {
     log::error("cannot load CA key (wrong {}?): {}",
-               secret_word_both(root_ca, sign_ca), e.what());
+               secret_word_both(specs.front(), specs.back()), e.what());
     return false;
   }
   for (const Job &j : jobs)
@@ -2152,42 +2600,59 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  // `config` is the effective config.
+  // `config` is the effective config: the locked snapshot, printed back in
+  // the sections it was declared in, so the output is a valid yca.toml.
   if (target == "config") {
     std::print("# showing configuration stored in database\n");
-    std::print("org_name = \"{}\"\n", config.org_name);
-    std::print("country_code = \"{}\"\n", config.country_code);
-    std::print("repository_host = \"{}\"\n", config.repository_host);
-    std::print("root_ca_cn = \"{}\"\n", config.root_ca_cn);
-    std::print("root_ca_curve = \"{}\"\n", config.root_ca_curve);
-    std::print("root_ca_digest = \"{}\"\n", config.root_ca_digest);
-    std::print("root_ca_valid_days = {}\n", config.root_ca_valid_days);
-    std::print("root_ca_slug_prefix = \"{}\"\n", config.root_ca_slug_prefix);
-    std::print("root_ca_slug = \"{}\"\n", config.root_ca_slug);
-    std::print("signing_ca_cn = \"{}\"\n", config.signing_ca_cn);
-    std::print("signing_ca_curve = \"{}\"\n", config.signing_ca_curve);
-    std::print("signing_ca_digest = \"{}\"\n", config.signing_ca_digest);
-    std::print("signing_ca_valid_days = {}\n", config.signing_ca_valid_days);
-    std::print("signing_ca_slug_prefix = \"{}\"\n",
-               config.signing_ca_slug_prefix);
-    std::print("signing_ca_slug = \"{}\"\n", config.signing_ca_slug);
-    std::print("ee_curve = \"{}\"\n", config.ee_curve);
-    std::print("ee_digest = \"{}\"\n", config.ee_digest);
-    std::print("ee_valid_days = {}\n", config.ee_valid_days);
-    if (!config.root_arc_oid.empty())
-      std::print("root_arc_oid = \"{}\"\n", config.root_arc_oid);
-    std::print("key_backend = \"{}\"\n", config.key_backend);
-    std::print("root_key_backend = \"{}\"\n", config.root_key_backend);
-    std::print("signing_key_backend = \"{}\"\n", config.signing_key_backend);
-    const bool root_p11 = config.root_key_backend == "pkcs11";
-    const bool sign_p11 = config.signing_key_backend == "pkcs11";
-    if (root_p11 || sign_p11)
-      std::print("pkcs11_module = \"{}\"\n", config.pkcs11_module);
-    if (sign_p11)
-      std::print("pkcs11_token_label = \"{}\"\n", config.pkcs11_token_label);
-    if (root_p11)
-      std::print("pkcs11_root_token_label = \"{}\"\n",
-                 config.pkcs11_root_token_label);
+    std::print("\n[pki]\norg_name = \"{}\"\ncountry_code = \"{}\"\n"
+               "repository_host = \"{}\"\n",
+               config.pki.org_name, config.pki.country_code,
+               config.pki.repository_host);
+    if (!config.pki.arc_oid.empty())
+      std::print("arc_oid = \"{}\"\n", config.pki.arc_oid);
+
+    const bool root_p11 = config.root.key_backend == "pkcs11";
+    bool any_p11 = root_p11;
+    for (const auto &[purpose, ca] : config.cas)
+      any_p11 = any_p11 || ca.key_backend == "pkcs11";
+    if (any_p11) {
+      std::print("\n[pkcs11]\nmodule = \"{}\"\n", config.pkcs11.module);
+      if (!config.pkcs11.token_label.empty())
+        std::print("token_label = \"{}\"\n", config.pkcs11.token_label);
+    }
+
+    // The resolved token label is printed on every token-held CA, not the
+    // default it may have come from: the snapshot records what was used.
+    auto print_ca = [](const std::string &section, const cfg::CaFields &ca) {
+      std::print("\n[{}]\ncn = \"{}\"\ncurve = \"{}\"\ndigest = \"{}\"\n"
+                 "valid_days = {}\nslug_prefix = \"{}\"\nslug = \"{}\"\n"
+                 "key_backend = \"{}\"\n",
+                 section, ca.cn, ca.curve, ca.digest, ca.valid_days,
+                 ca.slug_prefix, ca.slug, ca.key_backend);
+      if (ca.key_backend == "pkcs11")
+        std::print("token_label = \"{}\"\n", ca.token_label);
+    };
+    print_ca("root", config.root);
+    for (const auto &[purpose, ca] : config.cas) {
+      print_ca("ca." + purpose, ca);
+      std::print("profiles = [");
+      for (std::size_t i = 0; i < ca.profiles.size(); ++i)
+        std::print("{}\"{}\"", i ? ", " : "", ca.profiles[i]);
+      std::print("]\nee_curve = \"{}\"\nee_digest = \"{}\"\n"
+                 "ee_valid_days = {}\n",
+                 ca.ee_curve, ca.ee_digest, ca.ee_valid_days);
+      auto print_subtrees = [](const char *key,
+                               const std::vector<std::string> &v) {
+        if (v.empty())
+          return;
+        std::print("{} = [", key);
+        for (std::size_t i = 0; i < v.size(); ++i)
+          std::print("{}\"{}\"", i ? ", " : "", v[i]);
+        std::print("]\n");
+      };
+      print_subtrees("permitted_dns", ca.permitted_dns);
+      print_subtrees("permitted_email", ca.permitted_email);
+    }
     return true;
   }
 
@@ -2196,15 +2661,18 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
   // reaches whichever generation carries it.
   if (target == "crl") {
     auto dbh_crl = open_store(db);
+    const std::string cn = resolve_ca_cn(*dbh_crl, config, selector);
+    if (cn.empty())
+      return false;
     const CaGen root = active_ca(*dbh_crl, config, "root");
-    const CaGen sign = active_ca(*dbh_crl, config, "signing");
     std::string ca_slug;
-    if (selector == "root-ca" || selector == root.cn)
+    if (cn == root.cn)
       ca_slug = root.slug;
-    else if (selector == "signing-ca" || selector == sign.cn)
-      ca_slug = sign.slug;
+    else if (auto g = gen_by_cn(*dbh_crl, "signing", cn))
+      ca_slug = g->slug;
     else {
-      log::error("crl --cn must be root-ca or signing-ca");
+      log::error("crl --cn must be root-ca, <purpose>-ca, or a CA "
+                 "generation's CN");
       return false;
     }
     const fs::path crl_path = store_dir / "ca" / (ca_slug + ".crl");
@@ -2221,14 +2689,13 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
   // Resolve to a single fingerprint via cert_index, then load the DER.
   std::optional<std::string> fp;
   if (target == "ca") {
-    std::string cn = selector, kind;
-    if (selector == "root-ca") {
-      cn = active_ca(*dbh, config, "root").cn;
+    std::string cn = resolve_ca_cn(*dbh, config, selector), kind;
+    if (cn.empty())
+      return false;
+    if (selector == "root-ca")
       kind = "root";
-    } else if (selector == "signing-ca") {
-      cn = active_ca(*dbh, config, "signing").cn;
-      kind = "signing";
-    }
+    else if (selector != cn)
+      kind = "signing"; // an alias resolved to a generation of that purpose
     auto q = dbh->new_statement(
         kind.empty()
             ? "SELECT fingerprint FROM cert_index WHERE cn=?1 AND "

@@ -18,23 +18,29 @@ cd "$WORK" || exit 1
 LOG="$WORK/yca.log"
 
 cat >"$CFG" <<'EOF'
+[pki]
 org_name = "Example"
 country_code = "CA"
 repository_host = "pki.example.ca"
-root_ca_cn = "ETS Root E1"
-root_ca_curve = "secp384r1"
-root_ca_digest = "SHA-384"
-root_ca_valid_days = 8192
-root_ca_slug_prefix = "ets-root-e"
-signing_ca_cn = "CA E1"
-signing_ca_curve = "secp384r1"
-signing_ca_digest = "SHA-384"
-signing_ca_valid_days = 8112
-signing_ca_slug_prefix = "ca-e"
+arc_oid = "1.3.6.1.4.1.32473"
+
+[root]
+cn = "ETS Root E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8192
+slug_prefix = "ets-root-e"
+
+[ca.tls]
+profiles = ["server", "client"]
+cn = "CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8112
+slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
-root_arc_oid = "1.3.6.1.4.1.32473"
 EOF
 
 PASS=0
@@ -331,7 +337,7 @@ sed 's/ee_curve = "secp256r1"/ee_curve = "prime256v1"/' "$CFG" >"$WORK/alias.tom
 
 # --- unicode: names are DN-only (free-form), slugs/URL fields strict ASCII ---
 sed -e 's/org_name = "Example"/org_name = "Компания 株"/' \
-	-e 's/root_ca_cn = "ETS Root E1"/root_ca_cn = "ETS 株 Root E1"/' \
+	-e 's/cn = "ETS Root E1"/cn = "ETS 株 Root E1"/' \
 	"$CFG" >"$WORK/uni.toml"
 "$BIN" --config "$WORK/uni.toml" --store "$WORK/pki_uni" init >/dev/null 2>&1 &&
 	ok "unicode org+root names accepted (DN UTF8String)" || bad "unicode names rejected"
@@ -347,7 +353,7 @@ openssl x509 -in "$WORK/pki_uni/ca/ets-root-e1.pem" -noout -subject -nameopt utf
 	grep -q "ETS 株 Root E1" &&
 	ok "get crl file named by slug (CN and slug decoupled)" ||
 	bad "get crl resolved by slugified CN"
-sed 's/root_ca_slug_prefix = "ets-root-e"/root_ca_slug_prefix = "ets-株"/' "$CFG" \
+sed 's/slug_prefix = "ets-root-e"/slug_prefix = "ets-株"/' "$CFG" \
 	>"$WORK/uni_slug.toml"
 "$BIN" --config "$WORK/uni_slug.toml" --store "$WORK/pki_uni2" init >/dev/null 2>&1 &&
 	bad "unicode slug prefix accepted" || ok "unicode slug prefix rejected (feeds URLs)"
@@ -398,12 +404,13 @@ w list --last --limit -1 >/dev/null 2>&1 && bad "list --limit -1 accepted" ||
 	ok "list --limit rejects negatives"
 w list 2>/dev/null && bad "list with no filter accepted" ||
 	ok "list requires exactly one filter"
-# window cap = max ee_valid_days (398): --expiring can cover a full EE
-# lifetime, so the signing CA is visible before issuance starts refusing
-w list --expiring 398 >/dev/null 2>&1 &&
-	ok "list --expiring 398 accepted" || bad "list --expiring 398"
-w list --expiring 399 >/dev/null 2>&1 &&
-	bad "list --expiring 399 accepted" || ok "list --expiring 399 rejected"
+# The window cap is the longest life any profile allows (email, 825 days):
+# --expiring must cover a full EE lifetime, so the issuing CA is visible
+# before issuance starts refusing.
+w list --expiring 825 >/dev/null 2>&1 &&
+	ok "list --expiring 825 accepted" || bad "list --expiring 825"
+w list --expiring 826 >/dev/null 2>&1 &&
+	bad "list --expiring 826 accepted" || ok "list --expiring 826 rejected"
 
 # --- corrupt CRL fails gracefully (logged error + exit 1, no abort) ---
 cp "$PKI/ca/ca-e1.crl" "$WORK/crl.bak"
@@ -781,6 +788,245 @@ r get config >/dev/null 2>&1 &&
 r create server --cn post.rot.ca >/dev/null 2>&1 &&
 	ok "issuance unaffected by the CA revocation" || bad "issuance broken"
 CA_STORE_PASSPHRASE="$CA_STORE_PASSPHRASE_SAVED"
+
+# =========================================================================
+# Several issuing CAs: one per purpose, each with its own profiles.
+# =========================================================================
+MCFG="$WORK/multi.toml"
+MPKI="$WORK/pki-multi"
+# Start with one CA that issues only `server`: nothing issues `client` yet.
+sed 's/^profiles = .*/profiles = ["server"]/' "$CFG" >"$MCFG"
+m() { "$BIN" --config "$MCFG" --store "$MPKI" "$@"; }
+# CA_STORE_PASSPHRASE is already exported, so this store adopts it instead
+# of generating one.
+m init >/dev/null 2>&1 && ok "multi-CA init exits 0" || bad "multi-CA init"
+m create server --cn s.multi.ca >/dev/null 2>&1 &&
+	ok "multi create server" || bad "multi create server"
+m create client --cn c.multi.ca --san=email:c@multi.ca >/dev/null 2>&1 &&
+	bad "client issued with no CA claiming the profile" ||
+	ok "unclaimed profile refused at issuance"
+
+# Declaring a purpose is not creating it: the store decides what exists.
+cat >>"$MCFG" <<'EOF'
+
+[ca.mtls]
+profiles = ["client"]
+cn = "mTLS CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8112
+slug_prefix = "mtls-e"
+ee_curve = "secp256r1"
+ee_digest = "SHA-256"
+ee_valid_days = 200
+EOF
+m create client --cn c.multi.ca --san=email:c@multi.ca >/dev/null 2>&1 &&
+	bad "declared-but-uncreated CA issued a certificate" ||
+	ok "a declared but uncreated CA does not issue"
+m add signing-ca --purpose nosuch >/dev/null 2>&1 &&
+	bad "add of an undeclared purpose accepted" ||
+	ok "add refuses a purpose the file does not declare"
+m add signing-ca --purpose mtls >/dev/null 2>&1 &&
+	ok "add signing-ca --purpose mtls" || bad "add signing-ca"
+for f in mtls-e1.pem mtls-e1.crt mtls-e1.crl; do
+	[ -f "$MPKI/ca/$f" ] && ok "added ca/$f written" || bad "added ca/$f missing"
+done
+m add signing-ca --purpose mtls >/dev/null 2>&1 &&
+	bad "add accepted a purpose the store already holds" ||
+	ok "add refuses an existing purpose (renew rotates it)"
+
+# The profile picks the issuer: each leaf chains to its own CA and to no
+# other, which is the whole point of the separation.
+m create client --cn c.multi.ca --san=email:c@multi.ca >/dev/null 2>&1 &&
+	ok "multi create client after add" || bad "multi create client"
+openssl verify -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/ca-e1.pem" "$MPKI/ee/s.multi.ca.crt" >/dev/null 2>&1 &&
+	ok "server leaf chains through the tls CA" || bad "server leaf chain"
+openssl verify -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/mtls-e1.pem" "$MPKI/ee/c.multi.ca.crt" >/dev/null 2>&1 &&
+	ok "client leaf chains through the mtls CA" || bad "client leaf chain"
+openssl verify -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/ca-e1.pem" "$MPKI/ee/c.multi.ca.crt" >/dev/null 2>&1 &&
+	bad "client leaf verified under the wrong CA" ||
+	ok "client leaf does not chain through the tls CA"
+# Each CA's own ee_valid_days applies, not one global policy.
+m create client --cn v.multi.ca --san=email:v@multi.ca --valid 250d >/dev/null 2>&1 &&
+	bad "--valid above the mtls CA ceiling accepted" ||
+	ok "--valid capped by the issuing CA's own ee_valid_days"
+
+# The alias is per purpose; the bare one is ambiguous now.
+m get ca --cn mtls-ca 2>/dev/null | openssl x509 -noout -subject 2>/dev/null |
+	grep -q "mTLS CA E1" && ok "get ca --cn <purpose>-ca" || bad "purpose alias"
+m get ca --cn signing-ca >/dev/null 2>&1 &&
+	bad "ambiguous signing-ca alias accepted" ||
+	ok "signing-ca rejected with several issuing CAs"
+
+# Rotation touches one lineage only.
+m renew signing-ca --new-cn "X" >/dev/null 2>&1 &&
+	bad "renew without --purpose accepted" || ok "renew needs --purpose"
+m renew signing-ca --purpose mtls --new-cn "mTLS CA E2" >/dev/null 2>&1 &&
+	ok "renew --purpose mtls" || bad "renew --purpose"
+[ -f "$MPKI/ca/mtls-e2.pem" ] && ok "mtls generation 2 published" || bad "mtls e2 missing"
+[ ! -f "$MPKI/ca/ca-e2.pem" ] &&
+	ok "the tls CA was untouched by the mtls rotation" || bad "tls CA rotated too"
+m get ca --cn tls-ca 2>/dev/null | openssl x509 -noout -subject 2>/dev/null |
+	grep -q "CA E1" && ok "tls CA still on generation 1" || bad "tls CA moved"
+
+# One refresh covers every purpose and every live generation. The summary
+# is logged, not printed, so read only the lines this run appended.
+LN="$(wc -l <"$LOG")"
+m refresh crl signing >/dev/null 2>&1
+REFRESHED="$(tail -n +$((LN + 1)) "$LOG")"
+for s in ca-e1 mtls-e1 mtls-e2; do
+	printf '%s' "$REFRESHED" | grep -q "$s" &&
+		ok "refresh crl signing covers $s" || bad "refresh missed $s"
+done
+
+# =========================================================================
+# The email profile: dual-use S/MIME, CSR-only, under its own CA.
+# =========================================================================
+cat >>"$MCFG" <<'EOF'
+
+[ca.email]
+profiles = ["email"]
+cn = "Email CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 8112
+slug_prefix = "email-e"
+ee_curve = "secp256r1"
+ee_digest = "SHA-256"
+ee_valid_days = 825
+permitted_email = ["multi.ca"]
+EOF
+m add signing-ca --purpose email >/dev/null 2>&1 &&
+	ok "add signing-ca --purpose email" || bad "add email CA"
+# 825 is the S/MIME ceiling; the TLS CAs may not go there.
+sed 's/^ee_valid_days = 397$/ee_valid_days = 825/' "$CFG" >"$WORK/tlslong.toml"
+"$BIN" --config "$WORK/tlslong.toml" --store "$WORK/pki-tl" init >/dev/null 2>&1 &&
+	bad "825 days accepted for a server CA" ||
+	ok "ee_valid_days capped by the strictest profile of the CA"
+
+# CSR-only: the CA must never hold an S/MIME private key.
+m create email --cn p@multi.ca --san=email:p@multi.ca >/dev/null 2>&1 &&
+	bad "create email accepted" || ok "the email profile refuses create"
+openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+	-keyout "$WORK/p.key" -out "$WORK/p.csr" -subj "/CN=p@multi.ca" \
+	-addext "subjectAltName=email:p@multi.ca" >/dev/null 2>&1
+m enroll --id p@multi.ca >/dev/null 2>&1
+NONCE="$(m get nonce --id p@multi.ca 2>/dev/null)"
+m sign email --id p@multi.ca --nonce "$NONCE" --csr "$WORK/p.csr" >/dev/null 2>&1 &&
+	ok "sign email from a CSR" || bad "sign email"
+m get email --cn p@multi.ca >"$WORK/p.crt" 2>/dev/null
+[ -f "$MPKI/ee/p@multi.ca.key" ] &&
+	bad "an email private key landed in the store" ||
+	ok "no email private key under ee/"
+
+# Dual use: digitalSignature for signing, keyAgreement for ECDH, and no
+# nonRepudiation (this PKI makes no such claim).
+KU="$(openssl x509 -in "$WORK/p.crt" -noout -ext keyUsage 2>/dev/null)"
+printf '%s' "$KU" | grep -q "Digital Signature" &&
+	ok "email KU has digitalSignature" || bad "email KU digitalSignature"
+printf '%s' "$KU" | grep -q "Key Agreement" &&
+	ok "email KU has keyAgreement (ECDH)" || bad "email KU keyAgreement"
+printf '%s' "$KU" | grep -qi "Non Repudiation" &&
+	bad "email KU asserts nonRepudiation" || ok "email KU omits nonRepudiation"
+openssl x509 -in "$WORK/p.crt" -noout -ext extendedKeyUsage 2>/dev/null |
+	grep -q "E-mail Protection" && ok "email EKU is emailProtection" ||
+	bad "email EKU"
+openssl x509 -in "$WORK/p.crt" -noout -ext certificatePolicies 2>/dev/null |
+	grep -q "1.3.6.1.4.1.32473.1.3" && ok "email policy OID .1.3" ||
+	bad "email policy OID"
+
+# The EKU chaining proof: the email leaf is an S/MIME certificate under its
+# own CA, and is not a TLS certificate under any of them.
+openssl verify -purpose smimesign -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/email-e1.pem" "$WORK/p.crt" >/dev/null 2>&1 &&
+	ok "email leaf verifies for smimesign" || bad "email smimesign verify"
+openssl verify -purpose sslserver -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/email-e1.pem" "$WORK/p.crt" >/dev/null 2>&1 &&
+	bad "email leaf verified as a TLS server" ||
+	ok "email leaf rejected for sslserver"
+# ...and the server leaf is the reverse.
+openssl verify -purpose sslserver -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/ca-e1.pem" "$MPKI/ee/s.multi.ca.crt" >/dev/null 2>&1 &&
+	ok "server leaf verifies for sslserver" || bad "server sslserver verify"
+openssl verify -purpose smimesign -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/ca-e1.pem" "$MPKI/ee/s.multi.ca.crt" >/dev/null 2>&1 &&
+	bad "server leaf verified as S/MIME" || ok "server leaf rejected for smimesign"
+
+# Each CA carries the EKUs of the profiles it lists, and nothing else. The
+# email CA also carries clientAuth: S/MIME BR 7.1.2.2 requires
+# emailProtection on a subordinate CA, forbids serverAuth, and permits
+# other values - which is what the public S/MIME intermediates ship (see
+# ../smime-refs). serverAuth is the one that must never appear there.
+openssl x509 -in "$MPKI/ca/ca-e1.pem" -noout -ext extendedKeyUsage 2>/dev/null |
+	grep -q "Web Server" && ok "tls CA carries serverAuth" || bad "tls CA EKU"
+openssl x509 -in "$MPKI/ca/ca-e1.pem" -noout -ext extendedKeyUsage 2>/dev/null |
+	grep -q "E-mail Protection" &&
+	bad "tls CA carries emailProtection" || ok "tls CA carries no email EKU"
+EKU_EMAIL="$(openssl x509 -in "$MPKI/ca/email-e1.pem" -noout -ext extendedKeyUsage 2>/dev/null)"
+printf '%s' "$EKU_EMAIL" | grep -q "E-mail Protection" &&
+	ok "email CA carries emailProtection" || bad "email CA emailProtection"
+printf '%s' "$EKU_EMAIL" | grep -q "Web Client" &&
+	ok "email CA carries clientAuth (SMIME BR 7.1.2.2, and Botan signs)" ||
+	bad "email CA clientAuth"
+printf '%s' "$EKU_EMAIL" | grep -q "Web Server" &&
+	bad "email CA carries serverAuth (SMIME BR forbids it)" ||
+	ok "email CA carries no serverAuth"
+
+# --- nameConstraints: the CA is bounded by who it may issue to ---
+NC="$(openssl x509 -in "$MPKI/ca/email-e1.pem" -noout -ext nameConstraints 2>/dev/null)"
+printf '%s' "$NC" | grep -q "critical" &&
+	ok "nameConstraints is critical (RFC 5280)" || bad "nameConstraints criticality"
+printf '%s' "$NC" | grep -q "email:multi.ca" &&
+	ok "nameConstraints permits email:multi.ca" || bad "nameConstraints content"
+# The extension is DER-encoded by hand (Botan cannot emit it), so it is
+# read back by a second implementation: OpenSSL rendered it above, and the
+# rendering must match what OpenSSL itself produces for the same input.
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+	-keyout "$WORK/nc.key" -out "$WORK/nc.pem" -subj "/CN=NC Ref" -days 5 \
+	-addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+	-addext "nameConstraints=critical,permitted;email:multi.ca" >/dev/null 2>&1
+REF="$(openssl x509 -in "$WORK/nc.pem" -noout -ext nameConstraints 2>/dev/null)"
+[ "$NC" = "$REF" ] &&
+	ok "hand-encoded nameConstraints matches OpenSSL's own encoding" ||
+	bad "nameConstraints encoding differs from OpenSSL"
+# The tls CA declares none, so it must carry none rather than an empty one.
+openssl x509 -in "$MPKI/ca/ca-e1.pem" -noout -ext nameConstraints 2>/dev/null |
+	grep -q "Name Constraints" &&
+	bad "tls CA carries nameConstraints it never declared" ||
+	ok "a CA with no declared subtrees carries no nameConstraints"
+
+# A mailbox outside the permitted subtree: the CA still signs it (RFC 5280
+# puts enforcement on the verifier), but no verifier will accept it.
+openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+	-keyout "$WORK/o.key" -out "$WORK/o.csr" -subj "/CN=o@elsewhere.ca" \
+	-addext "subjectAltName=email:o@elsewhere.ca" >/dev/null 2>&1
+m enroll --id o@elsewhere.ca >/dev/null 2>&1
+ON="$(m get nonce --id o@elsewhere.ca 2>/dev/null)"
+m sign email --id o@elsewhere.ca --nonce "$ON" --csr "$WORK/o.csr" >/dev/null 2>&1
+m get email --cn o@elsewhere.ca >"$WORK/o.crt" 2>/dev/null
+openssl verify -purpose smimesign -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/email-e1.pem" "$WORK/o.crt" 2>&1 |
+	grep -q "permitted subtree violation" &&
+	ok "a mailbox outside the subtree fails verification" ||
+	bad "out-of-subtree mailbox accepted"
+# ...while the one inside it still verifies.
+openssl verify -purpose smimesign -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$MPKI/ca/email-e1.pem" "$WORK/p.crt" >/dev/null 2>&1 &&
+	ok "a mailbox inside the subtree still verifies" ||
+	bad "in-subtree mailbox rejected"
+
+# The mailbox is the identity: the CN must be one of the rfc822Names.
+openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+	-keyout "$WORK/q.key" -out "$WORK/q.csr" -subj "/CN=q@multi.ca" \
+	-addext "subjectAltName=email:other@multi.ca" >/dev/null 2>&1
+m enroll --id q@multi.ca >/dev/null 2>&1
+QN="$(m get nonce --id q@multi.ca 2>/dev/null)"
+m sign email --id q@multi.ca --nonce "$QN" --csr "$WORK/q.csr" >/dev/null 2>&1 &&
+	bad "email CSR with a mismatched SAN accepted" ||
+	ok "email requires an rfc822Name equal to the CN"
 
 echo
 echo "e2e: $PASS passed, $FAIL failed"

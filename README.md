@@ -8,12 +8,17 @@ a plain HTTP server; revocation is CRL-only.
 
 ```mermaid
 flowchart LR
-    R[Root CA<br/>Generation 1 / root-e1] -->|signs| S[Signing CA<br/>Generation 1 / ca-e1]
-    S -->|issues| EE[Server / Client certificates]
+    R[Root CA<br/>Generation 1 / root-e1] -->|signs| S[Issuing CA per purpose<br/>Generation 1 / ca-e1]
+    S -->|issues| EE[Server / Client / Email certificates]
     CLI[yca CLI] --> ST[(SQLite store<br/>ca-store.db)]
     ACME[yca-acme daemon] -->|execs yca sign| CLI
     ST --> PUB[Published repository:<br/>CA certs, CRLs]
 ```
+
+The hierarchy is two tiers: one root, and one issuing CA per *purpose*
+(`[ca.tls]`, `[ca.mtls]`, ...), each carrying the EE profiles it is
+allowed to issue. A single issuing CA is the ordinary case; the profile
+being issued is what picks the CA that signs.
 
 ## Limitations
 
@@ -21,65 +26,106 @@ flowchart LR
   `SHA-256`, `SHA-384`, `SHA-512` (Botan's names, verbatim, no aliases:
   `prime256v1` is rejected). RSA keys and CSRs are not supported.
 - **Fixed policy OID structure.** CertificatePolicies is built from one
-  configurable arc (`root_arc_oid`, intended to be an org PEN) with
-  hardcoded suffixes: `<arc>.1.1` (TLS server), `<arc>.1.2` (VPN/mTLS
-  client). Only the arc is configurable; without it no policies are
-  emitted.
+  configurable arc (`arc_oid`, intended to be an org PEN) with suffixes
+  fixed by the profile table: `<arc>.1.1` (TLS server), `<arc>.1.2`
+  (VPN/mTLS client), `<arc>.1.3` (S/MIME). Only the arc is configurable;
+  without it no policies are emitted.
 - **Narrow HSM support.** The `pkcs11` key backend is tested against
   SoftHSM2 and the Nitrokey HSM 2 via OpenSC only. pkcs11-backed CA keys
   live on their token and never leave it; EE keys are always software.
-- **HSM: single token is the default layout.** With `key_backend =
-  "pkcs11"` alone both CA keys share one token, which must be available
-  for routine issuance - the root is then not truly offline. The split
-  layout (a distinct `pkcs11_root_token_label`) puts the root key on its
-  own token, and the hybrid layout (`root_key_backend = "pkcs11"`,
-  signing key internal) keeps only the root on a token; in both, daily
-  issuance runs without the root token.
+- **HSM: single token is the default layout.** With `[pkcs11]
+  token_label` and no per-CA label both CA keys share one token, which
+  must be available for routine issuance - the root is then not truly
+  offline. The split layout (a `token_label` of its own under `[root]`)
+  puts the root key on its own token, and the hybrid layout (`[root]
+  key_backend = "pkcs11"` with the issuing CA internal) keeps only the
+  root on a token; in both, daily issuance runs without the root token.
 - **Fixed CA subject DN structure.** CA DNs are always `CN` + `O` + `C`
-  (from `root_ca_cn`/`signing_ca_cn`, `org_name`, `country_code`); no
-  other attributes (OU, L, ST, serialNumber) can be added.
+  (from each CA's `cn`, plus `org_name` and `country_code`); no other
+  attributes (OU, L, ST, serialNumber) can be added.
 - **Fixed EE subject DN structure.** Simple subject DN for leaf
   certificates (`CN` only).
-- **Two EE profiles.** `server` and `client` only; no code signing,
-  S/MIME or document signing.
+- **Three EE profiles.** `server`, `client` and `email` (S/MIME); no code
+  signing or document signing. Each belongs to one issuing CA, and a CA
+  carries the EKUs of the profiles it lists, so a verifier that intersects
+  EKUs along a chain rejects a leaf its issuer had no business signing.
+- **Name constraints are `dNSName` and `rfc822Name` only.** An issuing CA
+  can be bounded by `permitted_dns` and `permitted_email`, but not by
+  `directoryName`, which the S/MIME BR also require of a technically
+  constrained CA: leaf DNs carry a CN and nothing else, so no non-empty
+  `directoryName` subtree could contain them. Excluded subtrees are
+  not supported.
 - **CRL-only revocation.** No OCSP responder; status is served by the
-  published signing and root CRLs, re-signed on timers.
-- **No root rotation or cross-signing.** The signing CA rotates
-  (`renew signing-ca`); the root does not.
+  published issuing and root CRLs, re-signed on timers.
+- **No root rotation or cross-signing.** Issuing CAs rotate
+  (`renew signing-ca --purpose <p>`); the root does not.
 
 ## Configuration (`yca.toml`)
 
 Format: TOML; default path `./yca.toml`, override with `--config`.
+
+`[pki]`
 
 | Key | Meaning |
 |-----|---------|
 | `org_name` | `O=` in the CA DNs; any script (UTF8String) |
 | `country_code` | `C=` in the CA DNs; exactly 2 letters |
 | `repository_host` | `host[:port]` serving the published artifacts; used to build the CDP and AIA (caIssuers) URLs in certificates |
-| `root_ca_cn` | root CA display name (`CN=`); any script |
-| `root_ca_curve` | root key curve |
-| `root_ca_digest` | root signature digest (also signs the root CRL) |
-| `root_ca_valid_days` | root certificate validity |
-| `root_ca_slug_prefix` | file/URL identifier; the slug is `<root_ca_slug_prefix><generation>` (`<generation>` is 1 at init) |
-| `signing_ca_cn` | signing CA display name |
-| `signing_ca_curve` | signing key curve |
-| `signing_ca_digest` | signing signature digest (also signs the signing CRL) |
-| `signing_ca_valid_days` | signing certificate validity |
-| `signing_ca_slug_prefix` | file/URL identifier; the slug is `<signing_ca_slug_prefix><generation>` (`<generation>` is 1 at init) |
+| `arc_oid` | optional dotted OID arc (org PEN) for CertificatePolicies; absent means no policies extension |
+
+`[pkcs11]`, present only when some CA holds its key on a token
+
+| Key | Meaning |
+|-----|---------|
+| `module` | path to the PKCS#11 provider `.so` |
+| `token_label` | default token label, used by every token-held CA that declares none of its own |
+
+`[root]` and `[ca.<purpose>]` share these
+
+| Key | Meaning |
+|-----|---------|
+| `cn` | CA display name (`CN=`); any script |
+| `curve` | CA key curve |
+| `digest` | CA signature digest (also signs this CA's CRL) |
+| `valid_days` | CA certificate validity |
+| `slug_prefix` | file/URL identifier; the slug is `<slug_prefix><generation>` (`<generation>` is 1 at init) |
+| `key_backend` | `internal` (default: software key, passphrase-encrypted in the store) or `pkcs11` |
+| `token_label` | this CA's token; only with `key_backend = "pkcs11"`, defaults to `[pkcs11] token_label` |
+
+`[ca.<purpose>]` adds
+
+| Key | Meaning |
+|-----|---------|
+| `profiles` | the EE profiles this CA issues, from `server`, `client`, `email`; each profile belongs to exactly one CA |
 | `ee_curve` | EE key curve (`create` generates on it, `sign` requires the CSR key on it) |
 | `ee_digest` | EE signature digest |
-| `ee_valid_days` | default and ceiling for EE validity; at most 398 |
-| `root_arc_oid` | optional dotted OID arc (org PEN) for CertificatePolicies; absent means no policies extension |
-| `key_backend` | `internal` (default: software keys, passphrase-encrypted in the store) or `pkcs11`; shorthand default for the two per-CA backends below |
-| `root_key_backend`, `signing_key_backend` | per-CA backend (`internal`\|`pkcs11`), each defaulting to `key_backend`. `pkcs11` root with `internal` signing is the hybrid layout |
-| `pkcs11_module` | path to the PKCS#11 provider `.so` (required when any backend is `pkcs11`) |
-| `pkcs11_token_label` | signing token label (required when the signing backend is `pkcs11`) |
-| `pkcs11_root_token_label` | root token label; defaults to `pkcs11_token_label` (single-token layout), a different label means split tokens, required explicitly in the hybrid layout |
+| `ee_valid_days` | default and ceiling for EE validity under this CA; capped by the strictest profile it lists (398 for `server`/`client`, 825 for `email`) |
+| `permitted_dns` | optional `nameConstraints` permitted subtrees, as bare FQDNs; `example.ca` also covers `www.example.ca` |
+| `permitted_email` | optional `nameConstraints` permitted subtrees, as FQDNs; `example.ca` means every mailbox at that host, `.example.ca` every mailbox in a subdomain of it |
 
-Constraints enforced: curves/digests from the sets above; slug
-prefixes lowercase kebab-case `[a-z0-9.-]`; `repository_host` a DNS host
-name with optional port (no scheme or path);
-`ee_valid_days < signing_ca_valid_days < root_ca_valid_days`. `internal` root with `pkcs11` signing is rejected (it would protect the replaceable key better than the anchor).
+Constraints enforced: curves/digests from the sets above; purposes and
+slug prefixes lowercase kebab-case `[a-z0-9.-]`; `repository_host` a DNS
+host name with optional port (no scheme or path); slug prefixes and CNs
+unique across all CAs, and no two prefixes differing only by digits (they
+would collide once generations are appended);
+`ee_valid_days < valid_days` per CA and every CA's `valid_days` below the
+root's. An `internal` root under a `pkcs11` issuing CA is rejected (it
+would protect the replaceable key better than the anchor). A `pkcs11`
+field nothing uses is an error rather than something to ignore: a
+`token_label` on an `internal` CA, a `[pkcs11]` section no CA draws on,
+or a `[pkcs11] token_label` that every token-held CA overrides.
+
+Each profile belongs to exactly one CA, which is how issuance picks an
+issuer: `create server` routes to whichever CA lists `server`. A profile
+no CA claims is not a configuration error, it simply means this PKI does
+not issue it, and issuance says so. `email` is CSR-only: it is issued
+through `enroll` / `get nonce` / `sign`, never through `create`, so the
+CA never holds an S/MIME private key.
+
+A CA carries the EKUs of the profiles it lists. A CA listing `email` also
+carries `clientAuth`, which the S/MIME Baseline Requirements permit on a
+subordinate CA (7.1.2.2) and public S/MIME intermediates ship; the leaf
+still carries `emailProtection` alone.
 
 Slug prefixes: the stable part of the CA slugs (file/URL names, pkcs11 
 key labels). The full slug is `<slug_prefix><generation>` at init;
@@ -90,41 +136,55 @@ MUST already be labeled `<slug_prefix>1` to be adopted (curve-checked),
 and a missing one WILL be generated on the token under exactly that
 label (`root-e1` and `ca-e1` in the example below).
 
-`yca init` snapshots the config into the store (`ca_config` table),
-which becomes the definitive reference: all fields are locked, and later
-edits to `yca.toml` are warned and ignored.
+`yca init` snapshots the config into the store, which becomes the
+definitive reference: all fields are locked, and later edits to
+`yca.toml` are warned and ignored. The snapshot follows the sections:
+`ca_config` holds `[pki]`, `[pkcs11]` and `[root]` under dotted keys,
+`ca_purpose` holds one row per issuing CA. A section is frozen when it is
+created, which is what will let a CA be added to an initialized store
+without re-initializing it. `yca get config` prints the snapshot back in
+the same sections, so its output is itself a valid `yca.toml`.
 
 Example:
 
 ```toml
+[pki]
 org_name = "Example 会社"
 country_code = "CA"
 repository_host = "pki.example.ca"
-root_ca_cn = "ETS Root E1"
-root_ca_curve = "secp384r1"
-root_ca_digest = "SHA-384"
-root_ca_valid_days = 7164
-root_ca_slug_prefix = "root-e"
-signing_ca_cn = "CA E1"
-signing_ca_curve = "secp384r1"
-signing_ca_digest = "SHA-384"
-signing_ca_valid_days = 1194
-signing_ca_slug_prefix = "ca-e"
+arc_oid = "1.3.6.1.4.1.32473" # org PEN arc (optional)
+
+[root]
+cn = "ETS Root E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 7164
+slug_prefix = "root-e"
+
+[ca.tls]
+profiles = ["server", "client"]
+cn = "CA E1"
+curve = "secp384r1"
+digest = "SHA-384"
+valid_days = 1194
+slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 398
-root_arc_oid = "1.3.6.1.4.1.32473" # org PEN arc (optional)
 
 # HSM-held CA keys (optional; default internal). PIN from CA_HSM_PIN.
-# key_backend = "pkcs11"
-# pkcs11_module = "/usr/lib/opensc-pkcs11.so"
-# pkcs11_token_label = "ets"
+# [pkcs11]
+# module = "/usr/lib/opensc-pkcs11.so"
+# token_label = "ets"
+#
+# Then per CA, in the sections above:
+#   [root]    key_backend = "pkcs11"
+#   [ca.tls]  key_backend = "pkcs11"
 # Split layout: the root key on its own token, plugged in only for
 # ceremonies. PIN from CA_HSM_ROOT_PIN (falls back to CA_HSM_PIN).
-# pkcs11_root_token_label = "ets-root"
-# Hybrid layout: only the root key on a token, signing key internal
+#   [root]    token_label = "ets-root"
+# Hybrid layout: only [root] on a token, issuing keys internal
 # (passphrase-encrypted in the store).
-# root_key_backend = "pkcs11"
 ```
 Note: `1.3.6.1.4.1.32473` is the IANA documentation PEN (RFC 5612), used here as a placeholder.
 
@@ -144,15 +204,16 @@ touches - daily issuance never needs the root secret. Read-only commands
 
 | Command | Purpose |
 |---------|---------|
-| `init` | initialize the PKI: root + signing CA. A passphrase is generated and shown once if `CA_STORE_PASSPHRASE` is unset. Fails if already initialized. |
+| `init` | initialize the PKI: the root plus every declared `[ca.<purpose>]`, in one root ceremony. A passphrase is generated and shown once if `CA_STORE_PASSPHRASE` is unset. Fails if already initialized. |
+| `add signing-ca --purpose <p>` | create an issuing CA the config declares but the store does not hold. Root key ceremony; the section is locked as it is created, so a CA can join an initialized store without re-initializing it. |
 | `create <server\|client> --cn <cn> [--san type:name ...] [--valid <N><s\|m\|h\|d>]` | issue an EE cert with a locally generated key, delivered under `ee/`. `server` always includes `DNS:CN`; `client` requires at least one `--san`. |
 | `enroll --id <id>` | enroll an identity (e.g. an email) for CSR signing |
 | `get nonce --id <id>` | issue/return the identity's single-use nonce (5 minutes, idempotent while fresh) |
 | `sign <server\|client> --id <id> --nonce <n> --csr <pem\|-\|path> [--valid ...]` | issue from an external PKCS#10 CSR, gated by the `(id, nonce)` pair. Only the public key (must be ECDSA on `ee_curve`), subject CN and supported SANs are taken from the CSR. Writes nothing under `ee/`; prints the CN so it pipes into `get`. |
 | `revoke <server\|client\|ca> [--cn <cn> \| --serial <hex>] [--reason <CRLReason>]` | revoke the newest active cert by CN, or the exact one by serial; the entry goes on the CRL of the issuing generation. `revoke ca` revokes a signing CA generation by `--cn` onto the root CRL (refused for the active issuer; `renew signing-ca` first). |
-| `renew signing-ca --new-cn <cn>` | rotate: the successor generation issues from then on, the predecessor keeps publishing its CRL |
+| `renew signing-ca [--purpose <p>] --new-cn <cn>` | rotate one issuing CA: the successor generation issues from then on, the predecessor keeps publishing its CRL. Other purposes are untouched. `--purpose` is required once several issuing CAs exist. |
 | `refresh crl [root\|signing\|all]` | re-sign the published CRLs: same unexpired entries, crlNumber+1, fresh dates; expired entries are pruned per RFC 5280 3.3. Covers every live generation of the scope. |
-| `get <server\|client\|ca\|crl\|config\|nonce> [--cn <cn>] [--id <id>] [--encoding pem\|der] [--chain]` | export to stdout. `ca`/`crl` take `--cn root-ca\|signing-ca` (or a generation CN); `--cn -` reads the CN from stdin. `--chain` appends the issuers, nearest first, stopping below the self-signed root that relying parties already hold; `server`/`client`/`ca` only, and PEM only, since DER cannot be concatenated. |
+| `get <server\|client\|ca\|crl\|config\|nonce> [--cn <cn>] [--id <id>] [--encoding pem\|der] [--chain]` | export to stdout. `ca`/`crl` take `--cn root-ca\|<purpose>-ca` (or a generation CN); `signing-ca` still works while exactly one issuing CA exists; `--cn -` reads the CN from stdin. `--chain` appends the issuers, nearest first, stopping below the self-signed root that relying parties already hold; `server`/`client`/`ca` only, and PEM only, since DER cannot be concatenated. |
 | `list <filter> [--tsv] [--limit N]` | one filter of `--expiring [N]`, `--expired [N]`, `--revoked [N]`, `--last [N]` (window in days) or `--cn <cn>`; indexed, no full store scan |
 
 `--valid` requests a shorter validity for one issuance, range
@@ -243,7 +304,7 @@ Certificate:
 - **Publication.** A timer rsyncs `store/ca/` (CA certs `.crt`, CRLs
   `.crl`) to the web root served at `repository_host`; the CDP and
   caIssuers URLs in issued certificates point there.
-- **Rotation.** `renew signing-ca` for the signing CA.
+- **Rotation.** `renew signing-ca --purpose <p>` for one issuing CA; the root does not rotate.
 - **ACME.** `yca-acme` exposes RFC 8555 issuance for the server profile:
   EAB-gated accounts, http-01 and dns-01 (wildcards included),
   revokeCert, ARI (RFC 9773). It owns only protocol state and execs the
