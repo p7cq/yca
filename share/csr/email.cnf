@@ -1,0 +1,25 @@
+# openssl req config for a yca email (S/MIME) CSR. Only the fields yca
+# honors are requested: a CN-only subject and the rfc822Name SAN the email
+# profile requires. Anything else in a CSR is ignored - the CA dictates the
+# certificate profile, and rebuilds the subject DN from its own
+# configuration, so an O or C requested here would be replaced.
+#
+# The mailbox is the identity: the CN is the mailbox address, and it must
+# also appear as an email SAN. This profile is CSR-only - `yca create email`
+# is refused, because the CA must never hold an S/MIME private key.
+#
+# Usage:
+#   openssl ecparam -genkey -name prime256v1 -noout -out email.key
+#   openssl req -new -key email.key -config email.cnf -out email.csr
+
+[req]
+prompt             = no
+distinguished_name = dn
+req_extensions     = ext
+
+[dn]
+CN = user@example.ca
+
+[ext]
+# One of the rfc822Names must equal the CN; further mailboxes may follow.
+subjectAltName = email:user@example.ca

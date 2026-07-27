@@ -176,6 +176,15 @@ load(const std::filesystem::path &path) {
     errs.push_back(std::format("[{}] {}: missing or not an integer", sec, key));
     return false;
   };
+  auto get_bool = [&](const toml::table &t, std::string_view sec,
+                      std::string_view key, bool &out) {
+    if (auto v = t[key].value<bool>()) {
+      out = *v;
+      return true;
+    }
+    errs.push_back(std::format("[{}] {}: must be a boolean", sec, key));
+    return false;
+  };
   // Only Botan's SECG curve names are accepted - no aliases (prime256v1 is
   // OpenSSL's name for secp256r1 and is rejected).
   auto check_curve = [&](std::string_view sec, std::string_view key,
@@ -332,6 +341,17 @@ load(const std::filesystem::path &path) {
         errs.push_back(
             std::format("[{}] profiles: missing or not an array", sec));
       }
+      // The DN shape is the profile's, the knob is the deployment's, and
+      // the knob may only widen: a profile whose subject must carry the
+      // organizational attributes refuses it.
+      if (t->contains("simple_dn") &&
+          get_bool(*t, sec, "simple_dn", ca.simple_dn) && ca.simple_dn)
+        for (const auto &name : ca.profiles)
+          if (const profile::Def *d = profile::find(name); d && d->full_dn)
+            errs.push_back(std::format(
+                "[{}] simple_dn: the '{}' profile requires an organizational "
+                "subject (C and O beside the CN)",
+                sec, name));
       // nameConstraints subtrees. A dNSName is a bare FQDN and covers its
       // subdomains by label suffix. An rfc822Name is a FQDN, optionally
       // preceded by a full stop, and never a mailbox: "example.ca" means

@@ -25,6 +25,12 @@ slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 398
+# Subject DNs are C, O, CN. simple_dn reduces the leaves this CA issues to
+# the bare CN: a TLS certificate is matched on its SANs, so the
+# organizational attributes carry nothing there. It is refused on a CA
+# carrying a profile whose subject must be organizational (email), and it
+# never applies to the CA's own certificate.
+simple_dn = true
 # Optional: bound a CA by who it may issue to, not only by what its
 # certificates may be used for. Emitted as a critical nameConstraints
 # extension, enforced by the relying party.

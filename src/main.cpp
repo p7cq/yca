@@ -385,8 +385,11 @@ int main(int argc, char **argv) {
         }
       }
       if (g_chain) {
-        if (g_target != "server" && g_target != "client" && g_target != "ca") {
-          log::error("--chain applies to server, client or ca");
+        // Any leaf profile, plus a CA generation: a chain is meaningful
+        // wherever there is an issuer above. Derived from the profile
+        // table rather than listed, so a new profile is not left out.
+        if (g_target != "ca" && !profile::find(g_target)) {
+          log::error("--chain applies to {} or ca", join(signable));
           return 1;
         }
         // A chain is a concatenation, and DER cannot be concatenated.

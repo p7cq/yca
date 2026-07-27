@@ -40,21 +40,25 @@ being issued is what picks the CA that signs.
   puts the root key on its own token, and the hybrid layout (`[root]
   key_backend = "pkcs11"` with the issuing CA internal) keeps only the
   root on a token; in both, daily issuance runs without the root token.
-- **Fixed CA subject DN structure.** CA DNs are always `CN` + `O` + `C`
-  (from each CA's `cn`, plus `org_name` and `country_code`); no other
-  attributes (OU, L, ST, serialNumber) can be added.
-- **Fixed EE subject DN structure.** Simple subject DN for leaf
-  certificates (`CN` only).
-- **Three EE profiles.** `server`, `client` and `email` (S/MIME); no code
-  signing or document signing. Each belongs to one issuing CA, and a CA
-  carries the EKUs of the profiles it lists, so a verifier that intersects
-  EKUs along a chain rejects a leaf its issuer had no business signing.
+- **Fixed subject DN structure.** Every DN is encoded `C`, `O`, `CN` in
+  that order (from `country_code`, `org_name` and the certificate's own
+  common name); no other attributes (OU, L, ST, serialNumber) can be
+  added. A CA certificate always carries the full DN. For the leaves a CA
+  issues, `[ca.<purpose>] simple_dn = true` reduces it to the bare `CN`,
+  which a profile whose subject must be organizational (`email`) refuses.
+  A `directoryName` name constraint is compared position by position, so
+  only this order can sit inside one.
+- **TLS and S/MIME profiles.** `server`, `client` and `email`, which is
+  what fits within what Botan offers: the Code Signing BR leave no
+  extendedKeyUsage that a code signing CA can carry and Botan will still
+  sign with, so code signing and document signing are not issued. Each
+  profile belongs to one issuing CA, and a CA carries the EKUs of the
+  profiles it lists, so a verifier that intersects EKUs along a chain
+  rejects a leaf its issuer had no business signing.
 - **Name constraints are `dNSName` and `rfc822Name` only.** An issuing CA
   can be bounded by `permitted_dns` and `permitted_email`, but not by
   `directoryName`, which the S/MIME BR also require of a technically
-  constrained CA: leaf DNs carry a CN and nothing else, so no non-empty
-  `directoryName` subtree could contain them. Excluded subtrees are
-  not supported.
+  constrained CA. Excluded subtrees are not supported.
 - **CRL-only revocation.** No OCSP responder; status is served by the
   published issuing and root CRLs, re-signed on timers.
 - **No root rotation or cross-signing.** Issuing CAs rotate
@@ -63,6 +67,11 @@ being issued is what picks the CA that signs.
 ## Configuration (`yca.toml`)
 
 Format: TOML; default path `./yca.toml`, override with `--config`.
+
+The file is organized in sections, which is also the granularity at
+which it is locked into the store: `[pki]`, an optional `[pkcs11]`, the
+trust anchor `[root]`, and one `[ca.<purpose>]` per issuing CA. The
+purpose names the section, so TOML itself rejects a duplicate.
 
 `[pki]`
 
@@ -100,6 +109,7 @@ Format: TOML; default path `./yca.toml`, override with `--config`.
 | `ee_curve` | EE key curve (`create` generates on it, `sign` requires the CSR key on it) |
 | `ee_digest` | EE signature digest |
 | `ee_valid_days` | default and ceiling for EE validity under this CA; capped by the strictest profile it lists (398 for `server`/`client`, 825 for `email`) |
+| `simple_dn` | optional, default `false`; `true` reduces the subject DN of the leaves this CA issues to the bare `CN`, dropping `C` and `O`. Never applies to the CA's own certificate, and refused on a CA carrying a profile whose subject must be organizational (`email`) |
 | `permitted_dns` | optional `nameConstraints` permitted subtrees, as bare FQDNs; `example.ca` also covers `www.example.ca` |
 | `permitted_email` | optional `nameConstraints` permitted subtrees, as FQDNs; `example.ca` means every mailbox at that host, `.example.ca` every mailbox in a subdomain of it |
 

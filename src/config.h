@@ -74,6 +74,15 @@ struct SigningCa : CaFields {
   // Default and ceiling for EE validity under this CA. Per CA because the
   // ceiling is profile policy, not a property of the deployment.
   int ee_valid_days = 0;
+  // Reduce the subject DN of the certificates this CA issues to the CN
+  // alone, dropping the organizational attributes (C and O) every DN here
+  // otherwise carries. It governs what the CA issues, not its own
+  // certificate: a CA DN is always the full C, O, CN.
+  //
+  // The default is the full DN because that is the shape a directoryName
+  // name constraint can contain. A profile whose subject must be
+  // organizational (profile::Def::full_dn) refuses the knob at load.
+  bool simple_dn = false;
   // Optional nameConstraints permitted subtrees. Absent means the CA is
   // bounded only by its EKU, which bounds what a certificate may be used
   // for but not who it may be issued to.

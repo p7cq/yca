@@ -13,7 +13,7 @@ _yca() {
     'init:initialize the PKI (root + every declared issuing CA)'
     'create:issue a certificate (server|client)'
     'enroll:enroll an identity for CSR signing'
-    'sign:issue a certificate from a PKCS#10 CSR (server|client)'
+    'sign:issue a certificate from a PKCS#10 CSR (server|client|email)'
     'revoke:revoke a certificate'
     'add:create a declared but not yet existing CA (root key ceremony)'
     'renew:create the next generation of a CA (root key ceremony)'
@@ -55,7 +55,7 @@ _yca() {
       ;;
     sign)
       _arguments \
-        '1:target:(server client)' \
+        '1:target:(server client email)' \
         '--id[enrolled identity]:id:' \
         '--nonce[nonce from get nonce --id]:nonce:' \
         '--csr[CSR\: inline PEM, - for stdin, or a file (PEM/DER)]:csr:_files' \
@@ -63,7 +63,7 @@ _yca() {
       ;;
     revoke)
       _arguments \
-        '1:target:(server client ca)' \
+        '1:target:(server client email ca)' \
         '(--serial)--cn[common name; for ca a generation CN or <purpose>-ca]:common name:' \
         '(--cn)--serial[serial (hex) - selects the exact certificate]:serial:' \
         "--reason[CRLReason name (default unspecified)]:reason:(${reasons[*]})"
@@ -86,7 +86,7 @@ _yca() {
       ;;
     get)
       _arguments \
-        '1:target:(server client ca crl config nonce)' \
+        '1:target:(server client email ca crl config nonce)' \
         '--cn[CN (- reads stdin), or CA alias for ca/crl]:cn:(root-ca signing-ca -)' \
         '--id[enrolled identity (nonce only)]:id:' \
         '--encoding[output encoding (default pem)]:encoding:(pem der)'

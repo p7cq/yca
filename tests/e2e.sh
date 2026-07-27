@@ -115,6 +115,26 @@ w get server --cn server.ca 2>/dev/null |
 	openssl x509 -noout -ext subjectAltName 2>/dev/null | grep -q "DNS:server.ca" &&
 	ok "server auto DNS:CN SAN" || bad "auto SAN missing"
 
+# --- subject DN encoding order: C, O, CN, from the anchor to the leaf ---
+# The order is the certificate's, not a rendering choice: a directoryName
+# name constraint is compared position by position and must be a prefix of
+# the name, so a CN-first DN could never sit inside a C, O subtree.
+# -nameopt oneline prints the encoding order; rfc2253 reverses it, which is
+# what makes this easy to read backwards, so both directions are asserted here.
+for f in "$PKI/ca/ets-root-e1.pem" "$PKI/ca/ca-e1.pem" "$PKI/ee/server.ca.crt"; do
+	openssl x509 -in "$f" -noout -subject -nameopt oneline 2>/dev/null |
+		grep -q "^subject=C = CA, O = Example, CN = " &&
+		ok "subject encoded C, O, CN: $(basename "$f")" ||
+		bad "subject order in $(basename "$f")"
+done
+openssl x509 -in "$PKI/ee/server.ca.crt" -noout -subject -nameopt rfc2253 2>/dev/null |
+	grep -q "^subject=CN=server.ca,O=Example,C=CA$" &&
+	ok "rfc2253 renders the same DN reversed" || bad "rfc2253 rendering"
+# The issuer field is the issuer's subject verbatim, so the orders agree.
+openssl x509 -in "$PKI/ee/server.ca.crt" -noout -issuer -nameopt oneline 2>/dev/null |
+	grep -q "^issuer=C = CA, O = Example, CN = CA E1$" &&
+	ok "issuer field copies the CA's subject DN" || bad "issuer DN"
+
 # --- client SAN rule ---
 w create client --cn "No SAN" >/dev/null 2>&1 &&
 	bad "client without --san accepted" || ok "client without --san rejected"
@@ -335,6 +355,47 @@ sed 's/ee_curve = "secp256r1"/ee_curve = "prime256v1"/' "$CFG" >"$WORK/alias.tom
 "$BIN" --config "$WORK/alias.toml" --store "$WORK/pki2" init >/dev/null 2>&1 &&
 	bad "prime256v1 alias accepted" || ok "prime256v1 alias rejected"
 
+# --- simple_dn: a per-CA preference the profile can veto ---
+# The default is the organizational DN, because that is the shape a
+# directoryName name constraint can contain; a CA whose profiles all
+# tolerate a bare CN may opt out for the leaves it issues.
+SCFG="$WORK/simple.toml"
+SPKI="$WORK/pki-simple"
+sed 's/^ee_valid_days = 397$/&\nsimple_dn = true/' "$CFG" >"$SCFG"
+s() { "$BIN" --config "$SCFG" --store "$SPKI" "$@"; }
+s init >/dev/null 2>&1 && ok "simple_dn accepted on a TLS-only CA" ||
+	bad "simple_dn rejected on a TLS-only CA"
+s create server --cn simple.ca >/dev/null 2>&1
+openssl x509 -in "$SPKI/ee/simple.ca.crt" -noout -subject -nameopt oneline 2>/dev/null |
+	grep -q "^subject=CN = simple.ca$" &&
+	ok "simple_dn leaf carries the bare CN" || bad "simple_dn leaf DN"
+# It governs what the CA issues, never the CA's own certificate: a yca CA
+# may itself have to sit inside someone else's directoryName subtree.
+openssl x509 -in "$SPKI/ca/ca-e1.pem" -noout -subject -nameopt oneline 2>/dev/null |
+	grep -q "^subject=C = CA, O = Example, CN = CA E1$" &&
+	ok "simple_dn leaves the CA's own DN organizational" || bad "simple_dn reached the CA DN"
+# Locked and printed like every other field, and the snapshot re-parses.
+s get config 2>/dev/null >"$WORK/simple-dump.toml"
+grep -q "^simple_dn = true$" "$WORK/simple-dump.toml" &&
+	ok "simple_dn in the locked snapshot" || bad "simple_dn missing from get config"
+(env -u CA_STORE_PASSPHRASE "$BIN" --config "$WORK/simple-dump.toml" \
+	--store "$WORK/pki-simple-rt" init >/dev/null 2>&1)
+"$BIN" --config "$WORK/simple-dump.toml" --store "$WORK/pki-simple-rt" get config \
+	2>/dev/null | diff -q - "$WORK/simple-dump.toml" >/dev/null &&
+	ok "a snapshot with simple_dn round-trips" || bad "simple_dn round-trip"
+# The profile sets a floor the knob may not go under: an S/MIME subject is
+# organizational by definition, so the CA carrying it refuses the knob
+# rather than storing one it would not honor.
+sed 's/^profiles = .*/profiles = ["server", "client", "email"]/' "$SCFG" \
+	>"$WORK/simple-email.toml"
+ERR="$("$BIN" --config "$WORK/simple-email.toml" --store "$WORK/pki-se" init 2>&1)"
+printf '%s' "$ERR" | grep -q "simple_dn: the 'email' profile" &&
+	ok "simple_dn refused by a profile that needs an organizational subject" ||
+	bad "simple_dn accepted beside the email profile"
+sed 's/^simple_dn = true$/simple_dn = "yes"/' "$SCFG" >"$WORK/simple-str.toml"
+"$BIN" --config "$WORK/simple-str.toml" --store "$WORK/pki-ss" init >/dev/null 2>&1 &&
+	bad "non-boolean simple_dn accepted" || ok "non-boolean simple_dn rejected"
+
 # --- unicode: names are DN-only (free-form), slugs/URL fields strict ASCII ---
 sed -e 's/org_name = "Example"/org_name = "Компания 株"/' \
 	-e 's/cn = "ETS Root E1"/cn = "ETS 株 Root E1"/' \
@@ -526,8 +587,12 @@ CN="$(w sign server --id user@example.ca --nonce "$NONCE" --csr "$WORK/evil.csr"
 [ "$CN" = "csr.example.ca" ] && ok "sign prints the CN on stdout" || bad "sign stdout: '$CN'"
 w get server --cn csr.example.ca 2>/dev/null >"$WORK/csr-signed.pem" ||
 	bad "get for CSR-signed cert"
-openssl x509 -in "$WORK/csr-signed.pem" -noout -subject 2>/dev/null |
-	grep -q "^subject=CN" && ok "subject DN filtered to CN only" || bad "extra DN attrs kept"
+# The CA builds the subject from its own configuration: the requested O
+# and OU are gone, and the C is the CA's, not the one asked for.
+openssl x509 -in "$WORK/csr-signed.pem" -noout -subject -nameopt oneline 2>/dev/null |
+	grep -q "^subject=C = CA, O = Example, CN = csr.example.ca$" &&
+	ok "subject DN rebuilt by the CA, requested attributes dropped" ||
+	bad "CSR subject attributes kept"
 openssl x509 -in "$WORK/csr-signed.pem" -noout -ext basicConstraints 2>/dev/null |
 	grep -q "CA:FALSE" && ok "CSR CA:TRUE overridden to CA:FALSE" || bad "basicConstraints honored from CSR"
 openssl x509 -in "$WORK/csr-signed.pem" -noout -ext keyUsage 2>/dev/null |
@@ -937,6 +1002,20 @@ openssl x509 -in "$WORK/p.crt" -noout -ext extendedKeyUsage 2>/dev/null |
 openssl x509 -in "$WORK/p.crt" -noout -ext certificatePolicies 2>/dev/null |
 	grep -q "1.3.6.1.4.1.32473.1.3" && ok "email policy OID .1.3" ||
 	bad "email policy OID"
+# The motivating case for the DN order: an S/MIME subject is organizational
+# by definition, and only a C, O, CN encoding can sit inside a
+# directoryName subtree (S/MIME BR 7.1.5).
+openssl x509 -in "$WORK/p.crt" -noout -subject -nameopt oneline 2>/dev/null |
+	grep -q "^subject=C = CA, O = Example, CN = p@multi.ca$" &&
+	ok "email leaf carries an organizational subject" || bad "email leaf DN"
+# --chain follows the profile table, not a hardcoded pair of profiles: an
+# S/MIME subscriber needs the intermediate to build a PKCS#12 bundle.
+m get email --cn p@multi.ca --chain 2>/dev/null >"$WORK/p-chain.pem"
+[ "$(grep -c "BEGIN CERTIFICATE" "$WORK/p-chain.pem")" -eq 2 ] &&
+	ok "get email --chain returns leaf + issuing CA" || bad "get email --chain"
+openssl verify -purpose smimesign -CAfile "$MPKI/ca/ets-root-e1.pem" \
+	-untrusted "$WORK/p-chain.pem" "$WORK/p-chain.pem" >/dev/null 2>&1 &&
+	ok "the email chain verifies on its own" || bad "email chain verify"
 
 # The EKU chaining proof: the email leaf is an S/MIME certificate under its
 # own CA, and is not a TLS certificate under any of them.

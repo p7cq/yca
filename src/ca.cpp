@@ -116,6 +116,19 @@ std::shared_ptr<Botan::Sqlite3_Database> open_store(const fs::path &db) {
   return dbh;
 }
 
+Botan::X509_DN subject_dn(const cfg::Pki &pki, const std::string &cn,
+                          bool simple) {
+  Botan::X509_DN dn;
+  if (!simple) {
+    // add_attribute ignores an empty value, so an unset field would simply
+    // be absent; both are required by the config loader.
+    dn.add_attribute("X520.Country", pki.country_code);
+    dn.add_attribute("X520.Organization", pki.org_name);
+  }
+  dn.add_attribute("X520.CommonName", cn);
+  return dn;
+}
+
 std::optional<Botan::X509_Certificate> load_ca_cert(const fs::path &store_dir,
                                                     const std::string &slug) {
   const fs::path p = store_dir / "ca" / (slug + ".pem");
@@ -425,25 +438,32 @@ std::optional<Botan::CRL_Code> parse_reason(const std::string &s) {
   return std::nullopt;
 }
 
-// path_limit: a value sets BasicConstraints pathlen; nullopt means CA:TRUE with
-// no path length constraint (as real roots do).
-Botan::X509_Cert_Options ca_options(const cfg::Config &config,
-                                    const std::string &cn, int valid_days,
-                                    std::optional<size_t> path_limit) {
-  Botan::X509_Cert_Options o("", util::days_to_seconds(valid_days));
-  o.common_name = cn;
-  o.country = config.pki.country_code;
-  o.organization = config.pki.org_name;
-  if (path_limit) {
-    o.CA_key(*path_limit);
-  } else {
-    o.is_CA = true;
-    o.extensions.add_new(
-        std::make_unique<Botan::Cert_Extension::Basic_Constraints>(
-            true, std::optional<size_t>{}),
-        true);
-  }
-  return o;
+// The extensions every CA certificate carries. path_limit: a value sets the
+// BasicConstraints path length, nullopt means CA:TRUE with none, as real
+// roots do. `issuer` is the CA signing this certificate, nullptr for the
+// self-signed root, whose authorityKeyIdentifier is its own subject one.
+//
+// Built as an extension set rather than an X509_Cert_Options because the
+// options struct also owns the subject DN and orders it CN-first; every
+// certificate here is minted through X509_CA::make_cert instead, which
+// takes the DN detail::subject_dn builds.
+Botan::Extensions ca_extensions(const std::vector<uint8_t> &pub_key,
+                                const std::string &digest,
+                                std::optional<std::size_t> path_limit,
+                                const Botan::X509_Certificate *issuer) {
+  Botan::Extensions ext;
+  ext.add_new(std::make_unique<Botan::Cert_Extension::Basic_Constraints>(
+                  true, path_limit),
+              true);
+  ext.add_new(std::make_unique<Botan::Cert_Extension::Key_Usage>(
+                  Botan::Key_Constraints::ca_constraints()),
+              true);
+  auto skid =
+      std::make_unique<Botan::Cert_Extension::Subject_Key_ID>(pub_key, digest);
+  ext.add_new(std::make_unique<Botan::Cert_Extension::Authority_Key_ID>(
+      issuer ? issuer->subject_key_id() : skid->get_key_id()));
+  ext.add_new(std::move(skid));
+  return ext;
 }
 
 // AIA (caIssuers -> root), CDP (root CRL), and CertificatePolicies for
@@ -452,13 +472,13 @@ Botan::X509_Cert_Options ca_options(const cfg::Config &config,
 // Revocation is CRL-only in this PKI (no OCSP), so AIA carries no OCSP URI;
 // the signing CA's status channel is the root CRL (CDP).
 // Policies only when root_arc_oid is configured (it is optional).
-void add_signing_pointer_extensions(Botan::X509_Cert_Options &o,
+void add_signing_pointer_extensions(Botan::Extensions &ext,
                                     const cfg::Config &config,
                                     const std::string &root_slug) {
   const std::string base = "http://" + config.pki.repository_host;
   const std::string &root = root_slug;
 
-  o.extensions.add_new(
+  ext.add_new(
       std::make_unique<Botan::Cert_Extension::Authority_Information_Access>(
           std::vector<std::string>{},
           std::vector<std::string>{base + "/" + root + ".crt"}));
@@ -466,22 +486,19 @@ void add_signing_pointer_extensions(Botan::X509_Cert_Options &o,
   Botan::AlternativeName cdp;
   cdp.add_uri(base + "/" + root + ".crl");
   using DP = Botan::Cert_Extension::CRL_Distribution_Points::Distribution_Point;
-  o.extensions.add_new(
-      std::make_unique<Botan::Cert_Extension::CRL_Distribution_Points>(
-          std::vector<DP>{DP(cdp)}));
+  ext.add_new(std::make_unique<Botan::Cert_Extension::CRL_Distribution_Points>(
+      std::vector<DP>{DP(cdp)}));
 
   if (!config.pki.arc_oid.empty())
-    o.extensions.add_new(
-        std::make_unique<Botan::Cert_Extension::Certificate_Policies>(
-            std::vector<Botan::OID>{Botan::OID(config.pki.arc_oid + ".1.1"),
-                                    Botan::OID(config.pki.arc_oid + ".1.2")}));
+    ext.add_new(std::make_unique<Botan::Cert_Extension::Certificate_Policies>(
+        std::vector<Botan::OID>{Botan::OID(config.pki.arc_oid + ".1.1"),
+                                Botan::OID(config.pki.arc_oid + ".1.2")}));
 }
 
 // EE pointers reference the issuing CA (issuer of the leaf), plus the one
-// policy OID the profile carries. Works on Extensions directly so the CSR
-// path (no X509_Cert_Options) can use it too. Revocation is CRL-only in
-// this PKI (no OCSP), so AIA carries only caIssuers; the leaf's status
-// channel is the issuing CRL (CDP).
+// policy OID the profile carries. Revocation is CRL-only in this PKI (no
+// OCSP), so AIA carries only caIssuers; the leaf's status channel is the
+// issuing CRL (CDP).
 void add_ee_pointer_extensions(Botan::Extensions &ext,
                                const cfg::Config &config,
                                const profile::Def &prof,
@@ -514,6 +531,40 @@ Botan::Key_Constraints ee_constraints(const profile::Def &prof) {
   if (prof.key_agreement)
     bits |= static_cast<uint32_t>(Botan::Key_Constraints::KeyAgreement);
   return Botan::Key_Constraints(bits);
+}
+
+// Everything a leaf carries, for both issuance paths: `create`, which
+// generates the key, and `sign`, which takes one from a CSR. The CA
+// dictates every extension - on the CSR path nothing is copied from the
+// request, and on the `create` path the certificate is built directly
+// rather than round-tripped through a PKCS#10 request the CA would sign
+// with a key it just generated itself.
+//
+// One function because the two lists must not drift: they are the same
+// certificate shape, differing only in where the public key came from.
+Botan::Extensions ee_extensions(const cfg::Config &config,
+                                const profile::Def &prof,
+                                const Botan::X509_Certificate &issuer,
+                                const std::string &issuer_slug,
+                                const std::vector<uint8_t> &pub_key,
+                                const std::string &digest,
+                                const Botan::AlternativeName &san) {
+  Botan::Extensions ext;
+  ext.add_new(std::make_unique<Botan::Cert_Extension::Basic_Constraints>(false),
+              true);
+  ext.add_new(
+      std::make_unique<Botan::Cert_Extension::Key_Usage>(ee_constraints(prof)),
+      true);
+  ext.add_new(std::make_unique<Botan::Cert_Extension::Extended_Key_Usage>(
+      std::vector<Botan::OID>{Botan::OID(std::string(prof.eku))}));
+  ext.add_new(std::make_unique<Botan::Cert_Extension::Authority_Key_ID>(
+      issuer.subject_key_id()));
+  ext.add_new(
+      std::make_unique<Botan::Cert_Extension::Subject_Key_ID>(pub_key, digest));
+  ext.add_new(
+      std::make_unique<Botan::Cert_Extension::Subject_Alternative_Name>(san));
+  add_ee_pointer_extensions(ext, config, prof, issuer_slug);
+  return ext;
 }
 
 // The profile a request names, or nullptr with the error logged. Unknown
@@ -738,6 +789,7 @@ KeyValues locked_purpose(const cfg::SigningCa &ca) {
       {"ee_curve", ca.ee_curve},
       {"ee_digest", ca.ee_digest},
       {"ee_valid_days", std::to_string(ca.ee_valid_days)},
+      {"simple_dn", ca.simple_dn ? "1" : "0"},
       {"permitted_dns", join_profiles(ca.permitted_dns)},
       {"permitted_email", join_profiles(ca.permitted_email)},
   };
@@ -752,7 +804,8 @@ void ensure_purpose_table(Botan::SQL_Database &db) {
                               "NULL, key_backend TEXT NOT NULL, token_label "
                               "TEXT NOT NULL, ee_curve TEXT NOT NULL, "
                               "ee_digest TEXT NOT NULL, ee_valid_days INTEGER "
-                              "NOT NULL, permitted_dns TEXT NOT NULL "
+                              "NOT NULL, simple_dn INTEGER NOT NULL DEFAULT 0, "
+                              "permitted_dns TEXT NOT NULL "
                               "DEFAULT '', permitted_email TEXT NOT NULL "
                               "DEFAULT '')",
                               app::purpose_table));
@@ -764,8 +817,9 @@ void lock_purpose(Botan::SQL_Database &db, const cfg::SigningCa &ca) {
   auto ins = db.new_statement(
       std::format("INSERT INTO {} (purpose,profiles,cn,curve,digest,valid_days,"
                   "slug_prefix,slug,key_backend,token_label,ee_curve,ee_digest,"
-                  "ee_valid_days,permitted_dns,permitted_email) "
-                  "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+                  "ee_valid_days,simple_dn,permitted_dns,permitted_email) "
+                  "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,"
+                  "?16)",
                   app::purpose_table));
   ins->bind(1, ca.purpose);
   ins->bind(2, join_profiles(ca.profiles));
@@ -780,8 +834,9 @@ void lock_purpose(Botan::SQL_Database &db, const cfg::SigningCa &ca) {
   ins->bind(11, ca.ee_curve);
   ins->bind(12, ca.ee_digest);
   ins->bind(13, static_cast<std::size_t>(ca.ee_valid_days));
-  ins->bind(14, join_profiles(ca.permitted_dns));
-  ins->bind(15, join_profiles(ca.permitted_email));
+  ins->bind(14, static_cast<std::size_t>(ca.simple_dn ? 1 : 0));
+  ins->bind(15, join_profiles(ca.permitted_dns));
+  ins->bind(16, join_profiles(ca.permitted_email));
   ins->spin();
 }
 
@@ -933,11 +988,13 @@ make_ca_key(const cfg::Config &config, const ca::Secrets &secrets,
 // pointers at the root that signed it. Shared by the init ceremony,
 // `add signing-ca` and the rotation, which mint the same shape and differ
 // only in the generation and in what they record afterwards.
-Botan::X509_Cert_Options signing_ca_options(const cfg::Config &config,
-                                            const cfg::SigningCa &ca,
-                                            const std::string &cn,
-                                            const std::string &root_slug) {
-  auto opts = ca_options(config, cn, ca.valid_days, size_t{0});
+Botan::Extensions signing_ca_extensions(const cfg::Config &config,
+                                        const cfg::SigningCa &ca,
+                                        const Botan::X509_Certificate &root,
+                                        const std::string &root_slug,
+                                        const std::vector<uint8_t> &pub_key,
+                                        const std::string &digest) {
+  auto ext = ca_extensions(pub_key, digest, std::size_t{0}, &root);
   // The union of what its profiles need, plus each profile's companion EKU
   // (profile.h), and nothing else: verifiers that intersect the EKU sets
   // along a chain refuse a leaf this CA had no business signing, and they
@@ -949,19 +1006,19 @@ Botan::X509_Cert_Options signing_ca_options(const cfg::Config &config,
       if (!p->ca_companion_eku.empty())
         ekus.emplace_back(std::string(p->ca_companion_eku));
     }
-  for (const auto &oid : ekus)
-    opts.add_ex_constraint(oid);
+  ext.add_new(
+      std::make_unique<Botan::Cert_Extension::Extended_Key_Usage>(ekus));
   // nameConstraints, when declared: the EKU bounds what a certificate may
   // be used for, this bounds who it may be issued to. Critical, as RFC
   // 5280 requires - a verifier that cannot understand the limit must
   // refuse the chain rather than ignore it.
   if (!ca.permitted_dns.empty() || !ca.permitted_email.empty())
-    opts.extensions.add_new(
+    ext.add_new(
         std::make_unique<x509ext::Name_Constraints>(
             x509ext::NameConstraints{ca.permitted_dns, ca.permitted_email}),
         true);
-  add_signing_pointer_extensions(opts, config, root_slug);
-  return opts;
+  add_signing_pointer_extensions(ext, config, root_slug);
+  return ext;
 }
 
 // The published artifacts of one CA generation: certificate (PEM for the
@@ -985,10 +1042,23 @@ bool create(const cfg::Config &config, const fs::path &db_path,
   TokenSessions tokens;
   auto root_key =
       make_ca_key(config, secrets, tokens, root_ca, config.root.slug, rng);
-  auto root_opts =
-      ca_options(config, config.root.cn, config.root.valid_days, std::nullopt);
-  auto root_cert = Botan::X509::create_self_signed_cert(
-      root_opts, *root_key, config.root.digest, rng);
+
+  // The anchor, self-signed. X509::create_self_signed_cert cannot be used:
+  // it builds the subject DN through X509_Cert_Options and would order it
+  // CN-first, so the certificate is assembled here from the same parts -
+  // with the issuer DN equal to the subject, as self-signing means.
+  const auto now = Clock::now();
+  const std::vector<uint8_t> root_pub = Botan::X509::BER_encode(*root_key);
+  auto root_signer = Botan::X509_Object::choose_sig_format(
+      *root_key, rng, config.root.digest, "");
+  const Botan::X509_DN root_dn =
+      subject_dn(config.pki, config.root.cn, /*simple=*/false);
+  auto root_cert = Botan::X509_CA::make_cert(
+      *root_signer, rng, root_signer->algorithm_identifier(), root_pub,
+      Botan::X509_Time(now),
+      Botan::X509_Time(now + std::chrono::days(config.root.valid_days)),
+      root_dn, root_dn,
+      ca_extensions(root_pub, config.root.digest, std::nullopt, nullptr));
 
   // One generation-1 certificate per declared issuing CA, all signed in
   // this single root ceremony.
@@ -998,15 +1068,17 @@ bool create(const cfg::Config &config, const fs::path &db_path,
     Botan::X509_Certificate cert;
   };
   Botan::X509_CA issuer(root_cert, *root_key, config.root.digest, rng);
-  const auto now = Clock::now();
   std::vector<Minted> minted;
   for (const auto &[purpose, ca] : config.cas) {
     auto key = make_ca_key(config, secrets, tokens, spec_of(ca), ca.slug, rng);
-    auto opts = signing_ca_options(config, ca, ca.cn, config.root.slug);
-    auto req = Botan::X509::create_cert_req(opts, *key, ca.digest, rng);
-    auto cert = issuer.sign_request(
-        req, rng, Botan::X509_Time(now),
-        Botan::X509_Time(now + std::chrono::days(ca.valid_days)));
+    const std::vector<uint8_t> pub = Botan::X509::BER_encode(*key);
+    auto cert = Botan::X509_CA::make_cert(
+        issuer.signature_op(), rng, issuer.algorithm_identifier(), pub,
+        Botan::X509_Time(now),
+        Botan::X509_Time(now + std::chrono::days(ca.valid_days)),
+        root_cert.subject_dn(), subject_dn(config.pki, ca.cn, /*simple=*/false),
+        signing_ca_extensions(config, ca, root_cert, config.root.slug, pub,
+                              config.root.digest));
     minted.push_back({&ca, std::move(key), std::move(cert)});
   }
 
@@ -1140,13 +1212,17 @@ mint_ca_generation(const cfg::Config &config, const fs::path &store_dir,
     return std::nullopt;
   }
 
-  auto opts = signing_ca_options(config, ca_cfg, next.cn, root.slug);
-  auto req = Botan::X509::create_cert_req(opts, *new_key, ca_cfg.digest, rng);
   Botan::X509_CA issuer(*root_cert, *root_key, config.root.digest, rng);
   const auto tp = Clock::now();
-  auto cert = issuer.sign_request(
-      req, rng, Botan::X509_Time(tp),
-      Botan::X509_Time(tp + std::chrono::days(ca_cfg.valid_days)));
+  const std::vector<uint8_t> pub = Botan::X509::BER_encode(*new_key);
+  auto cert = Botan::X509_CA::make_cert(
+      issuer.signature_op(), rng, issuer.algorithm_identifier(), pub,
+      Botan::X509_Time(tp),
+      Botan::X509_Time(tp + std::chrono::days(ca_cfg.valid_days)),
+      root_cert->subject_dn(),
+      subject_dn(config.pki, next.cn, /*simple=*/false),
+      signing_ca_extensions(config, ca_cfg, *root_cert, root.slug, pub,
+                            config.root.digest));
 
   // Artifacts before the database: an interrupted ceremony that leaves
   // files behind is recoverable (the next run replaces them), while an
@@ -1501,7 +1577,7 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
 
   auto cas = dbh->new_statement(std::format(
       "SELECT purpose,profiles,cn,curve,digest,valid_days,slug_prefix,slug,"
-      "key_backend,token_label,ee_curve,ee_digest,ee_valid_days,"
+      "key_backend,token_label,ee_curve,ee_digest,ee_valid_days,simple_dn,"
       "permitted_dns,permitted_email FROM {}",
       app::purpose_table));
   while (cas->step()) {
@@ -1519,8 +1595,9 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
     ca.ee_curve = cas->get_str(10);
     ca.ee_digest = cas->get_str(11);
     ca.ee_valid_days = static_cast<int>(cas->get_size_t(12));
-    ca.permitted_dns = split_profiles(cas->get_str(13));
-    ca.permitted_email = split_profiles(cas->get_str(14));
+    ca.simple_dn = cas->get_size_t(13) != 0;
+    ca.permitted_dns = split_profiles(cas->get_str(14));
+    ca.permitted_email = split_profiles(cas->get_str(15));
     c.cas.emplace(ca.purpose, std::move(ca));
   }
   // An initialized store always holds at least one issuing CA; without one
@@ -1719,11 +1796,6 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   Botan::EC_Group grp = Botan::EC_Group::from_name(ca_cfg->ee_curve);
   Botan::ECDSA_PrivateKey ee_key(rng, grp);
 
-  Botan::X509_Cert_Options o("", static_cast<uint32_t>(validity.count()));
-  o.common_name = cn; // leaf DN: CN only
-  o.add_constraints(ee_constraints(*prof));
-  o.add_ex_constraint(Botan::OID(std::string(prof->eku)));
-
   Botan::AlternativeName an;
   for (const auto &s : sans) {
     switch (s.type) {
@@ -1746,15 +1818,18 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
       break;
     }
   }
-  o.extensions.add_new(
-      std::make_unique<Botan::Cert_Extension::Subject_Alternative_Name>(an));
-  add_ee_pointer_extensions(o.extensions, config, *prof, sign.slug);
 
-  auto req = Botan::X509::create_cert_req(o, ee_key, ca_cfg->ee_digest, rng);
+  // The same extension set and the same DN rules as the CSR path; only the
+  // origin of the key differs.
+  const std::vector<uint8_t> pub = Botan::X509::BER_encode(ee_key);
   Botan::X509_CA issuer(*sign_cert, *sign_key, ca_cfg->ee_digest, rng);
   const auto tp = Clock::now();
-  auto ee_cert = issuer.sign_request(req, rng, Botan::X509_Time(tp),
-                                     Botan::X509_Time(tp + validity));
+  auto ee_cert = Botan::X509_CA::make_cert(
+      issuer.signature_op(), rng, issuer.algorithm_identifier(), pub,
+      Botan::X509_Time(tp), Botan::X509_Time(tp + validity),
+      sign_cert->subject_dn(), subject_dn(config.pki, cn, ca_cfg->simple_dn),
+      ee_extensions(config, *prof, *sign_cert, sign.slug, pub,
+                    ca_cfg->ee_digest, an));
 
   store.insert_cert(ee_cert);
   index_cert(*dbh, ee_cert, profile, sign.purpose);
@@ -1949,7 +2024,10 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  // Subject DN: only the CN is honored; the leaf DN is rebuilt as CN-only.
+  // Subject DN: only the CN is taken from the request, and even that only
+  // as a name - the DN itself is rebuilt from the CA's own configuration
+  // (detail::subject_dn), so an organization or country the requester
+  // asked for is never the one that ends up in the certificate.
   // Modern ACME clients (certbot) send SAN-only CSRs with an empty subject:
   // the CN is derived from the first dns SAN then (deterministic - Botan
   // keeps SANs sorted). More than one CN stays an error.
@@ -1969,7 +2047,8 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
   if (req->subject_dn().count() > 1)
-    log::warn("ignoring non-CN subject attributes in the CSR");
+    log::warn("ignoring the CSR's subject attributes other than the CN; the "
+              "CA builds the subject DN");
 
   // SANs: only dns/email/IPv4/URI are honored (same types as --san); the
   // remaining entry types (directoryName, IPv6, otherName) are not
@@ -2124,35 +2203,19 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   if (nonce_rejected() || duplicate())
     return false;
 
-  // The CA dictates every extension - nothing is copied from the CSR. Botan's
-  // X509_CA::sign_request would honor requested extensions (including
-  // basicConstraints CA:true), so the cert is built via make_cert with a
-  // policy-owned extension set instead. Same profile as issue_ee.
-  Botan::Extensions ext;
-  ext.add_new(std::make_unique<Botan::Cert_Extension::Basic_Constraints>(false),
-              true);
-  ext.add_new(
-      std::make_unique<Botan::Cert_Extension::Key_Usage>(ee_constraints(*prof)),
-      true);
-  ext.add_new(std::make_unique<Botan::Cert_Extension::Extended_Key_Usage>(
-      std::vector<Botan::OID>{Botan::OID(std::string(prof->eku))}));
-  ext.add_new(std::make_unique<Botan::Cert_Extension::Authority_Key_ID>(
-      sign_cert->subject_key_id()));
-  ext.add_new(std::make_unique<Botan::Cert_Extension::Subject_Key_ID>(
-      req->raw_public_key(), ca_cfg->ee_digest));
-  ext.add_new(
-      std::make_unique<Botan::Cert_Extension::Subject_Alternative_Name>(an));
-  add_ee_pointer_extensions(ext, config, *prof, sign.slug);
-
-  Botan::X509_DN subject;
-  subject.add_attribute("X520.CommonName", cn); // leaf DN: CN only
-
+  // The CA dictates every extension and the whole subject - nothing is
+  // copied from the CSR. Botan's X509_CA::sign_request would honor
+  // requested extensions (including basicConstraints CA:true) and the
+  // request's own DN, so the cert is built via make_cert instead.
   Botan::X509_CA issuer(*sign_cert, *sign_key, ca_cfg->ee_digest, rng);
   const auto tp = Clock::now();
   auto ee_cert = Botan::X509_CA::make_cert(
       issuer.signature_op(), rng, issuer.algorithm_identifier(),
       req->raw_public_key(), Botan::X509_Time(tp),
-      Botan::X509_Time(tp + validity), sign_cert->subject_dn(), subject, ext);
+      Botan::X509_Time(tp + validity), sign_cert->subject_dn(),
+      subject_dn(config.pki, cn, ca_cfg->simple_dn),
+      ee_extensions(config, *prof, *sign_cert, sign.slug, req->raw_public_key(),
+                    ca_cfg->ee_digest, an));
 
   store.insert_cert(ee_cert);
   index_cert(*dbh, ee_cert, profile, sign.purpose);
@@ -2641,6 +2704,10 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
       std::print("]\nee_curve = \"{}\"\nee_digest = \"{}\"\n"
                  "ee_valid_days = {}\n",
                  ca.ee_curve, ca.ee_digest, ca.ee_valid_days);
+      // Only when set: false is the default, so omitting it re-parses the
+      // same way and keeps the snapshot free of noise.
+      if (ca.simple_dn)
+        std::print("simple_dn = true\n");
       auto print_subtrees = [](const char *key,
                                const std::vector<std::string> &v) {
         if (v.empty())

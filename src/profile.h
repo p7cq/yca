@@ -21,6 +21,11 @@ enum class Subject {
 // demands of the subject, its policy OID under the org arc, and how long it
 // may live. Adding a profile is an entry here plus tests; nothing about a
 // profile is a per-deployment decision, so none of it is configurable.
+//
+// Before adding one, check that a CA carrying it can still be a CA to
+// Botan, which treats a certificate whose EKU names none of serverAuth,
+// clientAuth, OCSPSigning or anyExtendedKeyUsage as not being one at all
+// (see ca_companion_eku below).
 struct Def {
   std::string_view name;
   // extendedKeyUsage. An issuing CA carries the union of the EKUs of the
@@ -30,6 +35,12 @@ struct Def {
   // ECDH recipient key needs it, an ECDSA signing key must not have it.
   bool key_agreement;
   Subject subject;
+  // Whether the subject must carry the organizational attributes (C and O)
+  // beside the CN. Set for any profile whose standards put organizational
+  // identity in the subject, and for any profile that has to fit inside a
+  // directoryName name constraint, which is compared position by position
+  // against a C, O, CN encoding.
+  bool full_dn;
   // Appended to <arc_oid>; the registry of assignments is in cps-tpl.md.
   std::string_view policy_suffix;
   // Ceiling on this profile's certificates. 398 days is the TLS Baseline
@@ -59,17 +70,22 @@ struct Def {
 };
 
 inline constexpr Def kDefs[] = {
-    {"server", "1.3.6.1.5.5.7.3.1", false, Subject::DnsCn, ".1.1", 398, false,
-     ""},
-    {"client", "1.3.6.1.5.5.7.3.2", false, Subject::RequireSan, ".1.2", 398,
+    // The TLS profiles are the only ones with no use for an organizational
+    // subject: a server is named by its dNSName SANs and a client by the
+    // SAN its relying party matches, so [ca.*] simple_dn may reduce them.
+    {"server", "1.3.6.1.5.5.7.3.1", false, Subject::DnsCn, false, ".1.1", 398,
      false, ""},
+    {"client", "1.3.6.1.5.5.7.3.2", false, Subject::RequireSan, false, ".1.2",
+     398, false, ""},
     // S/MIME, as one dual-use certificate carrying both signing and ECDH key
     // agreement rather than a separate signing and encryption pair. There is
-    // no key escrow and none is planned, so the split would buy nothing;
-    // a lost key is a permanently unreadable mailbox; nonRepudiation is
-    // deliberately not asserted.
-    {"email", "1.3.6.1.5.5.7.3.4", true, Subject::EmailMatchingCn, ".1.3", 825,
-     true, "1.3.6.1.5.5.7.3.2"}, // + clientAuth on the CA, see ca_companion_eku
+    // no key escrow and nonRepudiation is deliberately not asserted.
+    // full_dn: an S/MIME subordinate CA counts as technically constrained
+    // only with a directoryName subtree beside the rfc822Name one (S/MIME BR
+    // 7.1.5), and a bare CN cannot sit inside any non-empty such subtree.
+    {"email", "1.3.6.1.5.5.7.3.4", true, Subject::EmailMatchingCn, true, ".1.3",
+     825, true,
+     "1.3.6.1.5.5.7.3.2"}, // + clientAuth on the CA, see ca_companion_eku
 };
 
 inline std::span<const Def> all() { return kDefs; }

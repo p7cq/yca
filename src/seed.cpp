@@ -85,17 +85,26 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
 
   // status: 'a' active, 'e' expired (past not_after), 'r' revoked (future
   // not_after + added to the CRL).
+  const std::vector<uint8_t> ee_pub = Botan::X509::BER_encode(ee_key);
+  // Deliberately thinner than a real leaf (no SAN, no AIA/CDP, no policy):
+  // the seeder fills the store for query tuning, and the subject DN is the
+  // one part that has to match, since `list` reads the CN back out of it.
   auto emit_cert = [&](const std::string &cn, bool server, char status) {
-    Botan::X509_Cert_Options o("",
-                               util::days_to_seconds(ca_cfg->ee_valid_days));
-    o.common_name = cn;
-    o.add_constraints(Botan::Key_Constraints(
-        static_cast<uint32_t>(Botan::Key_Constraints::DigitalSignature)));
-    o.add_ex_constraint(
-        Botan::OID(server ? "1.3.6.1.5.5.7.3.1" : "1.3.6.1.5.5.7.3.2"));
-    auto req = Botan::X509::create_cert_req(o, ee_key, md, rng);
-    auto cert = issuer.sign_request(req, rng, nb,
-                                    status == 'e' ? expired_na : active_na);
+    Botan::Extensions ext;
+    ext.add_new(
+        std::make_unique<Botan::Cert_Extension::Basic_Constraints>(false),
+        true);
+    ext.add_new(std::make_unique<Botan::Cert_Extension::Key_Usage>(
+                    Botan::Key_Constraints(static_cast<uint32_t>(
+                        Botan::Key_Constraints::DigitalSignature))),
+                true);
+    ext.add_new(std::make_unique<Botan::Cert_Extension::Extended_Key_Usage>(
+        std::vector<Botan::OID>{
+            Botan::OID(server ? "1.3.6.1.5.5.7.3.1" : "1.3.6.1.5.5.7.3.2")}));
+    auto cert = Botan::X509_CA::make_cert(
+        issuer.signature_op(), rng, issuer.algorithm_identifier(), ee_pub, nb,
+        status == 'e' ? expired_na : active_na, sign_cert->subject_dn(),
+        subject_dn(config.pki, cn, ca_cfg->simple_dn), ext);
     store.insert_cert(cert);
     index_cert(*dbh, cert, server ? "server" : "client", sign.purpose,
                status == 'r' ? "revoked" : "active",

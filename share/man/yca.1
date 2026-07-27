@@ -30,6 +30,15 @@ source of truth; later edits to locked fields in the file are ignored with a
 warning. Everything is locked: re\-initialize to change it.
 Per\-issuance flexibility is \fB\-\-valid\fR, capped by
 \fBee_valid_days\fR.
+.PP
+Subject DNs are encoded \fBC\fR, \fBO\fR, \fBCN\fR, from the most general
+component to the most specific, as X.500 prescribes and as every publicly
+trusted certificate does. The order is significant rather than cosmetic: a
+\fBdirectoryName\fR name constraint is compared position by position. A CA
+certificate always carries the full DN; \fB[ca.<purpose>] simple_dn =
+true\fR reduces the leaves that CA issues to the bare \fBCN\fR, and is
+refused on a CA carrying a profile whose subject must be organizational
+(\fBemail\fR).
 .SH OPTIONS
 .TP
 .BI \-\-config " path"
@@ -73,29 +82,36 @@ ceiling, a request below it is always allowed; nothing is persisted. One
 active certificate per (CN, profile); once the active one has
 less than 33% of its lifetime left, an overlapping successor may be issued
 (renewal window) and the old certificate simply expires.
+.IP
+Only the profiles whose key the CA may generate are offered here. The
+\fIemail\fR profile is CSR\-only and is issued with \fBsign\fR: the CA
+must never hold an S/MIME private key, which \fBcreate\fR would write
+unencrypted under \fBee/\fR.
 .TP
 \fBenroll\fR \fB\-\-id\fR \fIid\fR
 Enroll an identity (e.g. an email address) so it can request nonces and CSR
 signatures. Fails if already enrolled.
 .TP
-\fBsign\fR \fIserver\fR|\fIclient\fR \fB\-\-id\fR \fIid\fR \fB\-\-nonce\fR \fInonce\fR \fB\-\-csr\fR \fIcsr\fR [\fB\-\-valid\fR \fIN\fR{s|m|h|d}]
+\fBsign\fR \fIserver\fR|\fIclient\fR|\fIemail\fR \fB\-\-id\fR \fIid\fR \fB\-\-nonce\fR \fInonce\fR \fB\-\-csr\fR \fIcsr\fR [\fB\-\-valid\fR \fIN\fR{s|m|h|d}]
 Issue an end-entity certificate from an external PKCS#10 CSR, gated by a
 valid (\fIid\fR, \fInonce\fR) pair from \fBget nonce\fR; the nonce is
 consumed on success (single use). \fIcsr\fR is inline PEM, \fB\-\fR for
 standard input, or a file path (PEM/DER auto-detected). Only the public key
 (ECDSA on the \fBee_curve\fR curve), the subject CN and the supported SANs
 (dns, email, IPv4, URI) are taken from the CSR; every other requested
-extension or DN attribute is ignored and the CA dictates the profile.
+extension is ignored and the CA dictates the profile. The subject DN is
+rebuilt from the CA's own configuration, so a requested
+\fBorganizationName\fR or \fBcountryName\fR is replaced rather than kept.
 The \fBuri\fR rules of \fBcreate\fR apply, so a CSR carrying more than
 one URI SAN is refused.
 \fB\-\-valid\fR behaves exactly as in \fBcreate\fR. Prints the CN on
 standard output for piping into \fBget\fR \fB\-\-cn \-\fR; writes nothing
 under \fBee/\fR (the private key stays with the requester).
 .TP
-\fBrevoke\fR \fIserver\fR|\fIclient\fR|\fIca\fR [\fB\-\-cn\fR \fIcn\fR | \fB\-\-serial\fR \fIhex\fR] [\fB\-\-reason\fR \fIname\fR]
-Revoke a certificate and rewrite the signed CRL. For \fIserver\fR and
-\fIclient\fR the entry goes on the CRL of the generation that issued the
-certificate, not of whichever signs today. \fIca\fR revokes a signing CA
+\fBrevoke\fR \fIserver\fR|\fIclient\fR|\fIemail\fR|\fIca\fR [\fB\-\-cn\fR \fIcn\fR | \fB\-\-serial\fR \fIhex\fR] [\fB\-\-reason\fR \fIname\fR]
+Revoke a certificate and rewrite the signed CRL. For a leaf profile the
+entry goes on the CRL of the generation that issued the certificate, not
+of whichever signs today. \fIca\fR revokes a signing CA
 generation instead, selected by \fB\-\-cn\fR (its common name, or
 \fB<purpose>-ca\fR for that CA's active generation) and never by
 \fB\-\-serial\fR: the
@@ -158,7 +174,7 @@ horizon: a relying party may keep serving a cached root CRL until its
 nextUpdate, so after \fBrevoke\fR \fIca\fR publish the fresh one at once
 instead of waiting for the quarterly timer.
 .TP
-\fBget\fR \fIserver\fR|\fIclient\fR|\fIca\fR|\fIcrl\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR] [\fB\-\-chain\fR]
+\fBget\fR \fIserver\fR|\fIclient\fR|\fIemail\fR|\fIca\fR|\fIcrl\fR|\fIconfig\fR|\fInonce\fR [\fB\-\-cn\fR \fIcn\fR] [\fB\-\-id\fR \fIid\fR] [\fB\-\-encoding\fR \fBpem\fR|\fBder\fR] [\fB\-\-chain\fR]
 Write a certificate, CRL, the effective (database) configuration, or an
 enrollment nonce to standard output (default \fBpem\fR). For
 \fIca\fR/\fIcrl\fR, \fB\-\-cn\fR takes \fBroot-ca\fR, \fB<purpose>-ca\fR, or
@@ -170,7 +186,7 @@ secret.
 .IP
 \fB\-\-chain\fR appends the issuers above the certificate, nearest first,
 stopping below the self\-signed root, which relying parties already hold.
-It applies to \fIserver\fR, \fIclient\fR and \fIca\fR, and only with
+It applies to every leaf profile and to \fIca\fR, and only with
 \fBpem\fR: DER cannot be concatenated.
 .TP
 \fBlist\fR \fIfilter\fR [\fB\-\-tsv\fR] [\fB\-\-limit\fR \fIN\fR]

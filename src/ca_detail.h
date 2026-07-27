@@ -21,6 +21,20 @@ namespace ca::detail {
 // Store path: <store_dir>/<app::store_file> - a fixed name.
 std::filesystem::path store_path(const std::filesystem::path &store_dir);
 
+// The subject DN of every certificate this PKI mints, CA and leaf alike:
+// C, O, CN, most general component first, which is the X.500 convention and
+// what every publicly trusted certificate encodes. `simple` drops C and O,
+// leaving the bare CN.
+//
+// The order is the certificate's, not a rendering choice. A directoryName
+// name constraint is compared position by position and must be a prefix of
+// the name (RFC 5280 4.2.1.10), so a CN-first DN cannot sit inside a
+// C=..., O=... subtree even carrying identical attributes. This is also why
+// nothing here is built from Botan's X509_Cert_Options, whose load_dn_info
+// always emits the CN first.
+Botan::X509_DN subject_dn(const cfg::Pki &pki, const std::string &cn,
+                          bool simple);
+
 // Opens a store connection with the store contract's bounded lock waits
 // (busy_timeout ≥ 5000 ms): even pure readers can hit SQLITE_BUSY
 // for a moment - e.g. the exclusive lock of the WAL checkpoint a closing

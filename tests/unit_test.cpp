@@ -379,6 +379,65 @@ TEST_CASE("cfg::load: names are free-form UTF-8, slugs are strict ASCII") {
                      "share the same cn"));
 }
 
+TEST_CASE("cfg::load: simple_dn is a preference the profile may veto") {
+  // Absent means the organizational DN: the shape a directoryName name
+  // constraint can contain. Defaulting the other way would leave an S/MIME
+  // CA silently unconstrainable.
+  const auto plain = parse(VALID);
+  REQUIRE(plain.has_value());
+  CHECK_FALSE(plain->cas.at("tls").simple_dn);
+
+  // Honored on a CA whose profiles all tolerate a bare CN.
+  const auto simple = parse(in_ca("simple_dn = true"));
+  REQUIRE(simple.has_value());
+  CHECK(simple->cas.at("tls").simple_dn);
+  CHECK(loads(in_ca("simple_dn = false")));
+
+  // Refused, not silently dropped, on a CA carrying a profile whose subject
+  // must be organizational: `get config` would otherwise print a knob the
+  // store does not honor.
+  CHECK(rejected_for(
+      in_ca("simple_dn = true", with("profiles = [\"server\", \"client\"]",
+                                     "profiles = [\"server\", \"email\"]")),
+      "simple_dn: the 'email' profile"));
+  CHECK(rejected_for(in_ca("simple_dn = \"yes\""), "must be a boolean"));
+}
+
+TEST_CASE("ca::detail::subject_dn encodes C, O, CN") {
+  cfg::Pki pki;
+  pki.org_name = "Example";
+  pki.country_code = "CA";
+
+  // The sequence is the assertion: a directoryName constraint is compared
+  // position by position, so C=CA, O=Example contains this DN only in this
+  // order (RFC 5280 4.2.1.10, docs/multi-ca-blueprint.md 9.2.2).
+  const auto full = ca::detail::subject_dn(pki, "p@example.ca", false);
+  REQUIRE(full.dn_info().size() == 3);
+  CHECK(full.dn_info()[0].first == Botan::OID::from_string("X520.Country"));
+  CHECK(full.dn_info()[0].second.value() == "CA");
+  CHECK(full.dn_info()[1].first ==
+        Botan::OID::from_string("X520.Organization"));
+  CHECK(full.dn_info()[1].second.value() == "Example");
+  CHECK(full.dn_info()[2].first == Botan::OID::from_string("X520.CommonName"));
+  CHECK(full.dn_info()[2].second.value() == "p@example.ca");
+
+  const auto simple = ca::detail::subject_dn(pki, "www.example.ca", true);
+  REQUIRE(simple.dn_info().size() == 1);
+  CHECK(simple.dn_info()[0].first ==
+        Botan::OID::from_string("X520.CommonName"));
+  CHECK(simple.dn_info()[0].second.value() == "www.example.ca");
+
+  // Round-trips through Botan's own decoder in the same order: the encoding
+  // is what a verifier compares, not the in-memory vector.
+  std::vector<uint8_t> der;
+  Botan::DER_Encoder(der).encode(full);
+  Botan::X509_DN back;
+  Botan::BER_Decoder(der).decode(back);
+  REQUIRE(back.dn_info().size() == 3);
+  CHECK(back.dn_info()[0].first == Botan::OID::from_string("X520.Country"));
+  CHECK(back.dn_info()[2].first == Botan::OID::from_string("X520.CommonName"));
+}
+
 TEST_CASE("cfg::load: key_backend defaults to internal per CA") {
   const auto c = parse(VALID);
   REQUIRE(c.has_value());
