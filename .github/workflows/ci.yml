@@ -39,7 +39,7 @@ jobs:
             clang clang-tools libclang-rt-dev libc++-dev libc++abi-dev \
             build-essential \
             cmake ninja-build ccache libsqlite3-dev pkg-config \
-            openssl sqlite3 python3 \
+            openssl sqlite3 python3 zsh \
             autoconf automake libtool libssl-dev opensc
 
       - uses: actions/checkout@v5

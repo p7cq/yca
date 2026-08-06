@@ -71,7 +71,7 @@ _yca() {
     add)
       _arguments \
         '1:target:(signing-ca)' \
-        '--purpose[the [ca.<purpose>] section to create]:purpose:'
+        '--purpose[the \[ca.<purpose>\] section to create]:purpose:'
       ;;
     renew)
       _arguments \
