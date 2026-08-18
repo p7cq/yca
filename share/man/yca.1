@@ -27,8 +27,7 @@ is how issuance picks an issuer. At
 .B yca init
 each section is snapshotted into the store database, which becomes the
 source of truth; later edits to locked fields in the file are ignored with a
-warning. Everything is locked: re\-initialize to change it.
-Per\-issuance flexibility is \fB\-\-valid\fR, capped by
+warning. Per\-issuance flexibility is \fB\-\-valid\fR, capped by
 \fBee_valid_days\fR.
 .PP
 Subject DNs are encoded \fBC\fR, \fBO\fR, \fBCN\fR, from the most general
@@ -184,10 +183,9 @@ most of its 5-minute validity remains, rotating it otherwise. \fB\-\-cn\fR
 \fB\-\fR reads the CN from standard input (piping from \fBsign\fR). Needs no
 secret.
 .IP
-\fB\-\-chain\fR appends the issuers above the certificate, nearest first,
-stopping below the self\-signed root, which relying parties already hold.
-It applies to every leaf profile and to \fIca\fR, and only with
-\fBpem\fR: DER cannot be concatenated.
+\fB\-\-chain\fR appends the issuers above the certificate, \fBpem\fR-encoded
+and nearest first, stopping below the self\-signed root, which relying
+parties already hold.
 .TP
 \fBlist\fR \fIfilter\fR [\fB\-\-tsv\fR] [\fB\-\-limit\fR \fIN\fR]
 List certificates matching exactly one filter: \fB\-\-expiring\fR [\fIN\fR],
