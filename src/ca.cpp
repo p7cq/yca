@@ -148,8 +148,6 @@ CaGen config_gen(const cfg::Config &config, const std::string &purpose) {
   return CaGen{purpose, 1, "", ""};
 }
 
-// "root" for the anchor, "signing" for every issuing CA: the axis the CRL
-// cadences, the refresh scopes and the revoke-ca refusal are about.
 std::string kind_of(const std::string &purpose) {
   return purpose == "root" ? "root" : "signing";
 }
@@ -335,10 +333,7 @@ bool outlives_issuer(const Botan::X509_Certificate &issuer,
   if (now_epoch() + static_cast<std::size_t>(validity.count()) <=
       issuer.not_after().time_since_epoch())
     return false;
-  // Two ways here: the signing CA aged past (signing - ee) days, or an
-  // unlocked *_valid_days was raised too close to the signing CA's lifetime.
-  log::error("requested validity ends after the signing CA expires ({}); "
-             "lower the configured validity or renew the signing CA",
+  log::error("requested validity ends after the signing CA expires ({})",
              issuer.not_after().readable_string());
   return true;
 }
@@ -471,7 +466,7 @@ Botan::Extensions ca_extensions(const std::vector<uint8_t> &pub_key,
 // flat under repository_host; cert/CRL file names come from the root CA slug.
 // Revocation is CRL-only in this PKI (no OCSP), so AIA carries no OCSP URI;
 // the signing CA's status channel is the root CRL (CDP).
-// Policies only when root_arc_oid is configured (it is optional).
+// Policies only when root_arc_oid is configured.
 void add_signing_pointer_extensions(Botan::Extensions &ext,
                                     const cfg::Config &config,
                                     const std::string &root_slug) {
@@ -772,9 +767,7 @@ KeyValues locked_global(const cfg::Config &c) {
 
 // One issuing CA's locked fields. Stored as its own row rather than folded
 // into the global snapshot, so a CA declared after init can be locked when
-// it is created instead of forcing a re-init. ee_valid_days is issuance
-// policy but locked too - per-issuance flexibility is --valid, which may
-// request anything up to it (the policy is the ceiling).
+// it is created instead of forcing a re-init.
 KeyValues locked_purpose(const cfg::SigningCa &ca) {
   return {
       {"profiles", join_profiles(ca.profiles)},
@@ -879,9 +872,7 @@ const cfg::SigningCa *issuer_for(const cfg::Config &config,
   return ca;
 }
 
-// The configuration of the CA a stored generation belongs to. Absent when
-// the store holds a purpose the file no longer declares - reconcile warns
-// about that, and every operation on that CA has to stop here.
+// The configuration of the CA a stored generation belongs to.
 const cfg::SigningCa *config_of(const cfg::Config &config, const CaGen &gen) {
   const cfg::SigningCa *ca = config.ca(gen.purpose);
   if (!ca)
@@ -924,7 +915,7 @@ using TokenSessions = std::map<std::string, p11::Token>;
 
 // The session is opened with the mode the first caller asked for: a
 // read-only request on an already-open read-write session gets the
-// read-write one, as before.
+// read-write one.
 p11::Token &open_token(const cfg::Config &config, const ca::Secrets &secrets,
                        TokenSessions &tokens, const CaSpec &ca,
                        bool read_write) {
@@ -1133,11 +1124,11 @@ bool create(const cfg::Config &config, const fs::path &db_path,
                             app::crl_next_update_days, rng))
       log::warn("could not write the artifacts of '{}' under {}", m.cfg->cn,
                 ca_dir.string());
-    names += std::format("{}'{}' ({})", names.empty() ? "" : ", ", m.cfg->cn,
+    names += std::format("{}{} ({})", names.empty() ? "" : ", ", m.cfg->cn,
                          m.cfg->purpose);
   }
 
-  log::info("created 2-tier CA: root '{}' + issuing {}", config.root.cn, names);
+  log::info("created 2-tier CA: {} (root), {}", config.root.cn, names);
   return true;
 }
 
@@ -1257,9 +1248,9 @@ std::string resolve_ca_cn(Botan::SQL_Database &db, const cfg::Config &config,
     std::string aliases;
     for (const auto &[purpose, ca] : config.cas)
       aliases += std::format("{}{}-ca", aliases.empty() ? "" : ", ", purpose);
-    log::error("'signing-ca' is ambiguous with several issuing CAs; use one "
-               "of: {}",
-               aliases);
+    log::error("'signing-ca' is ambiguous with more than one issuing CA; "
+               "use one of: {})",
+               aliases, selector);
     return {};
   }
   return selector; // a literal generation CN
@@ -1373,10 +1364,15 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
     rng.randomize(raw.data(), raw.size());
     generated = Botan::hex_encode(raw);
     eff.passphrase = generated;
-    log::to_stdout("\n=== GENERATED CA PASSPHRASE (shown once) ===\n{}\n"
-                   "Store it now; set {} to it on future runs.\n"
-                   "============================================\n\n",
-                   generated, app::passphrase_env);
+    log::to_stdout(
+        "\n┌──────────────────────────────────────────────────────────────────┐"
+        "\n"
+        "│                 {} (shown once)                 │\n"
+        "├──────────────────────────────────────────────────────────────────┤\n"
+        "│ {} │\n"
+        "└──────────────────────────────────────────────────────────────────┘"
+        "\n",
+        app::passphrase_env, generated);
   }
 
   fs::create_directories(store_dir);
@@ -1633,8 +1629,8 @@ void reconcile(const cfg::Config &file, const cfg::Config &eff) {
   }
   for (const auto &[purpose, ca] : eff.cas)
     if (!file.cas.contains(purpose))
-      log::warn("[ca.{}] exists in the store but is missing from {}.toml; it "
-                "keeps issuing and publishing its CRL",
+      log::warn("[ca.{}] exists in the store but is missing from {}.toml; "
+                "check against 'get config'",
                 purpose, app::name);
 }
 
@@ -1647,7 +1643,7 @@ bool check_valid_override(const cfg::SigningCa &ca, std::chrono::seconds v) {
   if (v >= std::chrono::minutes(app::min_valid_override_minutes) &&
       v <= std::chrono::days(ca.ee_valid_days))
     return true;
-  log::error("--valid must be in [{}m, {}d] (ee_valid_days is the ceiling)",
+  log::error("--valid must be in [{}m, {}d] (up to ee_valid_days)",
              app::min_valid_override_minutes, ca.ee_valid_days);
   return false;
 }
@@ -1664,9 +1660,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   // A profile whose key must never reach the CA is CSR-only: `create`
   // would generate it here and leave it on disk.
   if (prof->csr_only) {
-    log::error("the '{}' profile is issued from a CSR only; the CA must "
-               "never hold its private key",
-               profile);
+    log::error("the '{}' profile is issued from a CSR only", profile);
     return false;
   }
   // The profile picks the issuer, and with it the EE policy: curve, digest
@@ -1703,9 +1697,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
     if (std::none_of(extra_sans.begin(), extra_sans.end(), [&](const San &s) {
           return s.type == San::Type::Email && s.value == cn;
         })) {
-      log::error("the '{}' profile requires --san email:<cn>, so that the "
-                 "CN names a mailbox the certificate actually carries",
-                 profile);
+      log::error("the '{}' profile requires --san email:<cn>", profile);
       return false;
     }
     break;

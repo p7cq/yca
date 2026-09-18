@@ -63,7 +63,7 @@ fi
 # $1 name prefix, $2 root slug prefix, $3 CA slug prefix, $4 [root] extra
 # lines, $5 [ca.tls] extra lines, $6 [pkcs11] extra lines.
 gen_cfg() {
-	cat <<EOF
+  cat <<EOF
 [pki]
 org_name = "Example"
 country_code = "CA"
@@ -98,7 +98,7 @@ EOF
 
 # Single-token layout: both CA keys on one token, via the shared default.
 gen_cfg ETS ets-root-e ca-e 'key_backend = "pkcs11"' 'key_backend = "pkcs11"' \
-	'token_label = "yca-hsm"' >"$CFG"
+  'token_label = "yca-hsm"' >"$CFG"
 
 PASS=0
 FAIL=0
@@ -118,8 +118,8 @@ export CA_HSM_PIN="$PIN"
 (env -u CA_HSM_PIN "$BIN" --config "$CFG" --store "$PKI" init >/dev/null 2>&1) &&
   bad "init without CA_HSM_PIN accepted" || ok "init without CA_HSM_PIN rejected"
 OUT="$(w init 2>&1)" && ok "init (generate path) exits 0" || bad "init exit code"
-printf '%s' "$OUT" | grep -q GENERATED &&
-  bad "passphrase generated in pkcs11 mode" || ok "no passphrase generated"
+printf '%s' "$OUT" | awk 'NR == 5{ print $2 }' | grep -qE '[[:xdigit:]]+' &&
+  bad "passphrase generated in pkcs11 mode" || ok "no passphrase generated (init)"
 grep -q "generating keypair 'ets-root-e1' on the token" "$LOG" &&
   ok "root key generated on token" || bad "root key not generated on token"
 
@@ -280,8 +280,8 @@ w3() { "$BIN" --config "$CFG3" --store "$HPKI" "$@"; }
 OUT="$(env -u CA_HSM_PIN -u CA_STORE_PASSPHRASE CA_HSM_ROOT_PIN="$HPIN" \
   "$BIN" --config "$CFG3" --store "$WORK/pki-hy-gen" init 2>&1)" &&
   ok "hybrid init (generated passphrase) exits 0" || bad "hybrid gen init"
-printf '%s' "$OUT" | grep -q GENERATED &&
-  ok "hybrid generates a passphrase" || bad "no passphrase generated"
+printf '%s' "$OUT" | awk 'NR == 5{ print $2 }' | grep -E '[[:xdigit:]]+' &&
+  ok "hybrid generates a passphrase" || bad "no passphrase generated (hybrid)"
 
 export CA_STORE_PASSPHRASE="$HPASS"
 (
