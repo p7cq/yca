@@ -1,5 +1,5 @@
 /*
-* Botan 3.12.0 Amalgamation
+* Botan 3.13.0 Amalgamation
 * (C) 1999-2023 The Botan Authors
 *
 * Botan is released under the Simplified BSD License (see license.txt)
@@ -10,6 +10,7 @@
 
 #include <array>
 #include <chrono>
+#include <compare>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -18,6 +19,7 @@
 #include <functional>
 #include <initializer_list>
 #include <iosfwd>
+#include <limits>
 #include <list>
 #include <map>
 #include <memory>
@@ -34,7 +36,7 @@
 
 /**
 * @file  build.h
-* @brief Build configuration for Botan 3.12.0
+* @brief Build configuration for Botan 3.13.0
 */
 
 /* NOLINTBEGIN(*-macro-usage,*-macro-to-enum) */
@@ -57,7 +59,7 @@
 /**
 * The minor version of the release
 */
-#define BOTAN_VERSION_MINOR 12
+#define BOTAN_VERSION_MINOR 13
 
 /**
 * The patch version of the release
@@ -73,7 +75,7 @@
  *
  * TODO(Botan4) remove this
  */
-#define BOTAN_VERSION_DATESTAMP 20260506
+#define BOTAN_VERSION_DATESTAMP 20260813
 
 /**
  * A string set to the release type
@@ -93,7 +95,7 @@
  *
  * TODO(Botan4) remove this
  */
-#define BOTAN_VERSION_VC_REVISION "git:45d6f286c320b2f2efd5373d195ec88c367e3071"
+#define BOTAN_VERSION_VC_REVISION "git:2a81eef56c96c237e590c27f9a75e60317c9c700"
 
 /**
  * A macro expanding to a string that is set at build time using the
@@ -155,22 +157,26 @@
 #define BOTAN_HAS_CERTSTOR_SQLITE3 20160818
 #define BOTAN_HAS_CIPHER_MODES 20180124
 #define BOTAN_HAS_CIPHER_MODE_PADDING 20131128
+#define BOTAN_HAS_DNS_NAME 20260512
 #define BOTAN_HAS_ECC_GROUP 20250101
 #define BOTAN_HAS_ECC_KEY 20190801
 #define BOTAN_HAS_ECC_PUBLIC_KEY_CRYPTO 20131128
 #define BOTAN_HAS_ECDSA 20131128
 #define BOTAN_HAS_EC_HASH_TO_CURVE 20210420
+#define BOTAN_HAS_EMAIL_ADDRESS 20260512
 #define BOTAN_HAS_HASH 20180112
 #define BOTAN_HAS_HEX_CODEC 20131128
 #define BOTAN_HAS_HMAC 20131128
 #define BOTAN_HAS_HMAC_DRBG 20140319
+#define BOTAN_HAS_IPV4_ADDRESS 20260512
+#define BOTAN_HAS_IPV6_ADDRESS 20260512
 #define BOTAN_HAS_KDF 20250528
 #define BOTAN_HAS_KDF_BASE 20131128
 #define BOTAN_HAS_MAC 20150626
 #define BOTAN_HAS_MODES 20150626
 #define BOTAN_HAS_MODE_CBC 20131128
 #define BOTAN_HAS_NUMBERTHEORY 20201108
-#define BOTAN_HAS_OCSP 20201106
+#define BOTAN_HAS_OCSP 20260519
 #define BOTAN_HAS_PASSWORD_HASHING 20210419
 #define BOTAN_HAS_PBKDF 20180902
 #define BOTAN_HAS_PBKDF2 20180902
@@ -189,8 +195,9 @@
 #define BOTAN_HAS_SHA_512_256 20250130
 #define BOTAN_HAS_STATEFUL_RNG 20160819
 #define BOTAN_HAS_SYSTEM_RNG 20141202
-#define BOTAN_HAS_X509 20201106
-#define BOTAN_HAS_X509_CERTIFICATES 20201106
+#define BOTAN_HAS_URI 20260512
+#define BOTAN_HAS_X509 20260519
+#define BOTAN_HAS_X509_CERTIFICATES 20260519
 
 
 /*
@@ -285,8 +292,14 @@
       #define BOTAN_DEPRECATED_HEADER(hdr) _Pragma("message \"this header is deprecated\"")
       #define BOTAN_FUTURE_INTERNAL_HEADER(hdr) _Pragma("message \"this header will be made internal in the future\"")
    #elif defined(_MSC_VER)
-      #define BOTAN_DEPRECATED_HEADER(hdr) __pragma(message("this header is deprecated"))
-      #define BOTAN_FUTURE_INTERNAL_HEADER(hdr) __pragma(message("this header will be made internal in the future"))
+      #if !defined(BOTAN_STRINGIFY) && !defined(BOTAN_STRINGIFY_2)
+         #define BOTAN_STRINGIFY_2(x) #x
+         #define BOTAN_STRINGIFY(x) BOTAN_STRINGIFY_2(x)
+      #endif
+      #define BOTAN_DEPRECATED_HEADER(hdr) \
+         __pragma(message(__FILE__ "(" BOTAN_STRINGIFY(__LINE__) "): this header is deprecated"))
+      #define BOTAN_FUTURE_INTERNAL_HEADER(hdr) \
+         __pragma(message(__FILE__ "(" BOTAN_STRINGIFY(__LINE__) "): this header will be made internal in the future"))
    #elif defined(__GNUC__)
       #define BOTAN_DEPRECATED_HEADER(hdr) _Pragma("GCC warning \"this header is deprecated\"")
       #define BOTAN_FUTURE_INTERNAL_HEADER(hdr) \
@@ -424,20 +437,33 @@ using std::uint8_t;
 * or code. They are kept only for compatibility with software
 * written against older versions.
 */
+
+/// Unsigned 8 bit integer; retained for compatibility with older versions
 using byte = std::uint8_t;
+
+/// Unsigned 16 bit integer; retained for compatibility with older versions
 using u16bit = std::uint16_t;
+
+/// Unsigned 32 bit integer; retained for compatibility with older versions
 using u32bit = std::uint32_t;
+
+/// Unsigned 64 bit integer; retained for compatibility with older versions
 using u64bit = std::uint64_t;
+
+/// Signed 32 bit integer; retained for compatibility with older versions
 using s32bit = std::int32_t;
 #endif
 
+/// True if this target has native 64 bit registers
 static constexpr bool HasNative64BitRegisters = sizeof(void*) >= 8;
 
+/// The native machine word, used as the limb type for multiprecision integers
 using word = std::conditional_t<HasNative64BitRegisters, std::uint64_t, uint32_t>;
 
 #if defined(__SIZEOF_INT128__)
    #define BOTAN_TARGET_HAS_NATIVE_UINT128
 
+/// Unsigned 128 bit integer, only available if the compiler supports it
 // GCC complains if this isn't marked with __extension__
 __extension__ typedef unsigned __int128 uint128_t;
 #endif
@@ -491,8 +517,15 @@ BOTAN_PUBLIC_API(2, 3) void deallocate_memory(void* p, size_t elems, size_t elem
 */
 void BOTAN_UNSTABLE_API initialize_allocator();
 
+/**
+* Initializes the allocator as a side effect of construction
+*
+* Declare a static instance in a translation unit to ensure the allocator
+* is initialized before any other static initialization in that unit.
+*/
 class Allocator_Initializer final {
    public:
+      /// Initialize the allocator
       Allocator_Initializer() { initialize_allocator(); }
 };
 
@@ -616,12 +649,30 @@ class BOTAN_PUBLIC_API(2, 0) Exception : public std::exception {
 */
 class BOTAN_PUBLIC_API(2, 0) Invalid_Argument : public Exception {
    public:
+      /**
+      * Create a Invalid_Argument exception
+      * @param msg a description of the problem
+      */
       explicit Invalid_Argument(std::string_view msg);
 
+      /**
+      * Create a Invalid_Argument exception
+      * @param msg a description of the problem
+      * @param where the API call which received the invalid argument
+      */
       explicit Invalid_Argument(std::string_view msg, std::string_view where);
 
+      /**
+      * Create a Invalid_Argument exception
+      * @param msg a description of the problem
+      * @param e the exception which caused this one
+      */
       Invalid_Argument(std::string_view msg, const std::exception& e);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::InvalidArgument; }
 };
 
@@ -630,6 +681,11 @@ class BOTAN_PUBLIC_API(2, 0) Invalid_Argument : public Exception {
 */
 class BOTAN_PUBLIC_API(3, 0) Unknown_PK_Field_Name final : public Invalid_Argument {
    public:
+      /**
+      * Create a Unknown_PK_Field_Name exception
+      * @param algo_name the name of the key algorithm
+      * @param field_name the unknown field which was requested
+      */
       Unknown_PK_Field_Name(std::string_view algo_name, std::string_view field_name);
 };
 
@@ -638,8 +694,17 @@ class BOTAN_PUBLIC_API(3, 0) Unknown_PK_Field_Name final : public Invalid_Argume
 */
 class BOTAN_PUBLIC_API(2, 0) Invalid_Key_Length final : public Invalid_Argument {
    public:
+      /**
+      * Create a Invalid_Key_Length exception
+      * @param name the name of the algorithm which rejected the key
+      * @param length the invalid key length in bytes
+      */
       Invalid_Key_Length(std::string_view name, size_t length);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::InvalidKeyLength; }
 };
 
@@ -648,8 +713,17 @@ class BOTAN_PUBLIC_API(2, 0) Invalid_Key_Length final : public Invalid_Argument 
 */
 class BOTAN_PUBLIC_API(2, 0) Invalid_IV_Length final : public Invalid_Argument {
    public:
+      /**
+      * Create a Invalid_IV_Length exception
+      * @param mode the name of the mode which rejected the nonce
+      * @param bad_len the invalid nonce length in bytes
+      */
       Invalid_IV_Length(std::string_view mode, size_t bad_len);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::InvalidNonceLength; }
 };
 
@@ -658,6 +732,10 @@ class BOTAN_PUBLIC_API(2, 0) Invalid_IV_Length final : public Invalid_Argument {
 */
 class BOTAN_PUBLIC_API(2, 0) Invalid_Algorithm_Name final : public Invalid_Argument {
    public:
+      /**
+      * Create a Invalid_Algorithm_Name exception
+      * @param name the algorithm name which could not be parsed
+      */
       explicit Invalid_Algorithm_Name(std::string_view name);
 };
 
@@ -666,8 +744,16 @@ class BOTAN_PUBLIC_API(2, 0) Invalid_Algorithm_Name final : public Invalid_Argum
 */
 class BOTAN_PUBLIC_API(2, 0) Encoding_Error final : public Exception {
    public:
+      /**
+      * Create a Encoding_Error exception
+      * @param name a description of the encoding which failed
+      */
       explicit Encoding_Error(std::string_view name);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::EncodingFailure; }
 };
 
@@ -676,12 +762,30 @@ class BOTAN_PUBLIC_API(2, 0) Encoding_Error final : public Exception {
 */
 class BOTAN_PUBLIC_API(2, 0) Decoding_Error : public Exception {
    public:
+      /**
+      * Create a Decoding_Error exception
+      * @param name a description of the decoding which failed
+      */
       explicit Decoding_Error(std::string_view name);
 
+      /**
+      * Create a Decoding_Error exception
+      * @param category the kind of object being decoded
+      * @param err a description of the problem
+      */
       Decoding_Error(std::string_view category, std::string_view err);
 
+      /**
+      * Create a Decoding_Error exception
+      * @param msg a description of the problem
+      * @param e the exception which caused this one
+      */
       Decoding_Error(std::string_view msg, const std::exception& e);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::DecodingFailure; }
 };
 
@@ -691,8 +795,16 @@ class BOTAN_PUBLIC_API(2, 0) Decoding_Error : public Exception {
 */
 class BOTAN_PUBLIC_API(2, 0) Invalid_State : public Exception {
    public:
+      /**
+      * Create a Invalid_State exception
+      * @param err a description of the invalid state
+      */
       explicit Invalid_State(std::string_view err) : Exception(err) {}
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::InvalidObjectState; }
 };
 
@@ -701,6 +813,10 @@ class BOTAN_PUBLIC_API(2, 0) Invalid_State : public Exception {
 */
 class BOTAN_PUBLIC_API(2, 0) PRNG_Unseeded final : public Invalid_State {
    public:
+      /**
+      * Create a PRNG_Unseeded exception
+      * @param algo the name of the unseeded PRNG
+      */
       explicit PRNG_Unseeded(std::string_view algo);
 };
 
@@ -710,8 +826,16 @@ class BOTAN_PUBLIC_API(2, 0) PRNG_Unseeded final : public Invalid_State {
 */
 class BOTAN_PUBLIC_API(2, 4) Key_Not_Set : public Invalid_State {
    public:
+      /**
+      * Create a Key_Not_Set exception
+      * @param algo the name of the algorithm whose key was not set
+      */
       explicit Key_Not_Set(std::string_view algo);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::KeyNotSet; }
 };
 
@@ -720,10 +844,24 @@ class BOTAN_PUBLIC_API(2, 4) Key_Not_Set : public Invalid_State {
 */
 class BOTAN_PUBLIC_API(2, 0) Lookup_Error : public Exception {
    public:
+      /**
+      * Create a Lookup_Error exception
+      * @param err a description of the object which was not found
+      */
       explicit Lookup_Error(std::string_view err) : Exception(err) {}
 
+      /**
+      * Create a Lookup_Error exception
+      * @param type the kind of object which was requested
+      * @param algo the algorithm name which was requested
+      * @param provider the provider which was requested, if any
+      */
       Lookup_Error(std::string_view type, std::string_view algo, std::string_view provider = "");
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::LookupError; }
 };
 
@@ -735,6 +873,10 @@ class BOTAN_PUBLIC_API(2, 0) Lookup_Error : public Exception {
 */
 class BOTAN_PUBLIC_API(2, 0) Algorithm_Not_Found final : public Lookup_Error {
    public:
+      /**
+      * Create a Algorithm_Not_Found exception
+      * @param name the algorithm which was not found
+      */
       explicit Algorithm_Not_Found(std::string_view name);
 };
 
@@ -747,6 +889,11 @@ class BOTAN_PUBLIC_API(2, 0) Algorithm_Not_Found final : public Lookup_Error {
 */
 class BOTAN_PUBLIC_API(2, 0) Provider_Not_Found final : public Lookup_Error {
    public:
+      /**
+      * Create a Provider_Not_Found exception
+      * @param algo the algorithm which was requested
+      * @param provider the provider which was not available
+      */
       Provider_Not_Found(std::string_view algo, std::string_view provider);
 };
 
@@ -758,8 +905,16 @@ class BOTAN_PUBLIC_API(2, 0) Provider_Not_Found final : public Lookup_Error {
 */
 class BOTAN_PUBLIC_API(2, 0) Invalid_Authentication_Tag final : public Exception {
    public:
+      /**
+      * Create a Invalid_Authentication_Tag exception
+      * @param msg a description of the failure
+      */
       explicit Invalid_Authentication_Tag(std::string_view msg);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::InvalidTag; }
 };
 
@@ -773,8 +928,16 @@ typedef Invalid_Authentication_Tag Integrity_Failure;
 */
 class BOTAN_PUBLIC_API(2, 0) Stream_IO_Error final : public Exception {
    public:
+      /**
+      * Create a Stream_IO_Error exception
+      * @param err a description of the IO failure
+      */
       explicit Stream_IO_Error(std::string_view err);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::IoError; }
 };
 
@@ -789,12 +952,29 @@ class BOTAN_PUBLIC_API(2, 0) Stream_IO_Error final : public Exception {
 */
 class BOTAN_PUBLIC_API(2, 9) System_Error : public Exception {
    public:
+      /**
+      * Create a System_Error exception
+      * @param msg a description of the problem
+      */
       explicit System_Error(std::string_view msg) : Exception(msg), m_error_code(0) {}
 
+      /**
+      * Create a System_Error exception
+      * @param msg a description of the problem
+      * @param err_code the operating system error code
+      */
       System_Error(std::string_view msg, int err_code);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::SystemError; }
 
+      /**
+      * Return the operating system error code associated with this exception
+      * @return the operating system error code captured at construction
+      */
       int error_code() const noexcept override { return m_error_code; }
 
    private:
@@ -806,8 +986,16 @@ class BOTAN_PUBLIC_API(2, 9) System_Error : public Exception {
 */
 class BOTAN_PUBLIC_API(2, 0) Internal_Error : public Exception {
    public:
+      /**
+      * Create a Internal_Error exception
+      * @param err a description of the internal error
+      */
       explicit Internal_Error(std::string_view err);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::InternalError; }
 };
 
@@ -819,11 +1007,27 @@ class BOTAN_PUBLIC_API(2, 0) Internal_Error : public Exception {
 */
 class BOTAN_PUBLIC_API(2, 0) Not_Implemented final : public Exception {
    public:
+      /**
+      * Create a Not_Implemented exception
+      * @param err a description of the unimplemented operation
+      */
       explicit Not_Implemented(std::string_view err);
 
+      /**
+      * Return the error type of this exception
+      * @return the error type of this exception
+      */
       ErrorType error_type() const noexcept override { return ErrorType::NotImplemented; }
 };
 
+/**
+* Throw an exception of type E, prefixing the message with the source location
+*
+* @param file the source file name
+* @param line the source line number
+* @param func the enclosing function name
+* @param args the remaining arguments forwarded to E's constructor
+*/
 template <typename E, typename... Args>
 inline void do_throw_error(const char* file, int line, const char* func, Args... args) {
    throw E(file, line, func, args...);
@@ -836,6 +1040,10 @@ namespace Botan {
 class BER_Decoder;
 class DER_Encoder;
 class ASN1_Time;  // in asn1_time.h
+
+/**
+* Alias for ASN1_Time, reflecting the name used by the X.509 ASN.1 modules
+*/
 typedef ASN1_Time X509_Time;
 
 /**
@@ -883,27 +1091,49 @@ enum class ASN1_Type : uint32_t /* NOLINT(performance-enum-size) */ {
    NoObject = 0xFF00,
 };
 
+/**
+* Return true if the two class tags have any bits in common
+*/
 inline bool intersects(ASN1_Class x, ASN1_Class y) {
    return (static_cast<uint32_t>(x) & static_cast<uint32_t>(y)) != 0;
 }
 
+/**
+* Return the bitwise combination of two type tags
+*/
 inline ASN1_Type operator|(ASN1_Type x, ASN1_Type y) {
    return static_cast<ASN1_Type>(static_cast<uint32_t>(x) | static_cast<uint32_t>(y));
 }
 
+/**
+* Return the bitwise combination of two class tags
+*/
 inline ASN1_Class operator|(ASN1_Class x, ASN1_Class y) {
    return static_cast<ASN1_Class>(static_cast<uint32_t>(x) | static_cast<uint32_t>(y));
 }
 
+/**
+* Combine a type tag and a class tag into a single tagging value
+*/
 inline uint32_t operator|(ASN1_Type x, ASN1_Class y) {
    return static_cast<uint32_t>(x) | static_cast<uint32_t>(y);
 }
 
+/**
+* Combine a class tag and a type tag into a single tagging value
+*/
 inline uint32_t operator|(ASN1_Class x, ASN1_Type y) {
    return static_cast<uint32_t>(x) | static_cast<uint32_t>(y);
 }
 
+/**
+* Return a descriptive string for an ASN.1 type tag
+*/
 std::string BOTAN_UNSTABLE_API asn1_tag_to_string(ASN1_Type type);
+
+/**
+* Return a descriptive string for an ASN.1 class tag
+*/
 std::string BOTAN_UNSTABLE_API asn1_class_to_string(ASN1_Class type);
 
 /**
@@ -930,12 +1160,92 @@ class BOTAN_PUBLIC_API(2, 0) ASN1_Object {
       */
       std::vector<uint8_t> BER_encode() const;
 
+      /**
+      * Default constructor
+      */
       ASN1_Object() = default;
+
+      /**
+      * Copy constructor
+      */
       ASN1_Object(const ASN1_Object&) = default;
+
+      /**
+      * Copy assignment
+      */
       ASN1_Object& operator=(const ASN1_Object&) = default;
+
+      /**
+      * Move constructor
+      */
       ASN1_Object(ASN1_Object&&) = default;
+
+      /**
+      * Move assignment
+      */
       ASN1_Object& operator=(ASN1_Object&&) = default;
+
       virtual ~ASN1_Object() = default;
+};
+
+/**
+* ASN.1 BIT STRING with explicit unused-bit count.
+*/
+class BOTAN_PUBLIC_API(3, 13) ASN1_BitString final {
+   public:
+      /**
+      * Create an empty BIT STRING
+      */
+      ASN1_BitString() = default;
+
+      /**
+      * Create a BIT STRING from the given bits
+      *
+      * @param bytes the bits, without the leading unused-bit count octet
+      * @param unused_bits the number of unused bits in the final byte
+      *
+      * Throws Invalid_Argument if unused_bits is 8 or larger, if unused_bits is
+      * non-zero for an empty BIT STRING, or if any of the unused bits are set.
+      */
+      ASN1_BitString(std::vector<uint8_t> bytes, size_t unused_bits);
+
+      /**
+      * Create a BIT STRING from the given bits
+      *
+      * @param bytes the bits, without the leading unused-bit count octet
+      * @param unused_bits the number of unused bits in the final byte
+      *
+      * Throws Invalid_Argument if unused_bits is 8 or larger, if unused_bits is
+      * non-zero for an empty BIT STRING, or if any of the unused bits are set.
+      */
+      ASN1_BitString(std::span<const uint8_t> bytes, size_t unused_bits);
+
+      /**
+      * Return the bits, without the leading unused-bit count octet
+      */
+      std::span<const uint8_t> bytes() const { return std::span{m_bytes}; }
+
+      /**
+      * Return the number of unused bits in the final byte
+      */
+      size_t unused_bits() const { return m_unused_bits; }
+
+      /**
+      * Return the number of significant bits in this BIT STRING
+      */
+      size_t bit_length() const;
+
+      /**
+      * Return the value of a single bit, counting from the most significant bit
+      * of the first byte
+      *
+      * Throws Invalid_Argument if bit is not less than bit_length()
+      */
+      bool bit_at(size_t bit) const;
+
+   private:
+      std::vector<uint8_t> m_bytes;
+      size_t m_unused_bits = 0;
 };
 
 /**
@@ -943,36 +1253,103 @@ class BOTAN_PUBLIC_API(2, 0) ASN1_Object {
 */
 class BOTAN_PUBLIC_API(2, 0) BER_Object final {
    public:
+      /**
+      * Create an unset BER_Object
+      */
       BER_Object() = default;
 
+      /**
+      * Copy constructor
+      */
       BER_Object(const BER_Object& other) = default;
+
+      /**
+      * Move constructor
+      */
       BER_Object(BER_Object&& other) = default;
+
+      /**
+      * Copy assignment
+      */
       BER_Object& operator=(const BER_Object& other) = default;
+
+      /**
+      * Move assignment
+      */
       BER_Object& operator=(BER_Object&& other) = default;
+
       ~BER_Object();
 
+      /**
+      * Return true if this object holds a value, ie if it was not read past the
+      * end of the input
+      */
       bool is_set() const { return m_type_tag != ASN1_Type::NoObject; }
 
+      /**
+      * Return the type and class tags combined into a single value
+      */
       uint32_t tagging() const { return type_tag() | class_tag(); }
 
+      /**
+      * Return the type tag of this object
+      */
       ASN1_Type type_tag() const { return m_type_tag; }
 
+      /**
+      * Return the class tag of this object
+      */
       ASN1_Class class_tag() const { return m_class_tag; }
 
+      /**
+      * Return the type tag of this object, an alias for type_tag()
+      */
       ASN1_Type type() const { return m_type_tag; }
 
+      /**
+      * Return the class tag of this object, an alias for class_tag()
+      */
       ASN1_Class get_class() const { return m_class_tag; }
 
+      /**
+      * Return a pointer to the contents of this object, excluding the tag and
+      * length header
+      */
       const uint8_t* bits() const { return m_value.data(); }
 
+      /**
+      * Return the length in bytes of the contents of this object
+      */
       size_t length() const { return m_value.size(); }
 
+      /**
+      * Return the contents of this object, excluding the tag and length header
+      */
       std::span<const uint8_t> data() const { return std::span{m_value}; }
 
+      /**
+      * Throw BER_Decoding_Error unless this object has the expected tagging
+      *
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      * @param descr a description of the object, used in the exception message
+      */
       void assert_is_a(ASN1_Type type_tag, ASN1_Class class_tag, std::string_view descr = "object") const;
 
+      /**
+      * Return true if this object has the given tagging
+      *
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       bool is_a(ASN1_Type type_tag, ASN1_Class class_tag) const;
 
+      /**
+      * Return true if this object has the given tagging
+      *
+      * @param type_tag the expected type tag, typically a context specific tag number
+      * @param class_tag the expected class tag
+      */
       bool is_a(int type_tag, ASN1_Class class_tag) const;
 
    private:
@@ -997,8 +1374,29 @@ class DataSource;
 
 namespace ASN1 {
 
+/**
+* Return the DER tag and length header of a SEQUENCE with the given contents length
+* @param contents_len the length in bytes of the SEQUENCE contents
+*/
+std::vector<uint8_t> der_sequence_header(size_t contents_len);
+
+/**
+* Return the contents wrapped in a DER SEQUENCE
+* @param val the contents of the SEQUENCE
+*/
 std::vector<uint8_t> put_in_sequence(const std::vector<uint8_t>& val);
+
+/**
+* Return the contents wrapped in a DER SEQUENCE
+* @param bits the contents of the SEQUENCE
+* @param len the length of bits in bytes
+*/
 std::vector<uint8_t> put_in_sequence(const uint8_t bits[], size_t len);
+
+/**
+* Return the contents of a BER object interpreted as a string
+* @param obj the object whose contents are converted
+*/
 std::string to_string(const BER_Object& obj);
 
 /**
@@ -1014,6 +1412,10 @@ bool maybe_BER(DataSource& src);
 */
 class BOTAN_PUBLIC_API(2, 0) BER_Decoding_Error : public Decoding_Error {
    public:
+      /**
+      * Create a BER decoding error
+      * @param err a description of the problem encountered
+      */
       explicit BER_Decoding_Error(std::string_view err);
 };
 
@@ -1022,6 +1424,11 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoding_Error : public Decoding_Error {
 */
 class BOTAN_PUBLIC_API(2, 0) BER_Bad_Tag final : public BER_Decoding_Error {
    public:
+      /**
+      * Create a bad tag error
+      * @param msg a description of the problem encountered
+      * @param tagging the offending tagging value
+      */
       BER_Bad_Tag(std::string_view msg, uint32_t tagging);
 };
 
@@ -1105,6 +1512,12 @@ class BOTAN_PUBLIC_API(2, 0) OID final : public ASN1_Object {
       std::string human_name_or_empty() const;
 
       /**
+      * If there is a known name associated with this OID, return that.
+      * Otherwise return nullopt.
+      */
+      std::optional<std::string> registered_name() const;
+
+      /**
       * Return true if the OID in *this is registered in the internal
       * set of constants as a known OID.
       */
@@ -1138,6 +1551,10 @@ class BOTAN_PUBLIC_API(2, 0) OID final : public ASN1_Object {
          return m_id;
       }
 
+      /**
+      * Get this OID as list (vector) of its components.
+      * @return vector representing this OID
+      */
       BOTAN_DEPRECATED("Do not access the integer values, use eg to_string")
       const std::vector<uint32_t>& get_id() const {
          return m_id;
@@ -1147,6 +1564,12 @@ class BOTAN_PUBLIC_API(2, 0) OID final : public ASN1_Object {
       std::vector<uint32_t> m_id;
 };
 
+/**
+* Write an OID to a stream, in the format produced by OID::to_string
+* @param out the stream to write to
+* @param oid the OID to write
+* @return the stream
+*/
 BOTAN_PUBLIC_API(3, 0) std::ostream& operator<<(std::ostream& out, const OID& oid);
 
 /**
@@ -1176,12 +1599,24 @@ class BOTAN_PUBLIC_API(2, 0) ASN1_String final : public ASN1_Object {
       void encode_into(DER_Encoder& to) const override;
       void decode_from(BER_Decoder& from) override;
 
+      /**
+      * Return the string type tag this value was encoded with
+      */
       ASN1_Type tagging() const { return m_tag; }
 
+      /**
+      * Return the value of this string, converted to UTF-8
+      */
       const std::string& value() const { return m_utf8_str; }
 
+      /**
+      * Return the length in bytes of the UTF-8 representation of this string
+      */
       size_t size() const { return value().size(); }
 
+      /**
+      * Return true if this string is empty
+      */
       bool empty() const { return m_utf8_str.empty(); }
 
       /**
@@ -1189,11 +1624,30 @@ class BOTAN_PUBLIC_API(2, 0) ASN1_String final : public ASN1_Object {
       */
       static bool is_string_type(ASN1_Type tag);
 
+      /**
+      * Compare two strings, ignoring the type tag they were encoded with
+      */
       bool operator==(const ASN1_String& other) const { return value() == other.value(); }
 
       friend bool operator<(const ASN1_String& a, const ASN1_String& b) { return a.value() < b.value(); }
 
+      /**
+      * Create a string, tagged as PrintableString if possible and otherwise as
+      * Utf8String
+      *
+      * @param utf8 the value of the string, encoded as UTF-8
+      */
       explicit ASN1_String(std::string_view utf8 = "");
+
+      /**
+      * Create a string with a specific type tag
+      *
+      * @param utf8 the value of the string, encoded as UTF-8
+      * @param tag the string type tag to encode this value with
+      *
+      * Throws Invalid_Argument if tag is not a string type that is a subset of
+      * UTF-8, or if utf8 is not a valid value for that type.
+      */
       ASN1_String(std::string_view utf8, ASN1_Type tag);
 
    private:
@@ -1207,35 +1661,87 @@ class BOTAN_PUBLIC_API(2, 0) ASN1_String final : public ASN1_Object {
 */
 class BOTAN_PUBLIC_API(2, 0) AlgorithmIdentifier final : public ASN1_Object {
    public:
+      /**
+      * Selects how an absent parameters field is encoded
+      */
       enum Encoding_Option : uint8_t { USE_NULL_PARAM, USE_EMPTY_PARAM }; /* NOLINT(*-use-enum-class) */
 
       void encode_into(DER_Encoder& to) const override;
       void decode_from(BER_Decoder& from) override;
 
+      /**
+      * Create an empty AlgorithmIdentifier
+      */
       AlgorithmIdentifier() = default;
 
+      /**
+      * Create an AlgorithmIdentifier with no parameters
+      * @param oid the algorithm OID
+      * @param enc whether the empty parameters are encoded as NULL or omitted
+      */
       AlgorithmIdentifier(const OID& oid, Encoding_Option enc);
+
+      /**
+      * Create an AlgorithmIdentifier with no parameters
+      * @param oid_name a name or dotted decimal string identifying the algorithm
+      * @param enc whether the empty parameters are encoded as NULL or omitted
+      */
       AlgorithmIdentifier(std::string_view oid_name, Encoding_Option enc);
 
+      /**
+      * Create an AlgorithmIdentifier
+      * @param oid the algorithm OID
+      * @param params the DER encoded parameters
+      */
       AlgorithmIdentifier(const OID& oid, const std::vector<uint8_t>& params);
+
+      /**
+      * Create an AlgorithmIdentifier
+      * @param oid_name a name or dotted decimal string identifying the algorithm
+      * @param params the DER encoded parameters
+      */
       AlgorithmIdentifier(std::string_view oid_name, const std::vector<uint8_t>& params);
 
+      /**
+      * Return the algorithm OID
+      */
       const OID& oid() const { return m_oid; }
 
+      /**
+      * Return the DER encoded parameters, which may be empty
+      */
       const std::vector<uint8_t>& parameters() const { return m_parameters; }
 
+      /**
+      * Return the algorithm OID
+      */
       BOTAN_DEPRECATED("Use AlgorithmIdentifier::oid") const OID& get_oid() const { return m_oid; }
 
+      /**
+      * Return the DER encoded parameters, which may be empty
+      */
       BOTAN_DEPRECATED("Use AlgorithmIdentifier::parameters") const std::vector<uint8_t>& get_parameters() const {
          return m_parameters;
       }
 
+      /**
+      * Return true if the parameters consist of a single DER encoded NULL
+      */
       bool parameters_are_null() const;
 
+      /**
+      * Return true if the parameters field is absent
+      */
       bool parameters_are_empty() const { return m_parameters.empty(); }
 
+      /**
+      * Return true if the parameters field is absent or a single DER encoded NULL
+      */
       bool parameters_are_null_or_empty() const { return parameters_are_empty() || parameters_are_null(); }
 
+      /**
+      * Return true if neither the OID nor the parameters have been set
+      */
       bool empty() const { return m_oid.empty() && m_parameters.empty(); }
 
    private:
@@ -1243,17 +1749,35 @@ class BOTAN_PUBLIC_API(2, 0) AlgorithmIdentifier final : public ASN1_Object {
       std::vector<uint8_t> m_parameters;
 };
 
-/*
-* Comparison Operations
+/**
+* Compare two AlgorithmIdentifiers
+*
+* @param x the first AlgorithmIdentifier
+* @param y the second AlgorithmIdentifier
+* @return true if x is equal to y
 */
 BOTAN_PUBLIC_API(2, 0) bool operator==(const AlgorithmIdentifier& x, const AlgorithmIdentifier& y);
+
+/**
+* Compare two AlgorithmIdentifiers
+*
+* @param x the first AlgorithmIdentifier
+* @param y the second AlgorithmIdentifier
+* @return true if x is not equal to y
+*/
 BOTAN_PUBLIC_API(2, 0) bool operator!=(const AlgorithmIdentifier& x, const AlgorithmIdentifier& y);
 
 }  // namespace Botan
 
+/**
+* Specialization of std::hash allowing OIDs to be used as keys in unordered containers
+*/
 template <>
 class std::hash<Botan::OID> {
    public:
+      /**
+      * Return a hash of the OID; see OID::hash_code
+      */
       size_t operator()(const Botan::OID& oid) const noexcept { return static_cast<size_t>(oid.hash_code()); }
 };
 
@@ -1288,23 +1812,44 @@ class BOTAN_PUBLIC_API(2, 0) ASN1_Time final : public ASN1_Object {
       /// Return if the time has been set somehow
       bool time_is_set() const;
 
+      /// Return the tag (UtcTime or GeneralizedTime) this time was encoded with
+      ASN1_Type tagging() const { return m_tag; }
+
       ///  Compare this time against another
       int32_t cmp(const ASN1_Time& other) const;
 
       /// Create an invalid ASN1_Time
       ASN1_Time() = default;
 
-      /// Create a ASN1_Time from a time point
-      explicit ASN1_Time(const std::chrono::system_clock::time_point& time);
-
       /// Create an ASN1_Time from seconds since epoch
       static ASN1_Time from_seconds_since_epoch(uint64_t seconds);
 
+      /// Create a ASN1_Time from a time point
+      static ASN1_Time from_time_point(const std::chrono::system_clock::time_point& time);
+
+      /// Create a ASN1_Time from a string
+      ///
+      /// Only the fixed 13 or 15 char RFC 5280 format (eg [YY]YYMMDDHHMMSSZ) is accepted,
+      /// tag is set based on the use of 2 or 4 digit year, 2-digit years use the
+      /// 1950 breakeven point (see RFC 5280 Section 4.1.2.5.1)
+      static ASN1_Time from_string(std::string_view t_spec);
+
+      /// Create a ASN1_Time from a string
+      ///
+      /// Only the fixed 13 or 15 char RFC 5280 format (eg [YY]YYMMDDHHMMSSZ) is accepted,
+      /// based on the provided tag (which must be UtcTime or GeneralizedTime)
+      static ASN1_Time from_string(std::string_view t_spec, ASN1_Type tag);
+
+      /// Create a ASN1_Time from a time point
+      explicit ASN1_Time(const std::chrono::system_clock::time_point& time) {
+         *this = ASN1_Time::from_time_point(time);
+      }
+
       /// Create an ASN1_Time from string
-      BOTAN_FUTURE_EXPLICIT ASN1_Time(std::string_view t_spec);
+      BOTAN_FUTURE_EXPLICIT ASN1_Time(std::string_view t_spec) { *this = ASN1_Time::from_string(t_spec); }
 
       /// Create an ASN1_Time from string and a specified tagging (Utc or Generalized)
-      ASN1_Time(std::string_view t_spec, ASN1_Type tag);
+      ASN1_Time(std::string_view t_spec, ASN1_Type tag) { *this = ASN1_Time::from_string(t_spec, tag); }
 
       /// Returns a STL timepoint object
       std::chrono::system_clock::time_point to_std_timepoint() const;
@@ -1313,26 +1858,58 @@ class BOTAN_PUBLIC_API(2, 0) ASN1_Time final : public ASN1_Object {
       uint64_t time_since_epoch() const;
 
    private:
-      void set_to(std::string_view t_spec, ASN1_Type type);
-      bool passes_sanity_check() const;
+      ASN1_Time(uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second, ASN1_Type tag);
 
-      uint32_t m_year = 0;
-      uint32_t m_month = 0;
-      uint32_t m_day = 0;
-      uint32_t m_hour = 0;
-      uint32_t m_minute = 0;
-      uint32_t m_second = 0;
+      uint16_t m_year = 0;   // range 0-9999
+      uint8_t m_month = 0;   // range 1-12
+      uint8_t m_day = 0;     // range 1-31
+      uint8_t m_hour = 0;    // range 0-23
+      uint8_t m_minute = 0;  // range 0-59
+      uint8_t m_second = 0;  // range 0-59 (leap seconds not supported)
       ASN1_Type m_tag = ASN1_Type::NoObject;
 };
 
 /*
 * Comparison Operations
+*
+* These compare the instants represented, and ignore whether the times were
+* tagged as UtcTime or GeneralizedTime.
+*/
+
+/**
+* Compare two times
+* @return true if x is equal to y
 */
 BOTAN_PUBLIC_API(2, 0) bool operator==(const ASN1_Time& x, const ASN1_Time& y);
+
+/**
+* Compare two times
+* @return true if x is not equal to y
+*/
 BOTAN_PUBLIC_API(2, 0) bool operator!=(const ASN1_Time& x, const ASN1_Time& y);
+
+/**
+* Compare two times
+* @return true if x is not later than y
+*/
 BOTAN_PUBLIC_API(2, 0) bool operator<=(const ASN1_Time& x, const ASN1_Time& y);
+
+/**
+* Compare two times
+* @return true if x is not earlier than y
+*/
 BOTAN_PUBLIC_API(2, 0) bool operator>=(const ASN1_Time& x, const ASN1_Time& y);
+
+/**
+* Compare two times
+* @return true if x is earlier than y
+*/
 BOTAN_PUBLIC_API(2, 0) bool operator<(const ASN1_Time& x, const ASN1_Time& y);
+
+/**
+* Compare two times
+* @return true if x is later than y
+*/
 BOTAN_PUBLIC_API(2, 0) bool operator>(const ASN1_Time& x, const ASN1_Time& y);
 
 }  // namespace Botan
@@ -1351,6 +1928,8 @@ class BOTAN_PUBLIC_API(2, 4) ASN1_Formatter /* NOLINT(*-special-member-functions
       virtual ~ASN1_Formatter() = default;
 
       /**
+      * Create a formatter with the given settings
+      *
       * @param print_context_specific if true, try to parse nested context specific data.
       * @param max_depth do not recurse more than this many times. If zero, recursion
       *        is unbounded.
@@ -1359,10 +1938,28 @@ class BOTAN_PUBLIC_API(2, 4) ASN1_Formatter /* NOLINT(*-special-member-functions
       ASN1_Formatter(bool print_context_specific, size_t max_depth, bool require_der = false) :
             m_print_context_specific(print_context_specific), m_max_depth(max_depth), m_require_der(require_der) {}
 
+      /**
+      * Format the given ASN.1 data, writing the result to a stream
+      *
+      * @param out the stream to write the formatted output to
+      * @param in the DER or BER encoded data
+      * @param len the length of in in bytes
+      */
       void print_to_stream(std::ostream& out, const uint8_t in[], size_t len) const;
 
+      /**
+      * Return the given ASN.1 data in formatted form
+      *
+      * @param in the DER or BER encoded data
+      * @param len the length of in in bytes
+      */
       std::string print(const uint8_t in[], size_t len) const;
 
+      /**
+      * Return the given ASN.1 data in formatted form
+      *
+      * @param vec the DER or BER encoded data
+      */
       template <typename Alloc>
       std::string print(const std::vector<uint8_t, Alloc>& vec) const {
          return print(vec.data(), vec.size());
@@ -1406,6 +2003,8 @@ class BOTAN_PUBLIC_API(2, 4) ASN1_Formatter /* NOLINT(*-special-member-functions
 class BOTAN_PUBLIC_API(2, 4) ASN1_Pretty_Printer final : public ASN1_Formatter {
    public:
       /**
+      * Create a pretty printer with the given settings
+      *
       * @param print_limit strings larger than this are not printed
       * @param print_binary_limit binary strings larger than this are not printed
       * @param print_context_specific if true, try to parse nested context specific data.
@@ -1576,7 +2175,7 @@ constexpr void ignore_params([[maybe_unused]] const T&... args) {}
 
 #define BOTAN_UNUSED Botan::ignore_params
 
-/*
+/**
 * Define Botan::assert_unreachable and BOTAN_ASSERT_UNREACHABLE
 *
 * This is intended to be used in the same situations as `std::unreachable()`;
@@ -1590,6 +2189,9 @@ constexpr void ignore_params([[maybe_unused]] const T&... args) {}
 *
 * Due to this difference, and the fact that it is not inlined, calling
 * this is significantly more costly than using `std::unreachable`.
+*
+* @param file the source file the call occurred in
+* @param line the source line the call occurred on
 */
 [[noreturn]] void BOTAN_UNSTABLE_API assert_unreachable(const char* file, int line);
 
@@ -1601,8 +2203,12 @@ constexpr void ignore_params([[maybe_unused]] const T&... args) {}
 
 namespace Botan {
 
+/**
+ * Trait that checks whether all of the given types are the same type
+ */
 template <typename T0 = void, typename... Ts>
 struct all_same {
+      /// True if every type in Ts is the same as T0
       static constexpr bool value = (std::is_same_v<T0, Ts> && ... && true);
 };
 
@@ -1616,6 +2222,7 @@ namespace detail {
  * detected based on the context.
  */
 struct AutoDetect {
+      /// This type is a tag only and cannot be instantiated
       constexpr AutoDetect() = delete;
 };
 
@@ -1682,41 +2289,101 @@ namespace Botan {
 template <typename T>
 #if !defined(_ITERATOR_DEBUG_LEVEL) || _ITERATOR_DEBUG_LEVEL == 0
 /*
-  * Check exists to prevent someone from doing something that will
-  * probably crash anyway (like secure_vector<non_POD_t> where ~non_POD_t
-  * deletes a member pointer which was zeroed before it ran).
-  * MSVC in debug mode uses non-integral proxy types in container types
-  * like std::vector, thus we disable the check there.
+ * Check exists to prevent someone from doing something that will
+ * probably crash anyway (like secure_vector<non_POD_t> where ~non_POD_t
+ * deletes a member pointer which was zeroed before it ran).
+ * MSVC in debug mode uses non-integral proxy types in container types
+ * like std::vector, thus we disable the check there.
  */
    requires std::is_integral_v<T> || std::is_enum_v<T>
 #endif
+
+/**
+* An allocator which zeroizes memory before releasing it
+*
+* Restricted to integral and enum types, since a non-trivial destructor
+* would run after the object had already been zeroized.
+*/
 class secure_allocator {
 
    public:
+      /**
+      * The type being allocated
+      */
       typedef T value_type;
+
+      /**
+      * The type used to express allocation sizes
+      */
       typedef std::size_t size_type;
 
+      /**
+      * Default constructor
+      */
       secure_allocator() noexcept = default;
+
+      /**
+      * Copy constructor
+      */
       secure_allocator(const secure_allocator&) noexcept = default;
+
+      /**
+      * Copy assignment
+      * @return reference to this
+      */
       secure_allocator& operator=(const secure_allocator&) noexcept = default;
+
+      /**
+      * Move constructor
+      */
       secure_allocator(secure_allocator&&) noexcept = default;
+
+      /**
+      * Move assignment
+      * @return reference to this
+      */
       secure_allocator& operator=(secure_allocator&&) noexcept = default;
 
       ~secure_allocator() noexcept = default;
 
+      /**
+      * Convert an allocator for a different type
+      */
       template <typename U>
       explicit secure_allocator(const secure_allocator<U>& /*other*/) noexcept {}
 
+      /**
+      * Allocate storage for n objects
+      * @param n the number of objects
+      * @return a pointer to the allocated storage
+      */
       T* allocate(std::size_t n) { return static_cast<T*>(allocate_memory(n, sizeof(T))); }
 
+      /**
+      * Zeroize and release storage previously returned by allocate
+      * @param p the pointer to release
+      * @param n the number of objects p was allocated for
+      */
       void deallocate(T* p, std::size_t n) { deallocate_memory(p, n, sizeof(T)); }
 };
 
+/**
+* Compare two secure allocators
+*
+* All instances are interchangeable, so this is always true.
+* @return always true
+*/
 template <typename T, typename U>
 inline bool operator==(const secure_allocator<T>& /*a*/, const secure_allocator<U>& /*b*/) {
    return true;
 }
 
+/**
+* Compare two secure allocators
+*
+* All instances are interchangeable, so this is always false.
+* @return always false
+*/
 template <typename T, typename U>
 inline bool operator!=(const secure_allocator<T>& /*a*/, const secure_allocator<U>& /*b*/) {
    return false;
@@ -1734,11 +2401,21 @@ using secure_deque = std::deque<T, secure_allocator<T>>;
 template <typename T>
 using SecureVector = secure_vector<T>;
 
+/**
+* Copy a vector into a secure_vector
+* @param in the vector to copy
+* @return a secure_vector holding the same contents
+*/
 template <typename T>
 secure_vector<T> lock(const std::vector<T>& in) {
    return secure_vector<T>(in.begin(), in.end());
 }
 
+/**
+* Copy a secure_vector into an ordinary vector
+* @param in the vector to copy
+* @return a std::vector holding the same contents
+*/
 template <typename T>
 std::vector<T> unlock(const secure_vector<T>& in) {
    return std::vector<T>(in.begin(), in.end());
@@ -1746,33 +2423,67 @@ std::vector<T> unlock(const secure_vector<T>& in) {
 
 // TODO(Botan4) remove these += operators entirely
 
+/**
+* Append the contents of one vector to another
+* @param out the vector to append to
+* @param in the vector to append
+* @return reference to out
+*/
 template <typename T, typename Alloc, typename Alloc2>
 std::vector<T, Alloc>& operator+=(std::vector<T, Alloc>& out, const std::vector<T, Alloc2>& in) {
    out.insert(out.end(), in.begin(), in.end());
    return out;
 }
 
+/**
+* Append the contents of a span to a vector
+* @param out the vector to append to
+* @param in the elements to append
+* @return reference to out
+*/
 template <typename T, typename Alloc>
 std::vector<T, Alloc>& operator+=(std::vector<T, Alloc>& out, std::span<const T> in) {
    out.insert(out.end(), in.begin(), in.end());
    return out;
 }
 
+/**
+* Append a single element to a vector
+* @param out the vector to append to
+* @param in the element to append
+* @return reference to out
+*/
 template <typename T, typename Alloc>
 std::vector<T, Alloc>& operator+=(std::vector<T, Alloc>& out, T in) {
    out.push_back(in);
    return out;
 }
 
+/**
+* Append a (pointer, length) pair to a vector
+* @param out the vector to append to
+* @param in the elements to append
+* @return reference to out
+*/
 template <typename T, typename Alloc, typename L>
 std::vector<T, Alloc>& operator+=(std::vector<T, Alloc>& out, const std::pair<const T*, L>& in) {
-   out.insert(out.end(), in.first, in.first + in.second);
+   if(in.second > 0) {
+      out.insert(out.end(), in.first, in.first + in.second);
+   }
    return out;
 }
 
+/**
+* Append a (pointer, length) pair to a vector
+* @param out the vector to append to
+* @param in the elements to append
+* @return reference to out
+*/
 template <typename T, typename Alloc, typename L>
 std::vector<T, Alloc>& operator+=(std::vector<T, Alloc>& out, const std::pair<T*, L>& in) {
-   out.insert(out.end(), in.first, in.first + in.second);
+   if(in.second > 0) {
+      out.insert(out.end(), in.first, in.first + in.second);
+   }
    return out;
 }
 
@@ -1854,6 +2565,9 @@ class BOTAN_PUBLIC_API(2, 0) RandomNumberGenerator {
 
       virtual ~RandomNumberGenerator() = default;
 
+      /**
+      * Default constructor
+      */
       RandomNumberGenerator() = default;
 
       /*
@@ -1862,7 +2576,15 @@ class BOTAN_PUBLIC_API(2, 0) RandomNumberGenerator {
       RandomNumberGenerator(const RandomNumberGenerator& rng) = delete;
       RandomNumberGenerator& operator=(const RandomNumberGenerator& rng) = delete;
 
+      /**
+      * Move constructor
+      */
       RandomNumberGenerator(RandomNumberGenerator&& rng) = default;
+
+      /**
+      * Move assignment
+      * @return reference to this
+      */
       RandomNumberGenerator& operator=(RandomNumberGenerator&& rng) = default;
 
       /**
@@ -1877,6 +2599,11 @@ class BOTAN_PUBLIC_API(2, 0) RandomNumberGenerator {
       */
       void randomize(std::span<uint8_t> output) { this->fill_bytes_with_input(output, {}); }
 
+      /**
+      * Randomize a byte array
+      * @param output the byte array to hold the random output
+      * @param length the number of bytes to generate
+      */
       void randomize(uint8_t output[], size_t length) { this->randomize(std::span(output, length)); }
 
       /**
@@ -1900,6 +2627,11 @@ class BOTAN_PUBLIC_API(2, 0) RandomNumberGenerator {
       */
       void add_entropy(std::span<const uint8_t> input) { this->fill_bytes_with_input({}, input); }
 
+      /**
+      * Incorporate some additional data into the RNG state
+      * @param input a byte array containing the entropy to be added
+      * @param length the number of bytes in input
+      */
       void add_entropy(const uint8_t input[], size_t length) { this->add_entropy(std::span(input, length)); }
 
       /**
@@ -1931,18 +2663,31 @@ class BOTAN_PUBLIC_API(2, 0) RandomNumberGenerator {
          this->fill_bytes_with_input(output, input);
       }
 
+      /**
+      * Randomize a byte array, first incorporating additional input
+      * @param output the byte array to hold the random output
+      * @param output_len the number of bytes to generate
+      * @param input a byte array containing the entropy to be added
+      * @param input_len the number of bytes in input
+      */
       void randomize_with_input(uint8_t output[], size_t output_len, const uint8_t input[], size_t input_len) {
          this->randomize_with_input(std::span(output, output_len), std::span(input, input_len));
       }
 
       /**
-      * This calls `randomize_with_input` using some timestamps as extra input.
+      * This calls `randomize_with_input` using system specific values
       *
-      * For a stateful RNG using non-random but potentially unique data the
-      * extra input can help protect against problems with fork, VM state
-      * rollback, or other cases where somehow an RNG state is duplicated. If
-      * both of the duplicated RNG states later incorporate a timestamp (and the
-      * timestamps don't themselves repeat), their outputs will diverge.
+      * This first attempts to provide input to the underlying RNG from some system
+      * specific source. If a system RNG is available, it is queried and the output from
+      * the system RNG is used as the additional input. Otherwise 12 bytes consisting of
+      * the local clock plus the current process ID are used.
+      *
+      * For a stateful RNG that was already correctly seeded with sufficient
+      * cryptographically secure material, using non-random but potentially unique data
+      * as the extra input can help protect against problems with fork, VM state
+      * rollback, or other cases where somehow an RNG state is duplicated. If both of
+      * the duplicated RNG states later incorporate some input, even predictable input,
+      * their outputs will diverge.
       *
       * @param output buffer to hold the random output
       * @throws PRNG_Unseeded if the RNG fails because it has not enough entropy
@@ -1951,11 +2696,17 @@ class BOTAN_PUBLIC_API(2, 0) RandomNumberGenerator {
       */
       void randomize_with_ts_input(std::span<uint8_t> output);
 
+      /**
+      * Randomize a byte array, using timestamps as additional input
+      * @param output the byte array to hold the random output
+      * @param output_len the number of bytes to generate
+      */
       void randomize_with_ts_input(uint8_t output[], size_t output_len) {
          this->randomize_with_ts_input(std::span(output, output_len));
       }
 
       /**
+      * Return the name of this RNG type
       * @return the name of this RNG type
       */
       virtual std::string name() const = 0;
@@ -2059,6 +2810,7 @@ class BOTAN_PUBLIC_API(2, 0) RandomNumberGenerator {
       }
 
       /**
+      * Generate a single random byte which is not zero
       * @return a random byte that is greater than zero
       * @throws PRNG_Unseeded if the RNG fails because it has not enough entropy
       * @throws Exception if the RNG fails
@@ -2142,8 +2894,10 @@ typedef RandomNumberGenerator RNG;
 */
 class BOTAN_PUBLIC_API(2, 0) Hardware_RNG : public RandomNumberGenerator {
    public:
-      void clear() final { /* no way to clear state of hardware RNG */
-      }
+      /**
+      * No-op clear implementation - no way to clear state of a hardware RNG
+      */
+      void clear() final {}
 };
 
 /**
@@ -2152,12 +2906,27 @@ class BOTAN_PUBLIC_API(2, 0) Hardware_RNG : public RandomNumberGenerator {
 */
 class BOTAN_PUBLIC_API(2, 0) Null_RNG final : public RandomNumberGenerator {
    public:
+      /**
+      * Test whether this RNG has been seeded
+      * @return true if this RNG is seeded and ready for use
+      */
       bool is_seeded() const override { return false; }
 
+      /**
+      * Test whether this RNG accepts externally provided input
+      * @return false if this RNG is known to ignore provided inputs
+      */
       bool accepts_input() const override { return false; }
 
+      /**
+      * Clear all internally held values of this RNG
+      */
       void clear() override {}
 
+      /**
+      * Return the name of this RNG type
+      * @return the name of this RNG type
+      */
       std::string name() const override { return "Null_RNG"; }
 
    private:
@@ -2175,8 +2944,16 @@ class Stateful_RNG;
 */
 class BOTAN_PUBLIC_API(2, 0) AutoSeeded_RNG final : public RandomNumberGenerator {
    public:
+      /**
+      * Test whether this RNG has been seeded
+      * @return true if this RNG is seeded and ready for use
+      */
       bool is_seeded() const override;
 
+      /**
+      * Test whether this RNG accepts externally provided input
+      * @return false if this RNG is known to ignore provided inputs
+      */
       bool accepts_input() const override { return true; }
 
       /**
@@ -2184,11 +2961,24 @@ class BOTAN_PUBLIC_API(2, 0) AutoSeeded_RNG final : public RandomNumberGenerator
       */
       void force_reseed();
 
+      /**
+      * Poll the provided sources for entropy and reseed from them
+      * @param srcs the entropy sources to poll
+      * @param poll_bits the number of bits to collect
+      * @return estimate of the number of bits collected
+      */
       size_t reseed_from_sources(Entropy_Sources& srcs,
                                  size_t poll_bits = RandomNumberGenerator::DefaultPollBits) override;
 
+      /**
+      * Return the name of this RNG type
+      * @return the name of this RNG type
+      */
       std::string name() const override;
 
+      /**
+      * Clear all internally held values of this RNG
+      */
       void clear() override;
 
       /**
@@ -2239,6 +3029,9 @@ class BOTAN_PUBLIC_API(2, 0) AutoSeeded_RNG final : public RandomNumberGenerator
                      size_t reseed_interval = RandomNumberGenerator::DefaultReseedInterval);
 
       AutoSeeded_RNG(const AutoSeeded_RNG& other) = delete;
+      /**
+      * Move constructor
+      */
       AutoSeeded_RNG(AutoSeeded_RNG&& other) noexcept;
       AutoSeeded_RNG& operator=(const AutoSeeded_RNG& other) = delete;
       AutoSeeded_RNG& operator=(AutoSeeded_RNG&& other) = delete;
@@ -2395,31 +3188,115 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
       class BOTAN_PUBLIC_API(3, 12) Limits final {
          public:
             /**
+            * The default maximum size in bytes of a single decoded object.
+            */
+            static constexpr size_t DefaultMaxObjectSize = 128 * 1024 * 1024;
+
+            /**
             * Accept only DER encodings
             */
-            static Limits DER() { return Limits(false, 0); }
+            static Limits DER() { return Limits(false, 0, false, DefaultMaxObjectSize, false); }
 
             /**
             * Accept non-canonical BER encodings.
             *
             * @param max_nested_indef maximum number of nested indefinite-length encodings accepted
             */
-            static Limits BER(size_t max_nested_indef = 16) { return Limits(true, max_nested_indef); }
+            static Limits BER(size_t max_nested_indef = 16) {
+               return Limits(true, max_nested_indef, false, DefaultMaxObjectSize, false);
+            }
 
+            /**
+            * If true, non-canonical BER encodings are accepted
+            */
             bool allow_ber_encoding() const { return m_allow_ber; }
 
+            /**
+            * If true, only DER encodings are accepted
+            */
             bool require_der_encoding() const { return !allow_ber_encoding(); }
 
+            /**
+            * The maximum number of nested indefinite-length encodings accepted
+            */
             size_t max_nested_indefinite_length() const { return m_max_nested_indef; }
 
+            /**
+            * If true, a standalone EOC marker (one that does not terminate an
+            * indefinite-length encoding) is skipped rather than rejected. Some
+            * BER producers emit trailing EOC markers; accepting them is needed to
+            * parse such data (eg CMS signatures in PDFs). Off by default.
+            */
+            bool allow_standalone_eoc() const { return m_allow_standalone_eoc; }
+
+            /**
+            * The maximum size in bytes of a single decoded object, or nullopt if
+            * no object size limit is enforced.
+            */
+            std::optional<size_t> max_object_size() const { return m_max_object_size; }
+
+            /**
+            * If true, a DER component that is explicitly encoded with a value
+            * equal to its DEFAULT is rejected (such components must be omitted in
+            * DER). Only applies in DER mode and only to fields decoded via
+            * decode_default(). Off by default, since Botan and many other
+            * implementations emit such components. See decode_default().
+            */
+            bool reject_default_value_encoding() const { return m_reject_default_value_encoding; }
+
+            /**
+            * Return a copy of these limits that tolerates standalone EOC markers.
+            * See allow_standalone_eoc().
+            */
+            Limits with_standalone_eoc_allowed() const {
+               Limits copy = *this;
+               copy.m_allow_standalone_eoc = true;
+               return copy;
+            }
+
+            /**
+            * Return a copy of these limits with the given maximum object size.
+            * A value of nullopt disables the object size limit. See
+            * max_object_size().
+            */
+            Limits with_max_object_size(std::optional<size_t> max_object_size) const {
+               Limits copy = *this;
+               copy.m_max_object_size = max_object_size;
+               return copy;
+            }
+
+            /**
+            * Return a copy of these limits that rejects DER components encoded
+            * equal to their DEFAULT value. See reject_default_value_encoding().
+            */
+            Limits with_default_value_encoding_rejected() const {
+               Limits copy = *this;
+               copy.m_reject_default_value_encoding = true;
+               return copy;
+            }
+
+            /**
+            * Compare two sets of limits for equality
+            */
             bool operator==(const Limits&) const = default;
 
          private:
-            Limits(bool allow_ber, size_t max_nested_indef) :
-                  m_allow_ber(allow_ber), m_max_nested_indef(max_nested_indef) {}
+            Limits(bool allow_ber,
+                   size_t max_nested_indef,
+                   bool allow_standalone_eoc,
+                   std::optional<size_t> max_object_size,
+                   bool reject_default_value_encoding) :
+                  m_allow_ber(allow_ber),
+                  m_max_nested_indef(max_nested_indef),
+                  m_allow_standalone_eoc(allow_standalone_eoc),
+                  m_max_object_size(max_object_size),
+                  m_reject_default_value_encoding(reject_default_value_encoding) {}
 
             bool m_allow_ber;
             size_t m_max_nested_indef;
+            bool m_allow_standalone_eoc;
+            std::optional<size_t> m_max_object_size;
+            bool m_reject_default_value_encoding;
       };
 
       /**
@@ -2451,10 +3328,23 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
       */
       BOTAN_FUTURE_EXPLICIT BER_Decoder(BER_Object&& obj) : BER_Decoder(std::move(obj), nullptr) {}
 
+      /**
+      * Set up to BER decode the data in obj, taking ownership of its contents
+      */
+      BER_Decoder(BER_Object&& obj, Limits limits);
+
       BER_Decoder(const BER_Decoder& other) = delete;
+
+      /**
+      * Move constructor
+      */
       BER_Decoder(BER_Decoder&& other) noexcept;
 
       BER_Decoder& operator=(const BER_Decoder&) = delete;
+
+      /**
+      * Move assignment
+      */
       BER_Decoder& operator=(BER_Decoder&&) noexcept;
 
       /**
@@ -2468,6 +3358,11 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
       */
       BER_Object get_next_object();
 
+      /**
+      * Get the next object in the data stream, storing it in @p ber
+      *
+      * If EOF, @p ber is set to an object with type NO_OBJECT.
+      */
       BER_Decoder& get_next(BER_Object& ber) {
          ber = get_next_object();
          return (*this);
@@ -2520,16 +3415,45 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
       */
       BER_Decoder& discard_remaining();
 
+      /**
+      * Start decoding a constructed object, returning a decoder for its contents.
+      * The returned decoder must be closed with end_cons().
+      *
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       BER_Decoder start_cons(ASN1_Type type_tag, ASN1_Class class_tag);
 
+      /**
+      * Start decoding a SEQUENCE, returning a decoder for its contents.
+      * The returned decoder must be closed with end_cons().
+      */
       BER_Decoder start_sequence() { return start_cons(ASN1_Type::Sequence, ASN1_Class::Universal); }
 
+      /**
+      * Start decoding a SET, returning a decoder for its contents.
+      * The returned decoder must be closed with end_cons().
+      */
       BER_Decoder start_set() { return start_cons(ASN1_Type::Set, ASN1_Class::Universal); }
 
+      /**
+      * Start decoding an IMPLICIT context specific constructed object, returning
+      * a decoder for its contents. The returned decoder must be closed with
+      * end_cons().
+      *
+      * @param tag the expected context specific tag number
+      */
       BER_Decoder start_context_specific(uint32_t tag) {
          return start_cons(ASN1_Type(tag), ASN1_Class::ContextSpecific);
       }
 
+      /**
+      * Start decoding an EXPLICIT context specific constructed object, returning
+      * a decoder for its contents. The returned decoder must be closed with
+      * end_cons().
+      *
+      * @param tag the expected context specific tag number
+      */
       BER_Decoder start_explicit_context_specific(uint32_t tag) {
          return start_cons(ASN1_Type(tag), ASN1_Class::ExplicitContextSpecific);
       }
@@ -2561,8 +3485,10 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
          return (*this);
       }
 
-      /*
+      /**
       * Save all the bytes remaining in the source
+      *
+      * @param out where the remaining bytes are written
       */
       template <typename Alloc>
       BER_Decoder& raw_bytes(std::vector<uint8_t, Alloc>& out) {
@@ -2577,6 +3503,9 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
          return (*this);
       }
 
+      /**
+      * Decode a BER encoded NULL, throwing if the next object is anything else
+      */
       BER_Decoder& decode_null();
 
       /**
@@ -2584,46 +3513,146 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
       */
       BER_Decoder& decode(bool& out) { return decode(out, ASN1_Type::Boolean, ASN1_Class::Universal); }
 
-      /*
+      /**
       * Decode a small BER encoded INTEGER
       */
       BER_Decoder& decode(size_t& out) { return decode(out, ASN1_Type::Integer, ASN1_Class::Universal); }
 
-      /*
+      /**
       * Decode a BER encoded INTEGER
       */
       BER_Decoder& decode(BigInt& out) { return decode(out, ASN1_Type::Integer, ASN1_Class::Universal); }
 
+      /**
+      * Decode the next object as an OCTET STRING and return its contents
+      */
       std::vector<uint8_t> get_next_octet_string() {
          std::vector<uint8_t> out_vec;
          decode(out_vec, ASN1_Type::OctetString);
          return out_vec;
       }
 
-      /*
+      /**
       * BER decode a BIT STRING or OCTET STRING
+      *
+      * @param out where the contents are written
+      * @param real_type either ASN1_Type::OctetString or ASN1_Type::BitString
       */
       template <typename Alloc>
       BER_Decoder& decode(std::vector<uint8_t, Alloc>& out, ASN1_Type real_type) {
          return decode(out, real_type, real_type, ASN1_Class::Universal);
       }
 
+      /**
+      * Decode a BOOLEAN with an IMPLICIT tagging
+      *
+      * @param v where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       BER_Decoder& decode(bool& v, ASN1_Type type_tag, ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
+      /**
+      * Decode a small INTEGER with an IMPLICIT tagging
+      *
+      * @param v where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       BER_Decoder& decode(size_t& v, ASN1_Type type_tag, ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
+      /**
+      * Decode an INTEGER with an IMPLICIT tagging
+      *
+      * @param v where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       BER_Decoder& decode(BigInt& v, ASN1_Type type_tag, ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
+      /**
+      * Decode a BIT STRING or OCTET STRING with an IMPLICIT tagging
+      *
+      * @param v where the contents are written
+      * @param real_type either ASN1_Type::OctetString or ASN1_Type::BitString
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       BER_Decoder& decode(std::vector<uint8_t>& v,
                           ASN1_Type real_type,
                           ASN1_Type type_tag,
                           ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
+      /**
+      * Decode a BIT STRING or OCTET STRING with an IMPLICIT tagging
+      *
+      * @param v where the contents are written
+      * @param real_type either ASN1_Type::OctetString or ASN1_Type::BitString
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       BER_Decoder& decode(secure_vector<uint8_t>& v,
                           ASN1_Type real_type,
                           ASN1_Type type_tag,
                           ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
+      /**
+      * Decode a BIT STRING, retaining the count of unused bits
+      *
+      * @param out where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
+      BER_Decoder& decode_bitstring(ASN1_BitString& out,
+                                    ASN1_Type type_tag = ASN1_Type::BitString,
+                                    ASN1_Class class_tag = ASN1_Class::Universal);
+
+      /**
+      * Decode a BIT STRING, throwing unless it has no unused bits
+      *
+      * @param out where the bits are written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
+      template <typename Alloc>
+      BER_Decoder& decode_octet_aligned_bitstring(std::vector<uint8_t, Alloc>& out,
+                                                  ASN1_Type type_tag = ASN1_Type::BitString,
+                                                  ASN1_Class class_tag = ASN1_Class::Universal) {
+         ASN1_BitString bits;
+         decode_bitstring(bits, type_tag, class_tag);
+
+         if(bits.unused_bits() != 0) {
+            throw Decoding_Error("Expected octet-aligned BIT STRING");
+         }
+
+         out.assign(bits.bytes().begin(), bits.bytes().end());
+         return (*this);
+      }
+
+      /**
+      * Decode a BIT STRING that is actually a bit set, such as X.509 KeyUsage
+      *
+      * The first bit of the encoding becomes the most significant of the @p width
+      * bits of @p bits. Throws if more than @p width bits are encoded, or in DER
+      * mode if the encoding is not minimal (ie the final bit is unset).
+      *
+      * @param bits where the bit set is written
+      * @param width the number of named bits, at most 64
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
+      BER_Decoder& decode_named_bitstring(uint64_t& bits,
+                                          size_t width,
+                                          ASN1_Type type_tag = ASN1_Type::BitString,
+                                          ASN1_Class class_tag = ASN1_Class::Universal);
+
+      /**
+      * Request an object decode itself from this stream
+      *
+      * @param obj the object to decode into
+      * @param type_tag must be NoObject; implicit tagging is not supported here
+      * @param class_tag must be NoObject; implicit tagging is not supported here
+      */
       BER_Decoder& decode(ASN1_Object& obj,
                           ASN1_Type type_tag = ASN1_Type::NoObject,
                           ASN1_Class class_tag = ASN1_Class::NoObject);
@@ -2633,19 +3662,49 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
       */
       BER_Decoder& decode_octet_string_bigint(BigInt& b);
 
+      /**
+      * Decode a non-negative INTEGER that fits in at most @p T_bytes bytes
+      *
+      * Throws BER_Decoding_Error if the value is negative or too large.
+      *
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      * @param T_bytes the maximum size of the value in bytes, at most 8
+      */
       uint64_t decode_constrained_integer(ASN1_Type type_tag, ASN1_Class class_tag, size_t T_bytes);
 
+      /**
+      * Decode an INTEGER into an integral type, throwing if it does not fit
+      *
+      * @param out where the value is written
+      */
       template <typename T>
       BER_Decoder& decode_integer_type(T& out) {
          return decode_integer_type<T>(out, ASN1_Type::Integer, ASN1_Class::Universal);
       }
 
+      /**
+      * Decode an INTEGER with an IMPLICIT tagging into an integral type,
+      * throwing if it does not fit
+      *
+      * @param out where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       template <typename T>
       BER_Decoder& decode_integer_type(T& out, ASN1_Type type_tag, ASN1_Class class_tag = ASN1_Class::ContextSpecific) {
          out = static_cast<T>(decode_constrained_integer(type_tag, class_tag, sizeof(out)));
          return (*this);
       }
 
+      /**
+      * Decode an OPTIONAL field, setting @p out to @p default_value if absent
+      *
+      * @param out where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      * @param default_value the value used if the field is not present
+      */
       template <typename T>
       BER_Decoder& decode_optional(T& out, ASN1_Type type_tag, ASN1_Class class_tag, const T& default_value = T()) {
          std::optional<T> optval;
@@ -2654,9 +3713,51 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
          return (*this);
       }
 
+      /**
+      * Decode a field carrying an ASN.1 DEFAULT value: if the field is absent
+      * @p out is set to @p default_value. Unlike decode_optional this is only
+      * for fields with a DEFAULT (not bare OPTIONAL fields): when the decoder is
+      * configured with Limits::with_default_value_encoding_rejected() and is in
+      * DER mode, a field that is present but equal to @p default_value is
+      * rejected, since DER requires such components to be omitted.
+      */
       template <typename T>
-      BER_Decoder& decode_optional(std::optional<T>& out, ASN1_Type type_tag, ASN1_Class class_tag);
+      BER_Decoder& decode_default(T& out, ASN1_Type type_tag, ASN1_Class class_tag, const T& default_value) {
+         std::optional<T> optval;
+         this->decode_optional(optval, type_tag, class_tag);
+         if(optval.has_value()) {
+            if(m_limits.require_der_encoding() && m_limits.reject_default_value_encoding() &&
+               *optval == default_value) {
+               throw BER_Decoding_Error("DER component encoded with its DEFAULT value");
+            }
+            out = std::move(*optval);
+         } else {
+            out = default_value;
+         }
+         return (*this);
+      }
 
+      /**
+      * Decode an OPTIONAL field, setting @p optval to nullopt if absent
+      *
+      * @param optval where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
+      template <typename T>
+      BER_Decoder& decode_optional(std::optional<T>& optval, ASN1_Type type_tag, ASN1_Class class_tag);
+
+      /**
+      * Decode an OPTIONAL IMPLICIT tagged field, setting @p out to
+      * @p default_value if absent
+      *
+      * @param out where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      * @param real_type the type tag the contents should be parsed as
+      * @param real_class the class tag the contents should be parsed as
+      * @param default_value the value used if the field is not present
+      */
       template <typename T>
       BER_Decoder& decode_optional_implicit(T& out,
                                             ASN1_Type type_tag,
@@ -2665,16 +3766,93 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
                                             ASN1_Class real_class,
                                             const T& default_value = T());
 
+      /**
+      * Decode an OPTIONAL field identified by a context-specific tag number.
+      *
+      * If the next object is tagged [tag_no] with class @p class_tag, @p fn is
+      * invoked to decode it (fn must consume exactly that object). Otherwise the
+      * stream is left unchanged and fn is not called.
+      *
+      * For a SEQUENCE of optional tagged fields that (per DER) appear at most
+      * once and in increasing tag order: call this once per field in tag order,
+      * then end_cons(), which rejects any unconsumed object (i.e. a duplicate,
+      * out-of-order, or unknown-tag field).
+      */
+      template <typename F>
+      BER_Decoder& decode_optional_field(uint32_t tag_no, ASN1_Class class_tag, F&& fn) {
+         if(peek_next_object().is_a(tag_no, class_tag)) {
+            std::forward<F>(fn)(*this);
+         }
+         return (*this);
+      }
+
+      /**
+      * Decode an already-extracted BER_Object as if its tag were
+      * `real_type`/`real_class`. Used to consume IMPLICIT-tagged values
+      * whose body matches a different universal type (e.g. a
+      * context-specific [8] body that should be parsed as an OID).
+      */
       template <typename T>
-      BER_Decoder& decode_list(std::vector<T>& out,
+      BER_Decoder& decode_implicit(BER_Object obj, T& out, ASN1_Type real_type, ASN1_Class real_class) {
+         obj.set_tagging(real_type, real_class);
+         push_back(std::move(obj));
+         if constexpr(std::is_base_of_v<ASN1_Object, T>) {
+            // The object was re-tagged above; decode_from checks the real tag itself
+            return decode(out);
+         } else {
+            return decode(out, real_type, real_class);
+         }
+      }
+
+      /**
+      * Read the next object, requiring it be tagged `type_tag`/`class_tag`, and
+      * decode it as if its tag were `real_type`/`real_class`.
+      *
+      * @param out where the value is written
+      * @param type_tag the expected type tag
+      * @param class_tag the expected class tag
+      * @param real_type the type tag the contents should be parsed as
+      * @param real_class the class tag the contents should be parsed as
+      */
+      template <typename T>
+      BER_Decoder& decode_implicit(
+         T& out, ASN1_Type type_tag, ASN1_Class class_tag, ASN1_Type real_type, ASN1_Class real_class) {
+         BER_Object obj = get_next_object();
+         obj.assert_is_a(type_tag, class_tag);
+         return decode_implicit(std::move(obj), out, real_type, real_class);
+      }
+
+      /**
+      * Decode a constructed object containing a list of homogeneously typed values
+      *
+      * @param vec where the values are appended
+      * @param type_tag the expected type tag of the constructed object
+      * @param class_tag the expected class tag of the constructed object
+      */
+      template <typename T>
+      BER_Decoder& decode_list(std::vector<T>& vec,
                                ASN1_Type type_tag = ASN1_Type::Sequence,
                                ASN1_Class class_tag = ASN1_Class::Universal);
 
+      /**
+      * Decode a list of homogeneously typed values if one is present
+      *
+      * @param vec where the values are appended
+      * @param type_tag the expected type tag of the constructed object
+      * @param class_tag the expected class tag of the constructed object
+      * @return true if the list was present
+      */
       template <typename T>
-      bool decode_optional_list(std::vector<T>& out,
+      bool decode_optional_list(std::vector<T>& vec,
                                 ASN1_Type type_tag = ASN1_Type::Sequence,
                                 ASN1_Class class_tag = ASN1_Class::Universal);
 
+      /**
+      * Decode a value and throw unless it equals the expected value
+      *
+      * @param expected the value the encoding must have
+      * @param error_msg the message of the exception thrown on a mismatch
+      */
       template <typename T>
       BER_Decoder& decode_and_check(const T& expected, std::string_view error_msg) {
          T actual;
@@ -2687,8 +3865,13 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
          return (*this);
       }
 
-      /*
-      * Decode an OPTIONAL string type
+      /**
+      * Decode an OPTIONAL string type, clearing @p out if it is absent
+      *
+      * @param out where the contents are written
+      * @param real_type the type tag the contents should be parsed as
+      * @param expected_tag the expected tag number
+      * @param class_tag the expected class tag
       */
       template <typename Alloc>
       BER_Decoder& decode_optional_string(std::vector<uint8_t, Alloc>& out,
@@ -2714,12 +3897,66 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
          return (*this);
       }
 
+      /**
+      * Decode an OPTIONAL string type, clearing @p out if it is absent
+      *
+      * @param out where the contents are written
+      * @param real_type the type tag the contents should be parsed as
+      * @param expected_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
       template <typename Alloc>
       BER_Decoder& decode_optional_string(std::vector<uint8_t, Alloc>& out,
                                           ASN1_Type real_type,
                                           ASN1_Type expected_tag,
                                           ASN1_Class class_tag = ASN1_Class::ContextSpecific) {
          return decode_optional_string(out, real_type, static_cast<uint32_t>(expected_tag), class_tag);
+      }
+
+      /**
+      * Decode an OPTIONAL BIT STRING with no unused bits, clearing @p out if it
+      * is absent
+      *
+      * @param out where the bits are written
+      * @param expected_tag the expected tag number
+      * @param class_tag the expected class tag
+      */
+      template <typename Alloc>
+      BER_Decoder& decode_optional_octet_aligned_bitstring(std::vector<uint8_t, Alloc>& out,
+                                                           uint32_t expected_tag,
+                                                           ASN1_Class class_tag = ASN1_Class::ContextSpecific) {
+         BER_Object obj = get_next_object();
+
+         const ASN1_Type type_tag = static_cast<ASN1_Type>(expected_tag);
+
+         if(obj.is_a(type_tag, class_tag)) {
+            if(class_tag == ASN1_Class::ExplicitContextSpecific) {
+               BER_Decoder(obj, m_limits).decode_octet_aligned_bitstring(out).verify_end();
+            } else {
+               push_back(std::move(obj));
+               decode_octet_aligned_bitstring(out, type_tag, class_tag);
+            }
+         } else {
+            out.clear();
+            push_back(std::move(obj));
+         }
+
+         return (*this);
+      }
+
+      /**
+      * Decode an OPTIONAL BIT STRING with no unused bits, clearing @p out if it
+      * is absent
+      *
+      * @param out where the bits are written
+      * @param expected_tag the expected type tag
+      * @param class_tag the expected class tag
+      */
+      template <typename Alloc>
+      BER_Decoder& decode_optional_octet_aligned_bitstring(std::vector<uint8_t, Alloc>& out,
+                                                           ASN1_Type expected_tag,
+                                                           ASN1_Class class_tag = ASN1_Class::ContextSpecific) {
+         return decode_optional_octet_aligned_bitstring(out, static_cast<uint32_t>(expected_tag), class_tag);
       }
 
       ~BER_Decoder();
@@ -2739,7 +3976,7 @@ class BOTAN_PUBLIC_API(2, 0) BER_Decoder final {
       std::unique_ptr<DataSource> m_data_src;
 };
 
-/*
+/**
 * Decode an OPTIONAL or DEFAULT element
 */
 template <typename T>
@@ -2752,7 +3989,13 @@ BER_Decoder& BER_Decoder::decode_optional(std::optional<T>& optval, ASN1_Type ty
          BER_Decoder(obj, m_limits).decode(out).verify_end();
       } else {
          this->push_back(std::move(obj));
-         this->decode(out, type_tag, class_tag);
+         if constexpr(std::is_base_of_v<ASN1_Object, T>) {
+            // Object types check the tag in decode_from; a re-tagging
+            // implicit override of an object is not supported here
+            this->decode(out);
+         } else {
+            this->decode(out, type_tag, class_tag);
+         }
       }
       optval = std::move(out);
    } else {
@@ -2763,8 +4006,8 @@ BER_Decoder& BER_Decoder::decode_optional(std::optional<T>& optval, ASN1_Type ty
    return (*this);
 }
 
-/*
-* Decode an OPTIONAL or DEFAULT element
+/**
+* Decode an OPTIONAL or DEFAULT element with an IMPLICIT tagging
 */
 template <typename T>
 BER_Decoder& BER_Decoder::decode_optional_implicit(T& out,
@@ -2776,9 +4019,7 @@ BER_Decoder& BER_Decoder::decode_optional_implicit(T& out,
    BER_Object obj = get_next_object();
 
    if(obj.is_a(type_tag, class_tag)) {
-      obj.set_tagging(real_type, real_class);
-      push_back(std::move(obj));
-      decode(out, real_type, real_class);
+      decode_implicit(std::move(obj), out, real_type, real_class);
    } else {
       // Not what we wanted, push it back on the stream
       out = default_value;
@@ -2788,7 +4029,7 @@ BER_Decoder& BER_Decoder::decode_optional_implicit(T& out,
    return (*this);
 }
 
-/*
+/**
 * Decode a list of homogeneously typed values
 */
 template <typename T>
@@ -2806,7 +4047,7 @@ BER_Decoder& BER_Decoder::decode_list(std::vector<T>& vec, ASN1_Type type_tag, A
    return (*this);
 }
 
-/*
+/**
 * Decode an optional list of homogeneously typed values
 */
 template <typename T>
@@ -3016,6 +4257,10 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
 
       friend void swap(BigInt& x, BigInt& y) noexcept { x.swap(y); }
 
+      /**
+      * Swap the internal register with the provided one, leaving the sign unchanged
+      * @param reg the register to swap with
+      */
       BOTAN_DEPRECATED("Deprecated no replacement") void swap_reg(secure_vector<word>& reg) {
          m_data.swap(reg);
          // sign left unchanged
@@ -3025,7 +4270,7 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
        * += operator
        * @param y the BigInt to add to this
        */
-      BigInt& operator+=(const BigInt& y) { return add(y._data(), y.sig_words(), y.sign()); }
+      BigInt& operator+=(const BigInt& y);
 
       /**
        * += operator
@@ -3037,7 +4282,7 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
        * -= operator
        * @param y the BigInt to subtract from this
        */
-      BigInt& operator-=(const BigInt& y) { return sub(y._data(), y.sig_words(), y.sign()); }
+      BigInt& operator-=(const BigInt& y);
 
       /**
        * -= operator
@@ -3128,12 +4373,34 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
       bool operator!() const { return is_zero(); }
 
       //BOTAN_DEPRECATED("Just use operator+/operator-")
+      /**
+      * Add a signed word array to an integer
+      * @param x the first addend
+      * @param y the words of the second addend
+      * @param y_words the number of words in y
+      * @param y_sign the sign of the second addend
+      * @return the sum
+      */
       static BigInt add2(const BigInt& x, const word y[], size_t y_words, Sign y_sign);
 
       //BOTAN_DEPRECATED("Just use operator+/operator-")
+      /**
+      * Add a signed word array to *this
+      * @param y the words of the addend
+      * @param y_words the number of words in y
+      * @param sign the sign of the addend
+      * @return reference to *this
+      */
       BigInt& add(const word y[], size_t y_words, Sign sign);
 
       //BOTAN_DEPRECATED("Just use operator+/operator-")
+      /**
+      * Subtract a signed word array from *this
+      * @param y the words of the subtrahend
+      * @param y_words the number of words in y
+      * @param sign the sign of the subtrahend
+      * @return reference to *this
+      */
       BigInt& sub(const word y[], size_t y_words, Sign sign) {
          return add(y, y_words, sign == Positive ? Negative : Positive);
       }
@@ -3366,6 +4633,7 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
       std::string to_hex_string() const;
 
       /**
+      * Return a byte of the big-endian encoding of this integer
        * @param n the offset to get a byte from
        * @result byte at offset n
        */
@@ -3378,8 +4646,18 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
        */
       word word_at(size_t n) const { return m_data.get_word_at(n); }
 
+      /**
+      * Set the word at a specified position of the internal register
+      * @param i position in the register
+      * @param w the value to set
+      */
       BOTAN_DEPRECATED("Deprecated no replacement") void set_word_at(size_t i, word w) { m_data.set_word_at(i, w); }
 
+      /**
+      * Replace the internal register with the given words
+      * @param w the words to set
+      * @param len the number of words in w
+      */
       BOTAN_DEPRECATED("Deprecated no replacement") void set_words(const word w[], size_t len) {
          m_data.set_words(w, len);
       }
@@ -3409,6 +4687,7 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
       Sign sign() const { return (m_signedness); }
 
       /**
+      * Return the sign opposite to that of this integer
        * @result the opposite sign of the represented integer value
        */
       Sign reverse_sign() const {
@@ -3436,6 +4715,7 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
       }
 
       /**
+      * Return the absolute value of this integer
        * @result absolute (positive) value of this
        */
       BigInt abs() const;
@@ -3503,7 +4783,14 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
        */
       BOTAN_DEPRECATED("Deprecated no replacement") void grow_to(size_t n) const { m_data.grow_to(n); }
 
-      BOTAN_DEPRECATED("Deprecated no replacement") void resize(size_t s) { m_data.resize(s); }
+      /**
+      * Resize the internal register, adjusting the sign if the value becomes zero
+      * @param s the new size of the register in words
+      */
+      BOTAN_DEPRECATED("Deprecated no replacement") void resize(size_t s) {
+         m_data.resize(s);
+         set_sign(sign());  // handle possible zero
+      }
 
       /**
        * Fill BigInt with a random number with size of bitsize
@@ -3638,11 +4925,18 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
        */
       void cond_flip_sign(bool predicate);
 
+      /**
+      * Mark this value as secret for constant time analysis tooling
+      */
       BOTAN_DEPRECATED("replaced by internal API") void const_time_poison() const { _const_time_poison(); }
 
+      /**
+      * Mark this value as no longer secret for constant time analysis tooling
+      */
       BOTAN_DEPRECATED("replaced by internal API") void const_time_unpoison() const { _const_time_unpoison(); }
 
       /**
+      * Generate a random integer within a range
        * @param rng a random number generator
        * @param min the minimum value (must be non-negative)
        * @param max the maximum value (must be non-negative and > min)
@@ -3734,10 +5028,21 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
          return n.serialize<secure_vector<uint8_t>>(bytes);
       }
 
+      /**
+      * Encode an integer as a fixed length big-endian string per IEEE 1363
+      * @param out the buffer to write to; its size determines the encoding length
+      * @param n the integer to encode
+      */
       BOTAN_DEPRECATED("Use BigInt::serialize_to") static void encode_1363(std::span<uint8_t> out, const BigInt& n) {
          n.serialize_to(out);
       }
 
+      /**
+      * Encode an integer as a fixed length big-endian string per IEEE 1363
+      * @param out the buffer to write to
+      * @param bytes the length of the encoding
+      * @param n the integer to encode
+      */
       BOTAN_DEPRECATED("Use BigInt::serialize_to")
       static void encode_1363(uint8_t out[], size_t bytes, const BigInt& n) {
          n.serialize_to(std::span{out, bytes});
@@ -3881,7 +5186,13 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
                m_reg.resize(words);
             }
 
-            void resize(size_t s) { m_reg.resize(s); }
+            void resize(size_t s) {
+               const bool shrinking = s < m_reg.size();
+               m_reg.resize(s);
+               if(shrinking) {
+                  invalidate_sig_words();
+               }
+            }
 
             void swap(Data& other) noexcept {
                m_reg.swap(other.m_reg);
@@ -3915,100 +5226,265 @@ class BOTAN_PUBLIC_API(2, 0) BigInt final {
       Sign m_signedness = Positive;
 };
 
-/*
-* Arithmetic Operators
+/**
+* Add two integers
+* @param x the first addend
+* @param y the second addend
+* @return (x + y)
 */
 inline BigInt operator+(const BigInt& x, const BigInt& y) {
    return BigInt::add2(x, y._data(), y.sig_words(), y.sign());
 }
 
+/**
+* Add a word to an integer
+* @param x the first addend
+* @param y the second addend
+* @return (x + y)
+*/
 inline BigInt operator+(const BigInt& x, word y) {
    return BigInt::add2(x, &y, 1, BigInt::Positive);
 }
 
+/**
+* Add an integer to a word
+* @param x the first addend
+* @param y the second addend
+* @return (x + y)
+*/
 inline BigInt operator+(word x, const BigInt& y) {
    return y + x;
 }
 
+/**
+* Subtract two integers
+* @param x the minuend
+* @param y the subtrahend
+* @return (x - y)
+*/
 inline BigInt operator-(const BigInt& x, const BigInt& y) {
    return BigInt::add2(x, y._data(), y.sig_words(), y.reverse_sign());
 }
 
+/**
+* Subtract a word from an integer
+* @param x the minuend
+* @param y the subtrahend
+* @return (x - y)
+*/
 inline BigInt operator-(const BigInt& x, word y) {
    return BigInt::add2(x, &y, 1, BigInt::Negative);
 }
 
+/**
+* Multiply two integers
+* @param x the first factor
+* @param y the second factor
+* @return (x * y)
+*/
 BOTAN_PUBLIC_API(2, 0) BigInt operator*(const BigInt& x, const BigInt& y);
+
+/**
+* Multiply an integer by a word
+* @param x the first factor
+* @param y the second factor
+* @return (x * y)
+*/
 BOTAN_PUBLIC_API(2, 8) BigInt operator*(const BigInt& x, word y);
 
+/**
+* Multiply a word by an integer
+* @param x the first factor
+* @param y the second factor
+* @return (x * y)
+*/
 inline BigInt operator*(word x, const BigInt& y) {
    return y * x;
 }
 
+/**
+* Divide two integers
+* @param x the dividend
+* @param d the divisor
+* @return (x / d), rounded towards zero
+*/
 BOTAN_PUBLIC_API(2, 0) BigInt operator/(const BigInt& x, const BigInt& d);
+
+/**
+* Divide an integer by a word
+* @param x the dividend
+* @param m the divisor
+* @return (x / m), rounded towards zero
+*/
 BOTAN_PUBLIC_API(2, 0) BigInt operator/(const BigInt& x, word m);
+
+/**
+* Reduce an integer modulo another
+* @param x the value to reduce
+* @param m the modulus
+* @return (x % m)
+*/
 BOTAN_PUBLIC_API(2, 0) BigInt operator%(const BigInt& x, const BigInt& m);
+
+/**
+* Reduce an integer modulo a word
+* @param x the value to reduce
+* @param m the modulus
+* @return (x % m)
+*/
 BOTAN_PUBLIC_API(2, 0) word operator%(const BigInt& x, word m);
+
+/**
+* Shift an integer left
+* @param x the value to shift
+* @param n the number of bits to shift by
+* @return (x << n)
+*/
 BOTAN_PUBLIC_API(2, 0) BigInt operator<<(const BigInt& x, size_t n);
+
+/**
+* Shift an integer right
+* @param x the value to shift
+* @param n the number of bits to shift by
+* @return (x >> n)
+*/
 BOTAN_PUBLIC_API(2, 0) BigInt operator>>(const BigInt& x, size_t n);
 
-/*
- * Comparison Operators
- */
+/**
+* Compare two integers
+* @param a the first operand
+* @param b the second operand
+* @return true if a is equal to b
+*/
 inline bool operator==(const BigInt& a, const BigInt& b) {
    return a.is_equal(b);
 }
 
+/**
+* Compare two integers
+* @param a the first operand
+* @param b the second operand
+* @return true if a is not equal to b
+*/
 inline bool operator!=(const BigInt& a, const BigInt& b) {
    return !a.is_equal(b);
 }
 
+/**
+* Compare two integers
+* @param a the first operand
+* @param b the second operand
+* @return true if a is less than or equal to b
+*/
 inline bool operator<=(const BigInt& a, const BigInt& b) {
    return (a.cmp(b) <= 0);
 }
 
+/**
+* Compare two integers
+* @param a the first operand
+* @param b the second operand
+* @return true if a is greater than or equal to b
+*/
 inline bool operator>=(const BigInt& a, const BigInt& b) {
    return (a.cmp(b) >= 0);
 }
 
+/**
+* Compare two integers
+* @param a the first operand
+* @param b the second operand
+* @return true if a is less than b
+*/
 inline bool operator<(const BigInt& a, const BigInt& b) {
    return a.is_less_than(b);
 }
 
+/**
+* Compare two integers
+* @param a the first operand
+* @param b the second operand
+* @return true if a is greater than b
+*/
 inline bool operator>(const BigInt& a, const BigInt& b) {
    return b.is_less_than(a);
 }
 
+/**
+* Compare an integer with a word
+* @param a the first operand
+* @param b the second operand
+* @return true if a is equal to b
+*/
 inline bool operator==(const BigInt& a, word b) {
    return (a.cmp_word(b) == 0);
 }
 
+/**
+* Compare an integer with a word
+* @param a the first operand
+* @param b the second operand
+* @return true if a is not equal to b
+*/
 inline bool operator!=(const BigInt& a, word b) {
    return (a.cmp_word(b) != 0);
 }
 
+/**
+* Compare an integer with a word
+* @param a the first operand
+* @param b the second operand
+* @return true if a is less than or equal to b
+*/
 inline bool operator<=(const BigInt& a, word b) {
    return (a.cmp_word(b) <= 0);
 }
 
+/**
+* Compare an integer with a word
+* @param a the first operand
+* @param b the second operand
+* @return true if a is greater than or equal to b
+*/
 inline bool operator>=(const BigInt& a, word b) {
    return (a.cmp_word(b) >= 0);
 }
 
+/**
+* Compare an integer with a word
+* @param a the first operand
+* @param b the second operand
+* @return true if a is less than b
+*/
 inline bool operator<(const BigInt& a, word b) {
    return (a.cmp_word(b) < 0);
 }
 
+/**
+* Compare an integer with a word
+* @param a the first operand
+* @param b the second operand
+* @return true if a is greater than b
+*/
 inline bool operator>(const BigInt& a, word b) {
    return (a.cmp_word(b) > 0);
 }
 
-/*
- * I/O Operators
- */
+/**
+* Write an integer to an output stream
+* @param stream the stream to write to
+* @param n the integer to write
+* @return reference to the stream
+*/
 BOTAN_DEPRECATED("Use BigInt::to_{hex,dec}_string")
 BOTAN_PUBLIC_API(2, 0) std::ostream& operator<<(std::ostream& stream, const BigInt& n);
 
+/**
+* Read an integer from an input stream
+* @param stream the stream to read from
+* @param n set to the integer which was read
+* @return reference to the stream
+*/
 BOTAN_DEPRECATED("Use BigInt::from_string")
 BOTAN_PUBLIC_API(2, 0) std::istream& operator>>(std::istream& stream, BigInt& n);
 
@@ -4039,6 +5515,7 @@ class BOTAN_PUBLIC_API(2, 0) Key_Length_Specification final {
             m_min_keylen(min_k), m_max_keylen(max_k > 0 ? max_k : min_k), m_keylen_mod(k_mod) {}
 
       /**
+      * Test if a key length is acceptable
       * @param length is a key length in bytes
       * @return true iff this length is a valid length for this algo
       */
@@ -4047,21 +5524,25 @@ class BOTAN_PUBLIC_API(2, 0) Key_Length_Specification final {
       }
 
       /**
+      * Return the smallest acceptable key length
       * @return minimum key length in bytes
       */
       size_t minimum_keylength() const { return m_min_keylen; }
 
       /**
+      * Return the largest acceptable key length
       * @return maximum key length in bytes
       */
       size_t maximum_keylength() const { return m_max_keylen; }
 
       /**
+      * Return the granularity of acceptable key lengths
       * @return key length multiple in bytes
       */
       size_t keylength_multiple() const { return m_keylen_mod; }
 
-      /*
+      /**
+      * Scale all length requirements by a factor
       * Multiplies all length requirements with the given factor
       * @param n the multiplication factor
       * @return a key length specification multiplied by the factor
@@ -4079,11 +5560,33 @@ class BOTAN_PUBLIC_API(2, 0) Key_Length_Specification final {
 */
 class BOTAN_PUBLIC_API(2, 0) SymmetricAlgorithm {
    public:
+      /**
+      * Default constructor
+      */
       SymmetricAlgorithm() = default;
+
       virtual ~SymmetricAlgorithm() = default;
+
+      /**
+      * Copy constructor
+      */
       SymmetricAlgorithm(const SymmetricAlgorithm& other) = default;
+
+      /**
+      * Move constructor
+      */
       SymmetricAlgorithm(SymmetricAlgorithm&& other) = default;
+
+      /**
+      * Copy assignment
+      * @return reference to this
+      */
       SymmetricAlgorithm& operator=(const SymmetricAlgorithm& other) = default;
+
+      /**
+      * Move assignment
+      * @return reference to this
+      */
       SymmetricAlgorithm& operator=(SymmetricAlgorithm&& other) = default;
 
       /**
@@ -4093,16 +5596,19 @@ class BOTAN_PUBLIC_API(2, 0) SymmetricAlgorithm {
       virtual void clear() = 0;
 
       /**
+      * Return the key lengths supported by this algorithm
       * @return object describing limits on key size
       */
       virtual Key_Length_Specification key_spec() const = 0;
 
       /**
+      * Return the largest acceptable key length
       * @return maximum allowed key length
       */
       size_t maximum_keylength() const { return key_spec().maximum_keylength(); }
 
       /**
+      * Return the smallest acceptable key length
       * @return minimum allowed key length
       */
       size_t minimum_keylength() const { return key_spec().minimum_keylength(); }
@@ -4134,18 +5640,27 @@ class BOTAN_PUBLIC_API(2, 0) SymmetricAlgorithm {
       void set_key(const uint8_t key[], size_t length) { set_key(std::span{key, length}); }
 
       /**
+      * Return the name of this algorithm
       * @return the algorithm name
       */
       virtual std::string name() const = 0;
 
       /**
+      * Test whether a key has been set on this object
       * @return true if a key has been set on this object
       */
       virtual bool has_keying_material() const = 0;
 
    protected:
+      /**
+      * Throw Key_Not_Set unless a key has been set on this object
+      */
       void assert_key_material_set() const { assert_key_material_set(has_keying_material()); }
 
+      /**
+      * Throw Key_Not_Set unless the predicate holds
+      * @param predicate if false, a Key_Not_Set exception is thrown
+      */
       void assert_key_material_set(bool predicate) const {
          if(!predicate) {
             throw_key_not_set_error();
@@ -4188,6 +5703,7 @@ class BOTAN_PUBLIC_API(2, 0) BlockCipher : public SymmetricAlgorithm {
       static std::unique_ptr<BlockCipher> create_or_throw(std::string_view algo_spec, std::string_view provider = "");
 
       /**
+      * List the providers available for a given block cipher
       * @return list of available providers for this algorithm, empty if not available
       * @param algo_spec algorithm name
       */
@@ -4202,21 +5718,25 @@ class BOTAN_PUBLIC_API(2, 0) BlockCipher : public SymmetricAlgorithm {
       static constexpr size_t ParallelismMult = 4;
 
       /**
+      * Return the block size of this cipher
       * @return block size of this algorithm
       */
       virtual size_t block_size() const = 0;
 
       /**
+      * Return how many blocks this cipher processes in parallel
       * @return native parallelism of this cipher in blocks
       */
       virtual size_t parallelism() const { return 1; }
 
       /**
+      * Return the preferred input size for bulk processing
       * @return preferred parallelism of this cipher in bytes
       */
       size_t parallel_bytes() const { return parallelism() * block_size() * BlockCipher::ParallelismMult; }
 
       /**
+      * Return the name of the provider implementing this object
       * @return provider information about this implementation. Default is "base",
       * might also return "sse2", "avx2", "openssl", or some other arbitrary string.
       */
@@ -4306,6 +5826,12 @@ class BOTAN_PUBLIC_API(2, 0) BlockCipher : public SymmetricAlgorithm {
       */
       virtual void decrypt_n(const uint8_t in[], uint8_t out[], size_t blocks) const = 0;
 
+      /**
+      * Encrypt blocks in XEX mode: XOR with the mask, encrypt, then XOR again
+      * @param data the input/output buffer of blocks*block_size() bytes
+      * @param mask the mask to XOR with, same size as data
+      * @param blocks the number of blocks to process
+      */
       BOTAN_DEPRECATED("Deprecated no replacement")
       void encrypt_n_xex(uint8_t data[], const uint8_t mask[], size_t blocks) const {
          const size_t BS = block_size();
@@ -4318,6 +5844,12 @@ class BOTAN_PUBLIC_API(2, 0) BlockCipher : public SymmetricAlgorithm {
          }
       }
 
+      /**
+      * Decrypt blocks in XEX mode: XOR with the mask, decrypt, then XOR again
+      * @param data the input/output buffer of blocks*block_size() bytes
+      * @param mask the mask to XOR with, same size as data
+      * @param blocks the number of blocks to process
+      */
       BOTAN_DEPRECATED("Deprecated no replacement")
       void decrypt_n_xex(uint8_t data[], const uint8_t mask[], size_t blocks) const {
          const size_t BS = block_size();
@@ -4331,10 +5863,15 @@ class BOTAN_PUBLIC_API(2, 0) BlockCipher : public SymmetricAlgorithm {
       }
 
       /**
+      * Create a new uninitialized object of the same type
       * @return new object representing the same algorithm as *this
       */
       virtual std::unique_ptr<BlockCipher> new_object() const = 0;
 
+      /**
+      * Create a new uninitialized object of the same type
+      * @return new object representing the same algorithm as *this
+      */
       BlockCipher* clone() const { return this->new_object().release(); }
 };
 
@@ -4361,8 +5898,16 @@ class Block_Cipher_Fixed_Params : public BaseClass {
    public:
       enum { BLOCK_SIZE = BS }; /* NOLINT(*-enum-size,*-use-enum-class) */
 
+      /**
+      * Return the block size of this cipher
+      * @return the fixed block size BS
+      */
       size_t block_size() const final { return BS; }
 
+      /**
+      * Return the key lengths supported by this cipher
+      * @return the fixed key length specification
+      */
       Key_Length_Specification key_spec() const final { return Key_Length_Specification(KMIN, KMAX, KMOD); }
 };
 
@@ -4377,6 +5922,7 @@ namespace Botan {
 class BOTAN_PUBLIC_API(2, 0) Buffered_Computation /* NOLINT(*special-member-functions) */ {
    public:
       /**
+      * Return the output length of this function
       * @return length of the output of this function in bytes
       */
       virtual size_t output_length() const = 0;
@@ -4394,12 +5940,40 @@ class BOTAN_PUBLIC_API(2, 0) Buffered_Computation /* NOLINT(*special-member-func
       */
       void update(std::span<const uint8_t> in) { add_data(in); }
 
+      /**
+      * Add new input to process, encoded as a big-endian integer
+      * @param val the value to process
+      */
       void update_be(uint16_t val);
+
+      /**
+      * Add new input to process, encoded as a big-endian integer
+      * @param val the value to process
+      */
       void update_be(uint32_t val);
+
+      /**
+      * Add new input to process, encoded as a big-endian integer
+      * @param val the value to process
+      */
       void update_be(uint64_t val);
 
+      /**
+      * Add new input to process, encoded as a little-endian integer
+      * @param val the value to process
+      */
       void update_le(uint16_t val);
+
+      /**
+      * Add new input to process, encoded as a little-endian integer
+      * @param val the value to process
+      */
       void update_le(uint32_t val);
+
+      /**
+      * Add new input to process, encoded as a little-endian integer
+      * @param val the value to process
+      */
       void update_le(uint64_t val);
 
       /**
@@ -4416,16 +5990,14 @@ class BOTAN_PUBLIC_API(2, 0) Buffered_Computation /* NOLINT(*special-member-func
       void update(uint8_t in) { add_data({&in, 1}); }
 
       /**
-      * Complete the computation and retrieve the
-      * final result.
-      * @param out The byte array to be filled with the result.
-      * Must be of length output_length()
+      * Complete the computation and retrieve the final result.
+      * @param out The byte array to be filled with the result, which
+      * must be of length output_length()
       */
       void final(uint8_t out[]) { final_result({out, output_length()}); }
 
       /**
-      * Complete the computation and retrieve the
-      * final result as a container of your choice.
+      * Complete the computation and retrieve the final result as a container.
       * @return a contiguous container holding the result
       */
       template <concepts::resizable_byte_buffer T = secure_vector<uint8_t>>
@@ -4435,10 +6007,22 @@ class BOTAN_PUBLIC_API(2, 0) Buffered_Computation /* NOLINT(*special-member-func
          return output;
       }
 
+      /**
+      * Complete the computation and retrieve the final result
+      * @return a std::vector holding the result
+      */
       std::vector<uint8_t> final_stdvec() { return final<std::vector<uint8_t>>(); }
 
+      /**
+      * Complete the computation and retrieve the final result
+      * @param out the buffer to write the result to, must be output_length() bytes
+      */
       void final(std::span<uint8_t> out);
 
+      /**
+      * Complete the computation and retrieve the final result
+      * @param out a container which is resized to hold the result
+      */
       template <concepts::resizable_byte_buffer T>
       void final(T& out) {
          out.resize(output_length());
@@ -4504,12 +6088,227 @@ class BOTAN_PUBLIC_API(2, 0) Buffered_Computation /* NOLINT(*special-member-func
 namespace Botan {
 
 /**
+* A DNS name (host name or wildcard pattern) in canonical form.
+*
+* Construction validates that the input conforms to the Preferred Name
+* Syntax (RFC 1035 / RFC 1123 LDH labels, length limits, no leading or
+* trailing dot). Entirely numeric names (`"1.2.3.4"`) are rejected. The
+* stored form is lowercased ASCII.
+*/
+class BOTAN_PUBLIC_API(3, 13) DNSName final {
+   public:
+      /**
+      * Parse and canonicalize a literal hostname. Returns nullopt if the
+      * input is not a valid DNS name per RFC 1035 / 1123, or if it
+      * contains a `"*"` label (use `from_san_string` for that).
+      */
+      static std::optional<DNSName> from_string(std::string_view name);
+
+      /**
+      * Like `from_string`, but additionally accepts the RFC 6125 6.4.3
+      * wildcard form: a single `"*"` anywhere within the leftmost label
+      * of an otherwise-valid DNS name (e.g. `"*.example.com"`,
+      * `"foo*.example.com"`). Shapes that could never produce a match -
+      * multiple `"*"` (`"*.*.example.com"`), `"*"` outside the leftmost label
+      * (`"foo.*.example.com"`), or patterns with fewer than three labels
+      * (`"*"`, `"*.com"`) - are rejected, as are wildcards embedded within
+      * an IDNA A-label (`"xn--f*.example.com"`). Intended for parsing
+      * X.509 SAN dnsName entries.
+      */
+      static std::optional<DNSName> from_san_string(std::string_view name);
+
+      /**
+      * Access the canonicalized name
+      * @return the lowercased ASCII form of the name
+      */
+      const std::string& to_string() const { return m_name; }
+
+      /**
+      * Access the canonicalized name
+      * @return the lowercased ASCII form of the name
+      */
+      const std::string& name() const { return m_name; }
+
+      /**
+      * True if this name is a wildcard pattern: a single `"*"` somewhere
+      * in the leftmost label, per RFC 6125 6.4.3 (which permits
+      * in-label partial wildcards like `"foo*.example.com"` as well as
+      * the complete-leftmost-label `"*.example.com"` form). Shapes
+      * outside this form - multiple `"*"` or `"*"` not in the leftmost
+      * label - are rejected at construction by `from_san_string`, so
+      * any stored `"*"` is already in the leftmost label.
+      *
+      * TODO(Botan4) when RFC 9525 wildcards are used, this fn can change
+      * to just looking at the first character of m_name.
+      */
+      bool is_wildcard() const { return m_name.find('*') != std::string::npos; }
+
+      /**
+      * Test whether this name matches a wildcard pattern (e.g. "*.example.com").
+      * The wildcard label must be the leftmost label. Comparison is
+      * case-insensitive.
+      */
+      bool matches_wildcard(std::string_view wildcard) const;
+
+      /**
+      * Order two names by their canonicalized form
+      * @return the ordering of this name relative to the other
+      */
+      auto operator<=>(const DNSName&) const = default;
+
+      /**
+      * Compare two names by their canonicalized form
+      * @return true if the two names are equal
+      */
+      bool operator==(const DNSName&) const = default;
+
+      /**
+      * Test if the issued name (which might be a wildcard pattern) can match the host,
+      * which should be a complete and valid DNS name.
+      *
+      * Returns false if either the pattern or the host seem invalid
+      */
+      static bool host_wildcard_match(std::string_view issued, std::string_view host);
+
+   private:
+      explicit DNSName(std::string canonical) : m_name(std::move(canonical)) {}
+
+      std::string m_name;
+};
+
+}  // namespace Botan
+
+namespace Botan {
+
+/**
+* A parsed email address in mailbox form: "local-part@domain".
+*
+* This is specifically modeling RFC 5280's rfc822Name GeneralName type.
+* In this type, the local-part of the email address must be an ASCII subset.
+*
+* This type and SmtpUTF8Mailbox are very similar in that both express mailbox
+* names. However they are modeled as distinct and unrelated types, as certain
+* name constraint processing rules are applied differently to the two name
+* forms, so it is important that they not be confusable. In addition, by a
+* strict reading of the RFCs, the names expressed by EmailAddress and by
+* SmtpUTF8Mailbox are completely disjoint; EmailAddress as encoded can only
+* express ASCII local-part names, and SmtpUTF8Mailbox is RFC MUST required to be
+* used only for names with a non-ASCII local-part.
+*/
+class BOTAN_PUBLIC_API(3, 13) EmailAddress final {
+   public:
+      /**
+      * Parse an rfc822Name mailbox
+      * @param addr the address to parse
+      * @return the parsed address, or nullopt if addr is not a valid rfc822Name
+      */
+      static std::optional<EmailAddress> from_string(std::string_view addr);
+
+      /// The local-part, ASCII only
+      const std::string& local_part() const { return m_local_part; }
+
+      /// The domain part of the address
+      /// @return the domain of the address
+      const DNSName& domain() const { return m_domain; }
+
+      /**
+      * Format the address as "local-part@domain"
+      * @return the text form of the address
+      */
+      std::string to_string() const;
+
+      /**
+      * Order two addresses
+      * @return the ordering of this address relative to the other
+      */
+      auto operator<=>(const EmailAddress&) const = default;
+
+      /**
+      * Compare two addresses
+      * @return true if the two addresses are equal
+      */
+      bool operator==(const EmailAddress&) const = default;
+
+   private:
+      EmailAddress(std::string local_part, DNSName domain) :
+            m_local_part(std::move(local_part)), m_domain(std::move(domain)) {}
+
+      std::string m_local_part;
+      DNSName m_domain;
+};
+
+/**
+* A parsed internationalized mailbox (`SmtpUTF8Mailbox`) as defined by RFC 9598.
+*
+* The mailbox is `local-part "@" domain`, where local-part is a UTF-8 string.
+* The RFC specifically requires that this name only be used when the local-part
+* of the name is not representable in ASCII.
+*
+* Prior specifications of this name (RFC 8398) allowed for any internationalized
+* domains be stored as U-label names. However RFC 9598 changes this so that only
+* A-label names are allowed. This restriction is enforced by this type.
+*/
+class BOTAN_PUBLIC_API(3, 13) SmtpUtf8Mailbox final {
+   public:
+      /**
+      * Parse an SmtpUTF8Mailbox
+      * @param addr the address to parse
+      * @return the parsed address, or nullopt if addr is not a valid SmtpUTF8Mailbox
+      */
+      static std::optional<SmtpUtf8Mailbox> from_string(std::string_view addr);
+
+      /// The local-part, UTF-8 encoded, should contain non-ASCII
+      const std::string& local_part() const { return m_local_part; }
+
+      /// The domain, as an LDH host name in A-label form (RFC 9598 Section 3)
+      const DNSName& domain() const { return m_domain; }
+
+      /**
+      * Format the mailbox as "local-part@domain"
+      * @return the text form of the mailbox
+      */
+      std::string to_string() const;
+
+      /**
+      * Order two mailboxes
+      * @return the ordering of this mailbox relative to the other
+      */
+      auto operator<=>(const SmtpUtf8Mailbox&) const = default;
+
+      /**
+      * Compare two mailboxes
+      * @return true if the two mailboxes are equal
+      */
+      bool operator==(const SmtpUtf8Mailbox&) const = default;
+
+   private:
+      SmtpUtf8Mailbox(std::string local_part, DNSName domain) :
+            m_local_part(std::move(local_part)), m_domain(std::move(domain)) {}
+
+      std::string m_local_part;
+      DNSName m_domain;
+};
+
+}  // namespace Botan
+
+namespace Botan {
+
+/**
 * IPv4 Address
 */
 class BOTAN_PUBLIC_API(3, 12) IPv4Address final {
    public:
+      /**
+      * Create an address from its integer value
+      * @param ip the address as a 32-bit big-endian integer
+      */
       explicit IPv4Address(uint32_t ip) : m_ip(ip) {}
 
+      /**
+      * Convert a dotted-decimal string to an IPv4Address
+      * @param str the address to parse
+      * @return the parsed address, or nullopt if str is not a valid IPv4 address
+      */
       static std::optional<IPv4Address> from_string(std::string_view str);
 
       /**
@@ -4518,14 +6317,30 @@ class BOTAN_PUBLIC_API(3, 12) IPv4Address final {
       */
       static IPv4Address netmask(size_t bits);
 
+      /**
+      * Return the netmask matching a single host
+      * @return an address with all 32 bits set
+      */
       static IPv4Address host_mask() { return netmask(32); }
 
+      /**
+      * Bitwise AND of two addresses, typically used to apply a netmask
+      * @param other the address to AND with
+      * @return the bitwise AND of the two addresses
+      */
       IPv4Address operator&(const IPv4Address& other) const { return IPv4Address(m_ip & other.m_ip); }
 
+      /**
+      * Order two addresses numerically
+      * @return the ordering of this address relative to the other
+      */
       auto operator<=>(const IPv4Address&) const = default;
 
       /// The address as a 32-bit big-endian integer
-      uint32_t value() const { return m_ip; }
+      BOTAN_DEPRECATED("Use IPv4Address::address") uint32_t value() const { return m_ip; }
+
+      /// The address as a 32-bit big-endian integer
+      uint32_t address() const { return m_ip; }
 
       /// The address as four bytes, network-byte-order.
       std::array<uint8_t, 4> to_bytes() const;
@@ -4575,6 +6390,10 @@ class BOTAN_PUBLIC_API(3, 12) IPv4Subnet final {
       *
       * The "/N" suffix is required: bare addresses should be parsed via
       * IPv4Address::from_string and wrapped with IPv4Subnet::host if needed.
+      * The input must already be canonical, such that from_string and
+      * to_string are exact inverses: the prefix length is canonical decimal
+      * ("/8", not "/08") and the host bits are clear ("10.0.0.0/8", not
+      * "10.1.2.3/8").
       *
       * Returns nullopt on parse failure or out-of-range prefix length.
       */
@@ -4601,9 +6420,10 @@ class BOTAN_PUBLIC_API(3, 12) IPv4Subnet final {
       std::string to_string() const;
 
       /**
-      * Bytes for use in a DER-encoded GeneralName iPAddress field:
-      *  - 4 bytes (the address) if is_host() — SAN form per RFC 5280 4.2.1.6.
-      *  - 8 bytes (address || netmask) otherwise — name constraint form per RFC 5280 4.2.1.10.
+      * Bytes for use in a DER-encoded GeneralName iPAddress field.
+      *
+      * If this is an address (is_host returns true) the output is 4 bytes (the address in network order)
+      * Otherwise it is a subnet and the output is 8 bytes (address || netmask)
       */
       std::vector<uint8_t> serialize() const;
 
@@ -4625,10 +6445,27 @@ class IPv4Address;
 */
 class BOTAN_PUBLIC_API(3, 12) IPv6Address final {
    public:
+      /**
+      * Create an address from its 16 byte big-endian encoding
+      * @param ip the bytes of the address
+      */
       explicit IPv6Address(std::span<const uint8_t, 16> ip);
 
+      /**
+      * Create an address from its 16 byte big-endian encoding
+      * @param ip the bytes of the address
+      */
       explicit IPv6Address(std::array<uint8_t, 16> ip) : m_ip(ip) {}
 
+      /**
+      * Convert a string representation of an IPv6 address to IPv6Address.
+      *
+      * Accepts the full form (eight colon-separated hex groups), the
+      * "::"-compressed form (exactly one run of zero groups elided), and
+      * combinations such as "2001:db8::1". The final 32 bits may be given
+      * in IPv4 dotted-decimal form (e.g. "::ffff:192.0.2.1"). Surrounding
+      * brackets and zone identifiers are not accepted.
+      */
       static std::optional<IPv6Address> from_string(std::string_view str);
 
       /**
@@ -4637,14 +6474,38 @@ class BOTAN_PUBLIC_API(3, 12) IPv6Address final {
       */
       static IPv6Address netmask(size_t bits);
 
+      /**
+      * Return the netmask matching a single host
+      * @return an address with all 128 bits set
+      */
       static IPv6Address host_mask() { return netmask(128); }
 
+      /**
+      * Bitwise AND of two addresses, typically used to apply a netmask
+      * @param other the address to AND with
+      * @return the bitwise AND of the two addresses
+      */
       IPv6Address operator&(const IPv6Address& other) const;
 
+      /**
+      * Order two addresses numerically
+      * @return the ordering of this address relative to the other
+      */
       auto operator<=>(const IPv6Address&) const = default;
 
-      std::span<const uint8_t, 16> address() const { return m_ip; }
+      /**
+      * Access the raw bytes of the address
+      * @return the 16 byte big-endian encoding of the address
+      */
+      std::array<uint8_t, 16> address() const { return m_ip; }
 
+      /**
+      * Convert an IPv6 address to the RFC 5952 canonical text form:
+      * lowercase hex, leading zeros within a group suppressed, and the
+      * longest run of two or more zero groups compressed to "::". The
+      * mixed hex/dotted notation is never produced, even for IPv4-mapped
+      * addresses.
+      */
       std::string to_string() const;
 
       /**
@@ -4690,6 +6551,12 @@ class BOTAN_PUBLIC_API(3, 12) IPv6Subnet final {
       *
       * The "/N" suffix is required: bare addresses should be parsed via
       * IPv6Address::from_string and wrapped with IPv6Subnet::host if needed.
+      * The input must already be canonical, such that from_string and
+      * to_string are exact inverses: the address is RFC 5952 form with host
+      * bits clear ("2001:db8::/32") and the prefix length is canonical
+      * decimal ("/32", not "/032"). In particular the IPv4-mapped dotted form
+      * ("::ffff:1.2.3.4/120") is rejected even though IPv6Address::from_string
+      * would accept the address.
       *
       * Returns nullopt on parse failure or out-of-range prefix length.
       */
@@ -4749,7 +6616,6 @@ enum class Certificate_Status_Code : uint16_t {
    OCSP_RESPONSE_GOOD = 1,
    OCSP_SIGNATURE_OK = 2,
    VALID_CRL_CHECKED = 3,
-   OCSP_NO_HTTP = 4,
 
    // Warnings
    FIRST_WARNING_STATUS = 500,
@@ -4759,6 +6625,7 @@ enum class Certificate_Status_Code : uint16_t {
    OCSP_SERVER_NOT_AVAILABLE = 503,
    TRUSTED_CERT_HAS_EXPIRED = 504,
    TRUSTED_CERT_NOT_YET_VALID = 505,
+   OCSP_NO_HTTP = 506,
 
    // Errors
    FIRST_ERROR_STATUS = 1000,
@@ -4795,8 +6662,6 @@ enum class Certificate_Status_Code : uint16_t {
    CERT_CHAIN_TOO_LONG = 4002,
    CA_CERT_NOT_FOR_CERT_ISSUER = 4003,
    NAME_CONSTRAINT_ERROR = 4004,
-   IPADDR_BLOCKS_ERROR = 4011,
-   AS_BLOCKS_ERROR = 4012,
 
    // Revocation errors
    CA_CERT_NOT_FOR_CRL_ISSUER = 4005,
@@ -4805,8 +6670,18 @@ enum class Certificate_Status_Code : uint16_t {
 
    // Other problems
    CERT_NAME_NOMATCH = 4008,
+
+   // Errors in extensions
    UNKNOWN_CRITICAL_EXTENSION = 4009,
+   // TODO(Botan4) remove this code, this is now rejected at parse time
    DUPLICATE_CERT_EXTENSION = 4010,
+   IPADDR_BLOCKS_ERROR = 4011,
+   AS_BLOCKS_ERROR = 4012,
+   NO_REV_AVAIL_INVALID_USE = 4013,
+   INVALID_OCSP_NOCHECK = 4014,
+   CRL_HAS_UNKNOWN_CRITICAL_EXTENSION = 4015,
+
+   // OCSP errors
    OCSP_SIGNATURE_ERROR = 4501,
    OCSP_ISSUER_NOT_FOUND = 4502,
    OCSP_RESPONSE_MISSING_KEYUSAGE = 4503,
@@ -4921,6 +6796,68 @@ class BOTAN_PUBLIC_API(3, 0) Key_Constraints final {
 };
 
 /**
+* X.509 ReasonFlags BIT STRING used by CRLDistributionPoints and
+* IssuingDistributionPoint (RFC 5280 4.2.1.13 / 5.2.5).
+*/
+class BOTAN_PUBLIC_API(3, 13) ReasonFlags final {
+   public:
+      /* RFC 5280 4.2.1.13:
+      *  ReasonFlags ::= BIT STRING {
+      *       unused                  (0),
+      *       keyCompromise           (1),
+      *       cACompromise            (2),
+      *       affiliationChanged      (3),
+      *       superseded              (4),
+      *       cessationOfOperation    (5),
+      *       certificateHold         (6),
+      *       privilegeWithdrawn      (7),
+      *       aACompromise            (8) }
+      */
+      enum Bits : uint16_t /* NOLINT(*-use-enum-class,performance-enum-size) */ {
+         None = 0,
+         KeyCompromise = 1 << 7,
+         CaCompromise = 1 << 6,
+         AffiliationChanged = 1 << 5,
+         Superseded = 1 << 4,
+         CessationOfOperation = 1 << 3,
+         CertificateHold = 1 << 2,
+         PrivilegeWithdrawn = 1 << 1,
+         AaCompromise = 1 << 0,
+      };
+
+      static constexpr uint16_t DefinedReasonBits = KeyCompromise | CaCompromise | AffiliationChanged | Superseded |
+                                                    CessationOfOperation | CertificateHold | PrivilegeWithdrawn |
+                                                    AaCompromise;
+
+      // NOLINTNEXTLINE(*-explicit-conversions)
+      ReasonFlags(ReasonFlags::Bits bits) : ReasonFlags(static_cast<uint16_t>(bits)) {}
+
+      explicit ReasonFlags(uint16_t bits) : m_value(bits) {
+         if((m_value & static_cast<uint16_t>(~DefinedReasonBits)) != 0) {
+            throw Decoding_Error("ReasonFlags contains undefined reason bits");
+         }
+         if(m_value == 0) {
+            throw Decoding_Error("ReasonFlags must have at least one defined reason");
+         }
+      }
+
+      bool operator==(const ReasonFlags&) const = default;
+
+      bool includes(ReasonFlags::Bits other) const { return (m_value & other) == other; }
+
+      bool includes(ReasonFlags other) const { return (m_value & other.m_value) == other.m_value; }
+
+      uint16_t value() const { return m_value; }
+
+   private:
+      uint16_t m_value;
+};
+
+inline ReasonFlags operator|(ReasonFlags::Bits a, ReasonFlags::Bits b) {
+   return ReasonFlags(static_cast<uint16_t>(static_cast<uint16_t>(a) | static_cast<uint16_t>(b)));
+}
+
+/**
 * X.509v2 CRL Reason Code.
 */
 enum class CRL_Code : uint8_t {
@@ -4949,14 +6886,322 @@ enum class Usage_Type : uint8_t {
 
 namespace Botan {
 
+/**
+* URI (RFC 3986 subset)
+*/
+class BOTAN_PUBLIC_API(3, 13) URI final {
+   public:
+      /**
+      * The optional authority component of a URI: a validated DNS name, IPv4
+      * literal, or IPv6 literal, with an optional port.
+      */
+      class BOTAN_PUBLIC_API(3, 13) Authority final {
+         public:
+            /**
+            * A validated DNS name, or a literal IPv4 or IPv6 address.
+            */
+            using Host = std::variant<DNSName, IPv4Address, IPv6Address>;
+
+            /**
+            * Tag for the alternative held by `Host`.
+            */
+            enum class HostKind : uint8_t {
+               DNS = 0,
+               IPv4 = 1,
+               IPv6 = 2,
+            };
+
+            /**
+            * Parse a bare authority "host[:port]" or "[ipv6][:port]".
+            * Returns nullopt for any parse failure.
+            */
+            static std::optional<Authority> from_string(std::string_view raw);
+
+            /**
+            * Parsed host: a DNS name, an IPv4 literal, or an IPv6 literal.
+            */
+            const Host& host() const { return m_host; }
+
+            /**
+            * Which alternative of `host()` is held.
+            */
+            HostKind host_kind() const;
+
+            /**
+            * The host as a string: DNS names and dotted-IPv4 literals are
+            * returned verbatim; IPv6 literals are returned without surrounding
+            * brackets. Lowercased for DNS / IPv4; the IPv6 form is whatever
+            * `IPv6Address::to_string` produces.
+            */
+            std::string host_to_string() const;
+
+            /**
+            * Port if present; nullopt otherwise.
+            */
+            std::optional<uint16_t> port() const { return m_port; }
+
+            /**
+            * The original input that was parsed
+            */
+            const std::string& original_input() const { return m_raw; }
+
+            /**
+            * The userinfo component, preserved verbatim (no case normalization
+            * or pct-decoding) and compared verbatim for identity. nullopt if no
+            * "@" was present; present-but-empty (e.g. "https://@example.com/")
+            * is distinguished from absent.
+            */
+            const std::optional<std::string>& userinfo() const { return m_userinfo; }
+
+            /**
+            * Order two authorities
+            * @param other the authority to compare against
+            * @return the ordering of this authority relative to other
+            */
+            std::strong_ordering operator<=>(const Authority& other) const;
+
+            /**
+            * Compare two authorities
+            * @param other the authority to compare against
+            * @return true if the two authorities are equal
+            */
+            bool operator==(const Authority& other) const;
+
+         private:
+            Authority(std::string raw, std::optional<std::string> userinfo, Host host, std::optional<uint16_t> port) :
+                  m_raw(std::move(raw)), m_userinfo(std::move(userinfo)), m_host(std::move(host)), m_port(port) {}
+
+            std::string m_raw;
+            std::optional<std::string> m_userinfo;
+            Host m_host;
+            std::optional<uint16_t> m_port;
+      };
+
+      /// A validated DNS name, or a literal IPv4 or IPv6 address
+      using Host = Authority::Host;
+
+      /// Tag for the alternative held by `Host`
+      using HostKind = Authority::HostKind;
+
+      /**
+      * Parse a URI, return nullopt on failure
+      */
+      static std::optional<URI> from_string(std::string_view raw);
+
+      /**
+      * Return the scheme, lowercase normalized
+      */
+      const std::string& scheme() const { return m_scheme; }
+
+      /**
+      * Return the parsed URI authority, if this URI has one.
+      */
+      const std::optional<Authority>& authority() const { return m_authority; }
+
+      /**
+      * Return the raw authority component if this URI included one, including
+      * the empty string for URIs such as "ldap:///CN=...".
+      */
+      std::optional<std::string_view> raw_authority() const;
+
+      /**
+      * Return the parsed host, if this URI has an authority.
+      * TODO(C++26) This can return std::optional<const Host&>
+      */
+      std::optional<std::reference_wrapper<const Host>> host() const {
+         return m_authority.has_value() ? std::optional<std::reference_wrapper<const Host>>(m_authority->host())
+                                        : std::nullopt;
+      }
+
+      /**
+      * The path component, preserved verbatim. Begins with "/" when present;
+      * empty if the parsed URI had no path (e.g. "http://example.com" or
+      * "http://example.com?q").
+      */
+      const std::string& path() const { return m_path; }
+
+      /**
+      * The query component, without the leading "?". Nullopt if no "?" was
+      * present; present-but-empty distinguishes "http://h/p?" from
+      * "http://h/p".
+      */
+      const std::optional<std::string>& query() const { return m_query; }
+
+      /**
+      * The fragment component, without the leading "#". Nullopt if no "#"
+      * was present; present-but-empty distinguishes "http://h/p#" from
+      * "http://h/p".
+      */
+      const std::optional<std::string>& fragment() const { return m_fragment; }
+
+      /**
+      * The original input that was parsed.
+      */
+      const std::string& original_input() const { return m_raw; }
+
+      /**
+      * Order two URIs
+      * @param other the URI to compare against
+      * @return the ordering of this URI relative to other
+      */
+      std::strong_ordering operator<=>(const URI& other) const;
+
+      /**
+      * Compare two URIs
+      * @param other the URI to compare against
+      * @return true if the two URIs are equal
+      */
+      bool operator==(const URI& other) const;
+
+      /**
+      * Return a list of URIs (possibly empty) which match the specified scheme
+      * and which contain a non-empty authority
+      */
+      static std::vector<URI> filter_scheme(std::string_view scheme, std::span<const URI> uris);
+
+   private:
+      URI(std::string raw,
+          std::string scheme,
+          std::optional<Authority> authority,
+          std::string path,
+          std::optional<std::string> query,
+          std::optional<std::string> fragment) :
+            m_raw(std::move(raw)),
+            m_scheme(std::move(scheme)),
+            m_authority(std::move(authority)),
+            m_path(std::move(path)),
+            m_query(std::move(query)),
+            m_fragment(std::move(fragment)) {}
+
+      std::string m_raw;
+      std::string m_scheme;
+      std::optional<Authority> m_authority;
+      std::string m_path;
+      std::optional<std::string> m_query;
+      std::optional<std::string> m_fragment;
+};
+
+}  // namespace Botan
+
+namespace Botan {
+
 class X509_Certificate;
 class Public_Key;
+class BigInt;
+class RandomNumberGenerator;
 
 BOTAN_DEPRECATED("Use Key_Constraints::to_string")
 
 inline std::string key_constraints_to_string(Key_Constraints c) {
    return c.to_string();
 }
+
+/**
+* X.509 certificate serial number (RFC 5280 CertificateSerialNumber)
+*
+* Stores the value as the contents octets of the DER INTEGER encoding
+* (two's complement, minimal length), so the sign is preserved and
+* equality on the stored bytes is value equality.
+*
+* RFC 5280 4.1.2.2:
+*    The serial number MUST be a positive integer assigned by the CA to
+*    each certificate.
+* and
+*    Note: Non-conforming CAs may issue certificates with serial numbers
+*    that are negative or zero.  Certificate users SHOULD be prepared to
+*    gracefully handle such certificates.
+*
+* so non-conforming values are representable, and can be detected with
+* is_negative, is_zero and octet_length.
+*/
+class BOTAN_PUBLIC_API(3, 13) X509_Serial_Number final : public ASN1_Object {
+   public:
+      /**
+      * Serial number zero
+      */
+      X509_Serial_Number() : m_contents{0x00} {}
+
+      /**
+      * Create from an integer value
+      */
+      explicit X509_Serial_Number(const BigInt& value);
+
+      /**
+      * Create from an unsigned big-endian encoded integer
+      */
+      static X509_Serial_Number from_bytes(std::span<const uint8_t> bytes);
+
+      /**
+      * Create from the contents octets of a BER INTEGER (big-endian two's
+      * complement). Redundant leading octets are normalized away; an empty
+      * input is rejected.
+      */
+      static X509_Serial_Number from_der_contents(std::span<const uint8_t> contents);
+
+      /**
+      * Generate a serial number suitable for issuing a certificate.
+      *
+      * The result is positive, never zero, and contains 126 bits of output
+      * from the RNG. The topmost bit is cleared, and the 127th bit is set.
+      */
+      static X509_Serial_Number random(RandomNumberGenerator& rng);
+
+      /**
+      * Return true if the serial number is negative
+      *
+      * TODO(Botan4) remove this once negative serial numbers are prohibited
+      */
+      bool is_negative() const;
+
+      /**
+      * Return true if the serial number is the integer zero
+      */
+      bool is_zero() const;
+
+      /**
+      * Number of contents octets in the DER encoding of this value
+      */
+      size_t octet_length() const { return m_contents.size(); }
+
+      /**
+      * True if this serial number satisfies the RFC 5280 4.1.2.2 rules for
+      * conforming CAs: a positive integer of at most 20 octets
+      */
+      bool conforms_to_rfc5280() const { return !is_negative() && !is_zero() && octet_length() <= 20; }
+
+      /**
+      * The contents octets of the DER INTEGER encoding (big-endian two's
+      * complement, minimal length)
+      */
+      std::span<const uint8_t> der_contents() const { return m_contents; }
+
+      /**
+      * The absolute value as unsigned big-endian bytes without leading
+      * zeros. Note this loses the sign, and is empty for a zero serial;
+      * it matches X509_Certificate::serial_number.
+      */
+      std::vector<uint8_t> magnitude() const;
+
+      BigInt to_bigint() const;
+
+      /**
+      * The value in hex, prefixed with '-' if negative
+      */
+      std::string to_string() const;
+
+      void encode_into(DER_Encoder& to) const override;
+      void decode_from(BER_Decoder& from) override;
+
+      bool operator==(const X509_Serial_Number& other) const { return m_contents == other.m_contents; }
+
+      /**
+      * Numeric ordering
+      */
+      std::strong_ordering operator<=>(const X509_Serial_Number& other) const;
+
+   private:
+      std::vector<uint8_t> m_contents;
+};
 
 /**
 * Distinguished Name
@@ -5008,15 +7253,39 @@ class BOTAN_PUBLIC_API(2, 0) X509_DN final : public ASN1_Object {
 
       bool empty() const { return m_rdn.empty(); }
 
+      /**
+      * Number of relative distinguished names (RDNs) in the DN. Note: prior
+      * to multi-AVA RDN support this returned the total number of AVAs; the
+      * two differ only when the DN contains a multi-valued RDN.
+      */
       size_t count() const { return m_rdn.size(); }
 
       std::string to_string() const;
 
       /**
-      * Return the DN components as a vector. Note that the order of the components is
-      * preserved only when using the initializer list constructor.
+      * Parse the string representation of a distinguished name.
+      *
+      * The grammar accepted is a subset of RFC 4514 Section 3, but also accepts
+      * quoted-value forms ala RFC 2253. The entire input must be consumed.
+      *
+      * @param str the string to parse
+      * @return the parsed DN, or nullopt if @p str is not a well-formed DN
       */
-      const std::vector<std::pair<OID, ASN1_String>>& dn_info() const { return m_rdn; }
+      static std::optional<X509_DN> parse(std::string_view str);
+
+      /**
+      * Return the DN as a sequence of RDNs. Each RDN is an X.501
+      * SET OF AttributeTypeAndValue; the inner vector preserves the
+      * decoded order but RDN equality is set-based per RFC 5280 7.1.
+      */
+      const std::vector<std::vector<std::pair<OID, ASN1_String>>>& rdns() const { return m_rdn; }
+
+      /**
+      * Return the DN attributes as a flat sequence of AVAs in decoded order.
+      * RDN structure is not preserved in this view; prefer rdns() to retain it.
+      */
+      BOTAN_DEPRECATED("Use rdns() which preserves RDN structure")
+      std::vector<std::pair<OID, ASN1_String>> dn_info() const;
 
       std::multimap<OID, std::string> get_attributes() const;
       std::multimap<std::string, std::string> contents() const;
@@ -5031,6 +7300,13 @@ class BOTAN_PUBLIC_API(2, 0) X509_DN final : public ASN1_Object {
 
       void add_attribute(const OID& oid, const ASN1_String& val);
 
+      /**
+      * Append a complete RDN. The provided AVAs become one
+      * RelativeDistinguishedName (X.501 SET OF AttributeTypeAndValue).
+      * An empty input is ignored.
+      */
+      void add_rdn(std::vector<std::pair<OID, ASN1_String>> rdn);
+
       static std::string deref_info_field(std::string_view key);
 
       /**
@@ -5042,9 +7318,21 @@ class BOTAN_PUBLIC_API(2, 0) X509_DN final : public ASN1_Object {
       */
       static size_t lookup_ub(const OID& oid);
 
+      /**
+      * Return a canonical byte encoding
+      *
+      * Internal interface, not covered by SemVer
+      */
+      const std::vector<uint8_t>& _canonical_bytes() const { return m_canonical_dn_bits; }
+
    private:
-      std::vector<std::pair<OID, ASN1_String>> m_rdn;
+      void update_canonical_bits();
+
+      // Outer vector: sequence of RDNs. Inner vector: AVAs within
+      // one RDN (X.501 SET OF AttributeTypeAndValue).
+      std::vector<std::vector<std::pair<OID, ASN1_String>>> m_rdn;
       std::vector<uint8_t> m_dn_bits;
+      std::vector<uint8_t> m_canonical_dn_bits;
 };
 
 BOTAN_PUBLIC_API(2, 0) bool operator==(const X509_DN& dn1, const X509_DN& dn2);
@@ -5057,63 +7345,151 @@ It is intended for allowing DNs as keys in std::map and similar containers
 BOTAN_PUBLIC_API(2, 0) bool operator<(const X509_DN& dn1, const X509_DN& dn2);
 
 BOTAN_PUBLIC_API(2, 0) std::ostream& operator<<(std::ostream& out, const X509_DN& dn);
-BOTAN_PUBLIC_API(2, 0) std::istream& operator>>(std::istream& in, X509_DN& dn);
+
+/**
+* Parse the input stream as a DN
+* Prefer X509_DN::parse
+*/
+BOTAN_DEPRECATED_API("Use X509_DN::parse") std::istream& operator>>(std::istream& in, X509_DN& dn);
 
 /**
 * Alternative Name
 */
 class BOTAN_PUBLIC_API(2, 0) AlternativeName final : public ASN1_Object {
    public:
+      /// An "OtherName" GeneralName entry: type-id OID and the inner ANY value as raw BER
+      class OtherNameValue final {
+         public:
+            const OID& oid() const { return m_oid; }
+
+            std::span<const uint8_t> value() const { return m_value; }
+
+            bool operator<(const OtherNameValue& other) const {
+               if(oid() != other.oid()) {
+                  return oid() < other.oid();
+               }
+               return m_value < other.m_value;
+            }
+
+         private:
+            friend class AlternativeName;
+
+            OtherNameValue(const OID& oid, std::vector<uint8_t> value) : m_oid(oid), m_value(std::move(value)) {}
+
+            OtherNameValue(const OID& oid, std::span<const uint8_t> value) :
+                  m_oid(oid), m_value(value.begin(), value.end()) {}
+
+            OID m_oid;
+            std::vector<uint8_t> m_value;
+      };
+
       void encode_into(DER_Encoder& to) const override;
       void decode_from(BER_Decoder& from) override;
 
       /// Create an empty name
       AlternativeName() = default;
 
-      /// Add a URI to this AlternativeName
+      /// Add a URI to this AlternativeName, parsing and validating the input
       void add_uri(std::string_view uri);
 
-      /// Add a URI to this AlternativeName
+      /// Add a previously parsed URI to this AlternativeName
+      void add_uri(URI uri);
+
+      /// Add an email address to this AlternativeName, parsing and validating the input
       void add_email(std::string_view addr);
 
-      /// Add a DNS name to this AlternativeName
+      /// Add a previously parsed email address to this AlternativeName
+      void add_email(EmailAddress addr);
+
+      /// Add a DNS name to this AlternativeName, parsing and validating the input
       void add_dns(std::string_view dns);
+
+      /// Add a previously parsed DNS name to this AlternativeName
+      void add_dns(DNSName dns);
 
       /// Add an "OtherName" identified by object identifier to this AlternativeName
       void add_other_name(const OID& oid, const ASN1_String& value);
+
+      /// Add an "OtherName" with arbitrary inner value, given as raw BER bytes
+      ///
+      /// `value` must be a complete BER-encoded object (tag + length + content)
+      /// representing the inner ANY value of the OtherName.
+      void add_other_name_value(const OID& oid, std::span<const uint8_t> value);
+
+      /// Add a registeredID (RFC 5280 [8])
+      void add_registered_id(const OID& oid);
 
       /// Add a directory name to this AlternativeName
       void add_dn(const X509_DN& dn);
 
       /// Add an IP address to this alternative name
-      void add_ipv4_address(uint32_t ipv4);
+      BOTAN_DEPRECATED("Use variant taking IPv4Address") void add_ipv4_address(uint32_t ipv4) {
+         this->add_ipv4_address(IPv4Address(ipv4));
+      }
 
       /// Add an IP address to this alternative name
-      void add_ipv4_address(IPv4Address ipv4) { add_ipv4_address(ipv4.value()); }
+      void add_ipv4_address(const IPv4Address& ipv4);
 
       /// Add an IPv6 address to this alternative name
       void add_ipv6_address(const IPv6Address& ipv6);
 
       /// Return the set of URIs included in this alternative name
-      const std::set<std::string>& uris() const { return m_uri; }
+      ///
+      /// Deprecated: use uri_names() instead, which exposes the parsed
+      /// URI values. This accessor constructs a copy.
+      BOTAN_DEPRECATED("Use AlternativeName::uri_names") std::set<std::string> uris() const;
+
+      /// Return the set of URIs included in this alternative name
+      const std::set<URI>& uri_names() const { return m_uri; }
 
       /// Return the set of email addresses included in this alternative name
-      const std::set<std::string>& email() const { return m_email; }
+      ///
+      /// Deprecated: use email_addresses() instead, which exposes the
+      /// parsed EmailAddress values. This accessor constructs a copy.
+      BOTAN_DEPRECATED("Use AlternativeName::email_addresses") std::set<std::string> email() const;
+
+      /// Return the set of email addresses included in this alternative name
+      const std::set<EmailAddress>& email_addresses() const { return m_email; }
 
       /// Return the set of DNS names included in this alternative name
-      const std::set<std::string>& dns() const { return m_dns; }
+      ///
+      /// Deprecated: use dns_names() instead, which exposes the parsed
+      /// DNSName values. This accessor constructs a copy.
+      BOTAN_DEPRECATED("Use AlternativeName::dns_names") std::set<std::string> dns() const;
+
+      /// Return the set of DNS names included in this alternative name
+      const std::set<DNSName>& dns_names() const { return m_dns; }
 
       /// Return the set of IPv4 addresses included in this alternative name
-      const std::set<uint32_t>& ipv4_address() const { return m_ipv4_addr; }
+      BOTAN_DEPRECATED("Use ipv4_addresses") std::set<uint32_t> ipv4_address() const;
 
       /// Return the set of IPv6 addresses included in this alternative name
-      const std::set<IPv6Address>& ipv6_address() const { return m_ipv6_addr; }
+      BOTAN_DEPRECATED("Use ipv6_addresses") const std::set<IPv6Address>& ipv6_address() const {
+         return ipv6_addresses();
+      }
 
-      /// Return the set of "other names" included in this alternative name
-      BOTAN_DEPRECATED("Support for other names is deprecated")
+      /// Return the set of IPv4 addresses included in this alternative name
+      const std::set<IPv4Address>& ipv4_addresses() const { return m_ipv4_addrs; }
+
+      /// Return the set of IPv6 addresses included in this alternative name
+      const std::set<IPv6Address>& ipv6_addresses() const { return m_ipv6_addrs; }
+
+      /// Return the set of "other names" whose value was a recognized ASN1_String type
+      BOTAN_DEPRECATED("Use AlternativeName::other_name_values")
       const std::set<std::pair<OID, ASN1_String>>& other_names() const {
          return m_othernames;
       }
+
+      /// Return all "OtherName" entries with their inner ANY value as raw BER
+      const std::set<OtherNameValue>& other_name_values() const { return m_other_name_values; }
+
+      /// Return the set of `SmtpUTF8Mailbox` SAN entries (RFC 9598).
+      ///
+      /// Any such values are also included with their raw encoding in other_name_values
+      const std::set<SmtpUtf8Mailbox>& smtp_utf8_mailboxes() const { return m_smtp_utf8_mailboxes; }
+
+      /// Return the set of registeredID OIDs
+      const std::set<OID>& registered_ids() const { return m_registered_ids; }
 
       /// Return the set of directory names included in this alternative name
       const std::set<X509_DN>& directory_names() const { return m_dn_names; }
@@ -5126,6 +7502,9 @@ class BOTAN_PUBLIC_API(2, 0) AlternativeName final : public ASN1_Object {
 
       /// Return true if this has any names set
       bool has_items() const;
+
+      /// Return true if this alternative name is empty (zero names)
+      bool is_empty() const;
 
       // Old, now deprecated interface follows:
       BOTAN_DEPRECATED("Use AlternativeName::{uris, email, dns, othernames, directory_names}")
@@ -5151,6 +7530,12 @@ class BOTAN_PUBLIC_API(2, 0) AlternativeName final : public ASN1_Object {
 
       BOTAN_DEPRECATED("Use AlternativeName::othernames") std::multimap<OID, ASN1_String> get_othernames() const;
 
+      /**
+      * This returns all of the alternative name DNs combined into a single DN
+      *
+      * This result is not a valid DN. The logic is retained for compatibility,
+      * but this function should not be used. It will be removed in Botan4.
+      */
       BOTAN_DEPRECATED("Use AlternativeName::directory_names") X509_DN dn() const;
 
       BOTAN_DEPRECATED("Use plain constructor plus add_{uri,dns,email,ipv4_address}")
@@ -5160,13 +7545,16 @@ class BOTAN_PUBLIC_API(2, 0) AlternativeName final : public ASN1_Object {
                                             std::string_view ip_address = "");
 
    private:
-      std::set<std::string> m_dns;
-      std::set<std::string> m_uri;
-      std::set<std::string> m_email;
-      std::set<uint32_t> m_ipv4_addr;
-      std::set<IPv6Address> m_ipv6_addr;
+      std::set<DNSName> m_dns;
+      std::set<URI> m_uri;
+      std::set<EmailAddress> m_email;
+      std::set<IPv4Address> m_ipv4_addrs;
+      std::set<IPv6Address> m_ipv6_addrs;
       std::set<X509_DN> m_dn_names;
-      std::set<std::pair<OID, ASN1_String>> m_othernames;
+      std::set<std::pair<OID, ASN1_String>> m_othernames;  // TODO(Botan4) remove this
+      std::set<OtherNameValue> m_other_name_values;
+      std::set<SmtpUtf8Mailbox> m_smtp_utf8_mailboxes;
+      std::set<OID> m_registered_ids;
 };
 
 /**
@@ -5238,7 +7626,18 @@ class BOTAN_PUBLIC_API(2, 0) GeneralName final : public ASN1_Object {
       static GeneralName ipv6_address(const IPv6Address& ipv6);
       static GeneralName ipv6_address(const IPv6Subnet& subnet);
 
-      // Encoding is not implemented
+      /**
+      * Wrap a URI SAN in a GeneralName, this is used for ffi
+      * @warning internal function that may be removed at any time
+      */
+      static GeneralName _uri_san_value(std::string_view full_uri);
+
+      /**
+      * Wrap a DNS SAN in a GeneralName, this is used for ffi
+      * @warning internal function that may be removed at any time
+      */
+      static GeneralName _dns_san_value(std::string_view dns);
+
       void encode_into(DER_Encoder& to) const override;
 
       void decode_from(BER_Decoder& from) override;
@@ -5271,37 +7670,83 @@ class BOTAN_PUBLIC_API(2, 0) GeneralName final : public ASN1_Object {
       BOTAN_DEPRECATED("Deprecated use NameConstraints type") MatchResult matches(const X509_Certificate& cert) const;
 
       bool matches_dns(const std::string& dns_name) const;
+      bool matches_dns(const DNSName& dns_name) const;
+
       bool matches_ipv4(uint32_t ip) const;
 
-      bool matches_ipv4(IPv4Address ip) const { return matches_ipv4(ip.value()); }
+      bool matches_ipv4(const IPv4Address& ip) const { return matches_ipv4(ip.address()); }
 
       bool matches_ipv6(const IPv6Address& ip) const;
       bool matches_dn(const X509_DN& dn) const;
+      bool matches_uri(const URI& uri) const;
+      bool matches_email(const EmailAddress& addr) const;
+      bool matches_email(const SmtpUtf8Mailbox& mailbox) const;
 
    private:
       friend class NameConstraints;
-      static constexpr size_t RFC822_IDX = 0;
-      static constexpr size_t DNS_IDX = 1;
-      static constexpr size_t URI_IDX = 2;
-      static constexpr size_t DN_IDX = 3;
-      static constexpr size_t IPV4_IDX = 4;
-      static constexpr size_t IPV6_IDX = 5;
 
-      using NameVariant = std::variant<std::string, std::string, std::string, X509_DN, IPv4Subnet, IPv6Subnet>;
+      class EmailConstraint final {
+         public:
+            EmailConstraint() = default;
+
+            static std::optional<EmailConstraint> from_string(std::string_view input);
+
+            const std::string& value() const { return m_value; }
+
+            auto operator<=>(const EmailConstraint&) const = default;
+
+         private:
+            explicit EmailConstraint(std::string value) : m_value(std::move(value)) {}
+
+            std::string m_value;
+      };
+
+      class DNSConstraint final {
+         public:
+            DNSConstraint() = default;
+
+            static std::optional<DNSConstraint> from_string(std::string_view input);
+
+            static std::optional<DNSConstraint> from_san_value(std::string_view input);
+
+            const std::string& value() const { return m_value; }
+
+            auto operator<=>(const DNSConstraint&) const = default;
+
+         private:
+            explicit DNSConstraint(std::string value) : m_value(std::move(value)) {}
+
+            std::string m_value;
+      };
+
+      class URIConstraint final {
+         public:
+            URIConstraint() = default;
+
+            static std::optional<URIConstraint> from_string(std::string_view input);
+
+            static std::optional<URIConstraint> from_san_value(std::string_view full_uri);
+
+            const std::string& value() const { return m_value; }
+
+            auto operator<=>(const URIConstraint&) const = default;
+
+         private:
+            explicit URIConstraint(std::string value) : m_value(std::move(value)) {}
+
+            std::string m_value;
+      };
+
+      /*
+      TODO: consider adding OtherConstraint and UnknownConstraint types here and eliminating m_type,
+      using m_name variant choice as the single source of the constraint type
+      */
+      using NameVariant = std::variant<EmailConstraint, DNSConstraint, URIConstraint, X509_DN, IPv4Subnet, IPv6Subnet>;
 
       GeneralName(NameType type, NameVariant name) : m_type(type), m_name(std::move(name)) {}
 
-      template <size_t idx, typename T>
-         requires(idx < 6)
-      static GeneralName make(T&& value) {
-         return {NameType(idx + 1 /* implicit enum relationship! */),
-                 NameVariant(std::in_place_index_t<idx>(), std::forward<T>(value))};
-      }
-
       NameType m_type = NameType::Unknown;
       NameVariant m_name;
-
-      static bool matches_dns(std::string_view name, std::string_view constraint);
 
       /**
       * Partial DN matching according to RFC 5280, Section 7.1, i.e.,
@@ -5328,6 +7773,11 @@ class BOTAN_PUBLIC_API(2, 0) GeneralSubtree final : public ASN1_Object {
       * Creates an empty name constraint.
       */
       BOTAN_DEPRECATED("Deprecated use NameConstraints") GeneralSubtree();
+
+      /**
+      * Creates a name constraint over the given base name.
+      */
+      explicit GeneralSubtree(GeneralName base) : m_base(std::move(base)) {}
 
       void encode_into(DER_Encoder& to) const override;
 
@@ -5396,21 +7846,27 @@ class BOTAN_PUBLIC_API(2, 0) NameConstraints final {
       std::set<GeneralName::NameType> m_excluded_name_types;
 };
 
+enum class Extension_Context : uint8_t { Certificate, CRL, CRL_Entry, OCSP_Request, OCSP_Response };
+
 /**
 * X.509 Certificate Extension
 */
 class BOTAN_PUBLIC_API(2, 0) Certificate_Extension /* NOLINT(*-special-member-functions) */ {
    public:
       /**
+      * Return object identifier for this extension
+      *
       * @return OID representing this extension
       */
       virtual OID oid_of() const = 0;
 
-      /*
-      * @return specific OID name
-      * If possible OIDS table should match oid_name to OIDS, ie
-      * OID::from_string(ext->oid_name()) == ext->oid_of()
-      * Should return empty string if OID is not known
+      /**
+      * Return string identifier for this extension
+      *
+      * If possible the OID table should match oid_name, ie
+      * `OID::from_string(ext->oid_name()) == ext->oid_of()`
+      *
+      * @return specific OID name, or empty if unknown
       */
       virtual std::string oid_name() const = 0;
 
@@ -5418,10 +7874,18 @@ class BOTAN_PUBLIC_API(2, 0) Certificate_Extension /* NOLINT(*-special-member-fu
       * Make a copy of this extension
       * @return copy of this
       */
-
       virtual std::unique_ptr<Certificate_Extension> copy() const = 0;
 
-      /*
+      /**
+      * Query if @param context is an appropriate context for this extension to exist
+      *
+      * Many extensions are used across different types of X509 objects but some
+      * are specific, this allows decoding to reject extensions in an
+      * inappropriate context.
+      */
+      virtual bool is_appropriate_context(Extension_Context context) const = 0;
+
+      /**
       * Callback visited during path validation.
       *
       * An extension can implement this callback to inspect
@@ -5441,7 +7905,7 @@ class BOTAN_PUBLIC_API(2, 0) Certificate_Extension /* NOLINT(*-special-member-fu
                             const std::optional<X509_Certificate>& issuer,
                             const std::vector<X509_Certificate>& cert_path,
                             std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                            size_t pos);
+                            size_t pos) const;
 
       virtual ~Certificate_Extension() = default;
 
@@ -5514,6 +7978,14 @@ class BOTAN_PUBLIC_API(2, 0) Extensions final : public ASN1_Object {
 
       void encode_into(DER_Encoder& to) const override;
       void decode_from(BER_Decoder& from) override;
+      void decode_from(BER_Decoder& from, std::optional<Extension_Context> context);
+
+      /**
+      * Return true if an unrecognized critical extension was encountered
+      * during the most recent decode_from. Resets on each call to decode_from
+      * and is not affected by subsequent calls to add/replace/remove.
+      */
+      bool has_unknown_critical_extension() const { return m_has_unknown_critical_extension; }
 
       /**
       * Adds a new extension to the list.
@@ -5589,11 +8061,22 @@ class BOTAN_PUBLIC_API(2, 0) Extensions final : public ASN1_Object {
       std::vector<std::pair<std::unique_ptr<Certificate_Extension>, bool>> extensions() const;
 
       /**
+      * Invoke the validation callback for each extension.
+      */
+      void validate(const X509_Certificate& subject,
+                    const std::optional<X509_Certificate>& issuer,
+                    const std::vector<X509_Certificate>& cert_path,
+                    std::vector<std::set<Certificate_Status_Code>>& cert_status,
+                    size_t pos) const;
+
+      /**
       * Returns the list of extensions as raw, encoded bytes
       * together with the corresponding criticality flag.
       * Contains all extensions, including any extensions encoded as Unknown_Extension
       */
       std::map<OID, std::pair<std::vector<uint8_t>, bool>> extensions_raw() const;
+
+      size_t count() const { return m_extension_oids.size(); }
 
       Extensions() = default;
 
@@ -5608,7 +8091,8 @@ class BOTAN_PUBLIC_API(2, 0) Extensions final : public ASN1_Object {
    private:
       static std::unique_ptr<Certificate_Extension> create_extn_obj(const OID& oid,
                                                                     bool critical,
-                                                                    const std::vector<uint8_t>& body);
+                                                                    const std::vector<uint8_t>& body,
+                                                                    std::optional<Extension_Context> context);
 
       class BOTAN_UNSTABLE_API Extensions_Info final {
          public:
@@ -5634,6 +8118,7 @@ class BOTAN_PUBLIC_API(2, 0) Extensions final : public ASN1_Object {
 
       std::vector<OID> m_extension_oids;
       std::map<OID, Extensions_Info> m_extension_info;
+      bool m_has_unknown_critical_extension = false;
 };
 
 }  // namespace Botan
@@ -5764,11 +8249,13 @@ class BOTAN_PUBLIC_API(2, 0) X509_Object : public ASN1_Object {
 namespace Botan {
 
 class Extensions;
+class BigInt;
 class X509_Certificate;
 class X509_DN;
 
 class CRL_Entry_Data;
 class CRL_Data;
+class X509_Serial_Number;
 
 /**
 * This class represents CRL entries
@@ -5780,9 +8267,19 @@ class BOTAN_PUBLIC_API(2, 0) CRL_Entry final : public ASN1_Object {
 
       /**
       * Get the serial number of the certificate associated with this entry.
+      *
+      * Note this is the absolute value; the (rare, non-conforming) negative
+      * serial numbers are indistinguishable from their positive counterpart.
+      * Prefer serial() which preserves the sign.
+      *
       * @return certificate's serial number
       */
-      const std::vector<uint8_t>& serial_number() const;
+      BOTAN_DEPRECATED("Prefer CRL_Entry::serial") const std::vector<uint8_t>& serial_number() const;
+
+      /**
+      * Get the serial number of the certificate associated with this entry
+      */
+      const X509_Serial_Number& serial() const;
 
       /**
       * Get the revocation date of the certificate associated with this entry
@@ -5865,16 +8362,28 @@ class BOTAN_PUBLIC_API(2, 0) X509_CRL final : public X509_Object {
       const Extensions& extensions() const;
 
       /**
+      * Return true if either the CRL extensions or any CRL entry extensions
+      * contained a critical extension which we did not recognize.
+      */
+      bool has_unknown_critical_extension() const;
+
+      /**
       * Get the AuthorityKeyIdentifier of this CRL.
       * @return this CRLs AuthorityKeyIdentifier
       */
       const std::vector<uint8_t>& authority_key_id() const;
 
       /**
-      * Get the serial number of this CRL.
-      * @return CRLs serial number
-      */
-      uint32_t crl_number() const;
+       * Get the CRL number of this CRL.
+       * @return CRL number (or nullopt if not set in the extensions)
+       */
+      const std::optional<BigInt>& crl_number_bigint() const;
+
+      /**
+       * Get the CRL number of this CRL.
+       * @return CRL number (or zero if not set in the extensions)
+       */
+      BOTAN_DEPRECATED("Use crl_number_bigint") uint32_t crl_number() const;
 
       /**
       * Get the CRL's thisUpdate value.
@@ -5898,31 +8407,51 @@ class BOTAN_PUBLIC_API(2, 0) X509_CRL final : public X509_Object {
       /**
       * Get the CRL's issuing distribution point
       */
-      BOTAN_DEPRECATED("Use issuing_distribution_points") std::string crl_issuing_distribution_point() const;
+      BOTAN_DEPRECATED("Use issuing_distribution_point_uris") std::string crl_issuing_distribution_point() const;
 
       /**
       * Get the CRL's issuing distribution points
       *
       * See https://www.rfc-editor.org/rfc/rfc5280#section-5.2.5
       */
+      BOTAN_DEPRECATED("Use issuing_distribution_point_uris")
       std::vector<std::string> issuing_distribution_points() const;
 
       /**
-      * Check if this CRL's scope covers the given certificate's CRL distribution points.
+      * Get the CRL's issuing distribution points
       *
-      * Per RFC 5280 6.3.3 step (b)(2), if the certificate has a CRL Distribution Points
-      * extension (4.2.1.13) and this CRL has an Issuing Distribution Point extension
-      * (5.2.5), at least one general name from the IDP must match a general name in one
-      * of the certificate's distribution points.
+      * See https://www.rfc-editor.org/rfc/rfc5280#section-5.2.5
+      */
+      const std::vector<URI>& issuing_distribution_point_uris() const;
+
+      /**
+      * Check whether this CRL's scope covers the given certificate per the
+      * RFC 5280 6.3.3 (b)(1) and (b)(2)(i) name-matching rules.
       *
-      * Returns true if the certificate has no CRLDP extension (this CRL's scope is
-      * unconstrained from the certificate's perspective), or if both extensions are
-      * present and their distribution point names overlap. Returns false otherwise,
-      * including when the certificate has a CRLDP but this CRL has no IDP.
+      * When the certificate has a CRLDP extension (4.2.1.13), iterates each
+      * DistributionPoint and verifies:
+      *   - (b)(1): if the DP includes cRLIssuer, this CRL's issuer must
+      *     appear in that field and this CRL must carry an IDP with
+      *     indirectCRL = TRUE; otherwise this CRL's issuer must match the
+      *     certificate's issuer.
+      *   - (b)(2)(i): if this CRL's IDP names a distributionPoint, that
+      *     name must overlap with the DP's distributionPoint (fullName
+      *     GeneralNames) or, if the DP omits distributionPoint, with
+      *     the DP's cRLIssuer entries.
       *
-      * The nameRelativeToCRLIssuer RDN form of DistributionPointName is not currently
-      * parsed by Botan's CRLDP/IDP decoders, so this comparison operates only on the
-      * fullName (GeneralNames) form.
+      * The trailing paragraph of 6.3.3 supplies an implicit DP: this CRL
+      * is also usable if its issuer matches the certificate's issuer and,
+      * if its IDP names a distributionPoint, that name overlaps with the
+      * certificate's issuer DN or any entry in the certificate's
+      * issuerAltName extension. This implicit DP applies both when the
+      * certificate has no CRLDP and, as a fallback, when it has a CRLDP
+      * but no DistributionPoint matches: a same-issuer complete CRL not
+      * named in any DP is still usable.
+      *
+      * Returns false if none of the above match. Returns true on a name
+      * match. Reason coverage is a separate question; this predicate
+      * intentionally does not consult the DP's reasons field or the IDP's
+      * onlySomeReasons.
       */
       bool has_matching_distribution_point(const X509_Certificate& cert) const;
 
@@ -5985,6 +8514,13 @@ class Extensions;
 class NameConstraints;
 class Public_Key;
 class X509_DN;
+class X509_Serial_Number;
+
+class DNSName;
+class EmailAddress;
+class IPv4Address;
+class IPv6Address;
+class URI;
 
 class X509_Certificate_Data;
 
@@ -6050,6 +8586,13 @@ class BOTAN_PUBLIC_API(2, 0) X509_Certificate : public X509_Object {
       const std::vector<uint8_t>& subject_public_key_bitstring_sha1() const;
 
       /**
+      * Get the SHA-256 bit string of the public key associated with this certificate.
+      * This is used for OCSP among other protocols.
+      * @return hash of subject public key of this certificate
+      */
+      std::span<const uint8_t, 32> subject_public_key_bitstring_sha256() const;
+
+      /**
       * Get the certificate's issuer distinguished name (DN).
       * @return issuer DN of this certificate
       */
@@ -6063,32 +8606,29 @@ class BOTAN_PUBLIC_API(2, 0) X509_Certificate : public X509_Object {
 
       /**
       * Get a value for a specific subject_info parameter name.
-      * @param name the name of the parameter to look up. Possible names include
-      * "X509.Certificate.version", "X509.Certificate.serial",
-      * "X509.Certificate.start", "X509.Certificate.end",
-      * "X509.Certificate.v2.key_id", "X509.Certificate.public_key",
-      * "X509v3.BasicConstraints.path_constraint",
-      * "X509v3.BasicConstraints.is_ca", "X509v3.NameConstraints",
-      * "X509v3.ExtendedKeyUsage", "X509v3.CertificatePolicies",
-      * "X509v3.SubjectKeyIdentifier", "X509.Certificate.serial",
-      * "X520.CommonName", "X520.Organization", "X520.Country",
-      * "RFC822" (Email in SAN) or "PKCS9.EmailAddress" (Email in DN).
-      * @return value(s) of the specified parameter
+      * @param name the name of the parameter to look up.
+      * @return value(s) of the specified parameter or empty if not found
       */
+      BOTAN_DEPRECATED("Use subject_dn and subject_alt_name to access subject names")
       std::vector<std::string> subject_info(std::string_view name) const;
 
       /**
       * Get a value for a specific subject_info parameter name.
-      * @param name the name of the parameter to look up. Possible names are
-      * "X509.Certificate.v2.key_id" or "X509v3.AuthorityKeyIdentifier".
-      * @return value(s) of the specified parameter
+      * @param name the name of the parameter to look up.
+      * @return value(s) of the specified parameter or empty if not found
       */
+      BOTAN_DEPRECATED("Use issuer_dn and issuer_alt_name to access issuer names")
       std::vector<std::string> issuer_info(std::string_view name) const;
 
       /**
       * Raw issuer DN bits
       */
       const std::vector<uint8_t>& raw_issuer_dn() const;
+
+      /**
+      * SHA-1 of Raw issuer DN
+      */
+      std::span<const uint8_t, 20> raw_issuer_dn_sha1() const;
 
       /**
       * SHA-256 of Raw issuer DN
@@ -6099,6 +8639,11 @@ class BOTAN_PUBLIC_API(2, 0) X509_Certificate : public X509_Object {
       * Raw subject DN
       */
       const std::vector<uint8_t>& raw_subject_dn() const;
+
+      /**
+      * SHA-1 of Raw subject DN
+      */
+      std::span<const uint8_t, 20> raw_subject_dn_sha1() const;
 
       /**
       * SHA-256 of Raw subject DN
@@ -6135,15 +8680,32 @@ class BOTAN_PUBLIC_API(2, 0) X509_Certificate : public X509_Object {
 
       /**
       * Get the serial number of this certificate.
+      *
+      * Note this is the absolute value; the (rare, non-conforming) negative
+      * serial numbers are indistinguishable from their positive counterpart.
+      * Prefer serial() which preserves the sign.
+      *
       * @return certificates serial number
       */
       const std::vector<uint8_t>& serial_number() const;
 
       /**
+      * Get the serial number of this certificate
+      */
+      const X509_Serial_Number& serial() const;
+
+      /**
       * Get the serial number's sign
       * @return 1 iff the serial is negative.
       */
-      bool is_serial_negative() const;
+      BOTAN_DEPRECATED("Use serial().is_negative()") bool is_serial_negative() const;
+
+      /**
+      * Return true if revocation status checking of this certificate should be
+      * skipped, as indicated by the presence of either the noRevAvail extension
+      * (RFC 9608) or the ocsp-nocheck extension (RFC 6960).
+      */
+      bool skip_revocation_check() const;
 
       /**
       * Get the DER encoded AuthorityKeyIdentifier of this certificate.
@@ -6309,27 +8871,54 @@ class BOTAN_PUBLIC_API(2, 0) X509_Certificate : public X509_Object {
       /**
       * Return the listed address of an OCSP responder, or empty if not set
       */
-      BOTAN_DEPRECATED("Use ocsp_responders") std::string ocsp_responder() const;
+      BOTAN_DEPRECATED("Use ocsp_responder_uris") std::string ocsp_responder() const;
 
       /**
       * Return the listed addresses of OCSP responders, or empty if not set
       */
-      const std::vector<std::string>& ocsp_responders() const;
+      BOTAN_DEPRECATED("Use ocsp_responder_uris") std::vector<std::string> ocsp_responders() const;
+
+      /**
+      * Return the listed addresses of OCSP responders, or empty if not set
+      */
+      const std::vector<URI>& ocsp_responder_uris() const;
 
       /**
       * Return the listed addresses of ca issuers, or empty if not set
       */
-      std::vector<std::string> ca_issuers() const;
+      BOTAN_DEPRECATED("Use ca_issuer_uris") std::vector<std::string> ca_issuers() const;
+
+      /**
+      * Return the listed addresses of ca issuers, or empty if not set
+      */
+      const std::vector<URI>& ca_issuer_uris() const;
 
       /**
       * Return the CRL distribution point, or empty if not set
       */
-      BOTAN_DEPRECATED("Use crl_distribution_points") std::string crl_distribution_point() const;
+      BOTAN_DEPRECATED("Use crl_distribution_point_uris") std::string crl_distribution_point() const;
 
       /**
       * Return the CRL distribution points, or empty if not set
       */
-      std::vector<std::string> crl_distribution_points() const;
+      BOTAN_DEPRECATED("Use crl_distribution_point_uris") std::vector<std::string> crl_distribution_points() const;
+
+      /**
+      * Return the CRL distribution points, or empty if not set
+      */
+      const std::vector<URI>& crl_distribution_point_uris() const;
+
+      /**
+      * Return all email addresses associated with the subject of this
+      * certificate, in parsed form.
+      *
+      * This combines RFC 822 names from the subjectAltName extension with
+      * email addresses carried in the subject DN's emailAddress attribute
+      * (the latter is the legacy location for subject email, see RFC 5280
+      * 4.2.1.10). DN attribute values that fail to parse as a mailbox are
+      * silently skipped.
+      */
+      std::vector<EmailAddress> subject_email_addresses() const;
 
       /**
       * @return a free-form string describing the certificate
@@ -6383,12 +8972,34 @@ class BOTAN_PUBLIC_API(2, 0) X509_Certificate : public X509_Object {
       /**
       * Check if a certain DNS name matches up with the information in
       * the cert
-      * @param name DNS name to match
       *
-      * Note: this will also accept a dotted quad input, in which case
-      * the SAN for IPv4 addresses will be checked.
+      * The string variant additionally accepts a dotted-quad IPv4 input,
+      * in which case the SAN for IPv4 addresses will be checked. Prefer
+      * the typed overloads for IP and DNS matching.
+      *
+      * @param name DNS name to match
       */
+      BOTAN_DEPRECATED("Use the DNSName / IPv4Address / IPv6Address overload")
       bool matches_dns_name(std::string_view name) const;
+
+      /**
+      * Check whether @p name matches the subject DNS names in this certificate.
+      *
+      * Compares against the dnsName entries in the subjectAltName, with the
+      * RFC 6125 wildcard rules. If the certificate has no SAN at all, falls
+      * back to a wildcard comparison against the subject CN.
+      */
+      bool matches_dns_name(const DNSName& name) const;
+
+      /**
+      * Check whether @p address appears as an iPAddress entry in the subjectAltName.
+      */
+      bool matches_ip(const IPv4Address& address) const;
+
+      /**
+      * Check whether @p address appears as an iPAddress entry in the subjectAltName.
+      */
+      bool matches_ip(const IPv6Address& address) const;
 
       /**
       * Check to certificates for equality.
@@ -6517,6 +9128,8 @@ class BOTAN_PUBLIC_API(2, 0) Certificate_Store /* NOLINT(*-special-member-functi
       * @param issuer_dn the distinguished name of the issuer
       * @param serial_number the certificate's serial number
       * @return a matching certificate or nullopt otherwise
+      *
+      * TODO(Botan4) change this to use X509_Serial_Number
       */
       virtual std::optional<X509_Certificate> find_cert_by_issuer_dn_and_serial_number(
          const X509_DN& issuer_dn, std::span<const uint8_t> serial_number) const = 0;
@@ -6640,67 +9253,342 @@ class BOTAN_PUBLIC_API(2, 0) Certificate_Store_In_Memory final : public Certific
 
 namespace Botan {
 
+/**
+* Abstract interface to a SQL database
+*/
 class BOTAN_PUBLIC_API(2, 0) SQL_Database /* NOLINT(*-special-member-functions) */ {
    public:
+      /**
+      * An error occurred while interacting with the database
+      */
       class BOTAN_PUBLIC_API(2, 0) SQL_DB_Error final : public Exception {
          public:
+            /**
+            * Create a SQL_DB_Error
+            * @param what a description of the failure
+            */
             explicit SQL_DB_Error(std::string_view what) : Exception("SQL database", what), m_rc(0) {}
 
+            /**
+            * Create a SQL_DB_Error
+            * @param what a description of the failure
+            * @param rc the database specific result code
+            */
             SQL_DB_Error(std::string_view what, int rc) : Exception("SQL database", what), m_rc(rc) {}
 
+            /**
+            * Return the error type of this exception
+            * @return the error type of this exception
+            */
             ErrorType error_type() const noexcept override { return ErrorType::DatabaseError; }
 
+            /**
+            * Return the database specific result code
+            * @return the result code passed at construction, or 0
+            */
             int error_code() const noexcept override { return m_rc; }
 
          private:
             int m_rc;
       };
 
+      /**
+      * A prepared SQL statement
+      */
       class BOTAN_PUBLIC_API(2, 0) Statement /* NOLINT(*-special-member-functions) */ {
          public:
-            /* Bind statement parameters */
+            /**
+            * Bind a string to a statement parameter
+            * @param column the 1-based index of the parameter
+            * @param str the value to bind
+            */
             virtual void bind(int column, std::string_view str) = 0;
 
+            /**
+            * Bind an integer to a statement parameter
+            * @param column the 1-based index of the parameter
+            * @param i the value to bind
+            */
             virtual void bind(int column, size_t i) = 0;
 
+            /**
+            * Bind a timestamp to a statement parameter
+            * @param column the 1-based index of the parameter
+            * @param time the value to bind
+            */
             virtual void bind(int column, std::chrono::system_clock::time_point time) = 0;
 
+            /**
+            * Bind a blob to a statement parameter
+            * @param column the 1-based index of the parameter
+            * @param blob the value to bind
+            */
             virtual void bind(int column, const std::vector<uint8_t>& blob) = 0;
 
+            /**
+            * Bind a blob to a statement parameter
+            * @param column the 1-based index of the parameter
+            * @param data the value to bind
+            * @param len length of data in bytes
+            */
             virtual void bind(int column, const uint8_t* data, size_t len) = 0;
 
-            // TODO(Botan4) change this return type to a span
-            /* Get output */
-            virtual std::pair<const uint8_t*, size_t> get_blob(int column) = 0;
+            /**
+            * Bind SQL NULL to a statement parameter
+            * @param column the 1-based index of the parameter
+            */
+            virtual void bind_null(int column) = 0;
 
-            virtual std::string get_str(int column) = 0;
+            /**
+            * Read a blob from the current result row
+            * @param column the 0-based index of the column
+            * @return the blob value, valid until the next call to step
+            */
+            virtual std::span<const uint8_t> get_blob(int column) = 0;
 
+            /**
+            * Read a string from the current result row
+            * @param column the 0-based index of the column
+            * @return the string value, or nullopt if the column value was NULL
+            */
+            virtual std::optional<std::string> get_str(int column) = 0;
+
+            /**
+            * Read an integer from the current result row
+            * @param column the 0-based index of the column
+            * @return the integer value
+            */
             virtual size_t get_size_t(int column) = 0;
 
-            /* Run to completion */
+            /**
+            * Run the statement to completion
+            * @return the number of result rows which were stepped over
+            */
             virtual size_t spin() = 0;
 
-            /* Maybe update */
+            /**
+            * Advance to the next result row
+            * @return true if a row is available, false once the results are exhausted
+            */
             virtual bool step() = 0;
 
             virtual ~Statement() = default;
       };
 
-      /*
+      /**
       * Create a new statement for execution.
       * Use ?1, ?2, ?3, etc for parameters to set later with bind
+      *
+      * @param base_sql the SQL text of the statement
+      * @return the prepared statement
       */
       virtual std::shared_ptr<Statement> new_statement(std::string_view base_sql) const = 0;
 
+      /**
+      * Prepare a "SELECT <columns> FROM <table> [WHERE <where>] [LIMIT <limit>]"
+      * statement. `where` is the body of the WHERE clause (e.g.
+      * "id = ?1 AND name = ?2"); pass an empty string for no WHERE clause. Use
+      * ?1, ?2, ... for bound parameters. Virtual so backends can override if helpful.
+      *
+      * @param columns the columns to select
+      * @param table the table to select from
+      * @param where the body of the WHERE clause, or empty for no WHERE clause
+      * @param limit the maximum number of rows, or nullopt for no limit
+      * @return the prepared statement
+      */
+      virtual std::shared_ptr<Statement> select(std::string_view columns,
+                                                std::string_view table,
+                                                std::string_view where = {},
+                                                std::optional<size_t> limit = std::nullopt) const;
+
+      /**
+      * Prepare an upsert (insert-or-replace) statement for the given columns of
+      * the given table. The returned statement expects placeholders ?1..?N
+      * bound in the order the columns were given. The list must include every
+      * column of the table's primary key; backends that need the key/value
+      * distinction (e.g. Postgres ON CONFLICT) derive it by introspecting the
+      * schema.
+      *
+      * @param table the table to upsert into
+      * @param columns the columns to write, in placeholder order
+      * @return the prepared statement
+      */
+      virtual std::shared_ptr<Statement> upsert(std::string_view table,
+                                                std::initializer_list<std::string_view> columns) const = 0;
+
+      /**
+      * Count the rows of a table
+      * @param table_name the table to count
+      * @return the number of rows in the table
+      */
       virtual size_t row_count(std::string_view table_name) = 0;
 
-      virtual void create_table(std::string_view table_schema) = 0;
+      /**
+      * The supported column types
+      */
+      enum class Column_Type : uint8_t {
+         Blob,
+         String,
+         Integer,
+      };
 
+      /**
+      * The name, type and constraints of one column of a table
+      */
+      class Column {
+         public:
+            /**
+            * Declare a column
+            * @param name the name of the column
+            * @param type the type of the column
+            */
+            Column(std::string name, Column_Type type) : m_name(std::move(name)), m_type(type) {}
+
+            /**
+            * Mark this column as part of the primary key
+            * @return reference to this
+            */
+            Column& primary_key() {
+               m_primary_key = true;
+               return *this;
+            }
+
+            /**
+            * Mark this column as NOT NULL
+            * @return reference to this
+            */
+            Column& not_null() {
+               m_not_null = true;
+               return *this;
+            }
+
+            /**
+            * Mark this column as UNIQUE
+            * @return reference to this
+            */
+            Column& unique() {
+               m_unique = true;
+               return *this;
+            }
+
+            /**
+            * Query the column name
+            * @return the name of the column
+            */
+            const std::string& name() const { return m_name; }
+
+            /**
+            * Query the column type
+            * @return the type of the column
+            */
+            Column_Type type() const { return m_type; }
+
+            /**
+            * Query whether this column is part of the primary key
+            * @return true if primary_key was called
+            */
+            bool is_primary_key() const { return m_primary_key; }
+
+            /**
+            * Query whether this column is NOT NULL
+            * @return true if not_null was called
+            */
+            bool is_not_null() const { return m_not_null; }
+
+            /**
+            * Query whether this column is UNIQUE
+            * @return true if unique was called
+            */
+            bool is_unique() const { return m_unique; }
+
+         private:
+            std::string m_name;
+            Column_Type m_type;
+            bool m_primary_key = false;
+            bool m_not_null = false;
+            bool m_unique = false;
+      };
+
+      /**
+      * The name and columns of a table, used with create_table
+      */
+      class Table_Schema {
+         public:
+            /**
+            * Declare a table
+            * @param name the name of the table
+            * @param columns the columns of the table
+            */
+            Table_Schema(std::string name, std::vector<Column> columns) :
+                  m_name(std::move(name)), m_columns(std::move(columns)) {}
+
+            /**
+            * Only create the table if it does not already exist
+            * @return reference to this
+            */
+            Table_Schema& if_not_exists() {
+               m_if_not_exists = true;
+               return *this;
+            }
+
+            /**
+            * Query the table name
+            * @return the name of the table
+            */
+            const std::string& name() const { return m_name; }
+
+            /**
+            * Query the columns of the table
+            * @return the columns of the table
+            */
+            const std::vector<Column>& columns() const { return m_columns; }
+
+            /**
+            * Query whether creation is conditional
+            * @return true if if_not_exists was called
+            */
+            bool is_if_not_exists() const { return m_if_not_exists; }
+
+         private:
+            std::string m_name;
+            std::vector<Column> m_columns;
+            bool m_if_not_exists = false;
+      };
+
+      /**
+      * Create a table
+      * @param schema the name and columns of the table to create
+      */
+      virtual void create_table(const Table_Schema& schema) = 0;
+
+      /**
+      * Count the rows modified by the most recently executed statement
+      * @return the number of rows inserted, updated or deleted
+      */
       virtual size_t rows_changed_by_last_statement() = 0;
 
+      /**
+      * Prepare and run a statement to completion
+      * @param sql the SQL text to execute
+      * @return the number of result rows which were stepped over
+      */
       virtual size_t exec(std::string_view sql) { return new_statement(sql)->spin(); }
 
+      /**
+      * Query whether this database may be used from multiple threads
+      * @return true if the implementation is threadsafe
+      */
       virtual bool is_threadsafe() const { return false; }
+
+      /**
+      * Return true if the given name seems to be valid as the name for a table
+      *
+      * Default implementation accepts non-empty [a-zA-Z0-9_]
+      *
+      * @param table the name to check
+      * @return true if the name is acceptable as a table name
+      */
+      virtual bool is_valid_table_name(std::string_view table) const;
 
       virtual ~SQL_Database() = default;
 };
@@ -6807,7 +9695,11 @@ class BOTAN_PUBLIC_API(2, 0) Certificate_Store_In_SQL : public Certificate_Store
    private:
       RandomNumberGenerator& m_rng;
       std::shared_ptr<SQL_Database> m_database;
-      std::string m_prefix;
+
+      std::string m_db_cert_table;
+      std::string m_db_keys_table;
+      std::string m_db_crls_table;
+
       std::string m_password;
 };
 
@@ -6853,6 +9745,7 @@ enum class Cipher_Dir : uint8_t {
 class BOTAN_PUBLIC_API(2, 0) Cipher_Mode : public SymmetricAlgorithm {
    public:
       /**
+      * List the providers available for a given cipher mode
       * @return list of available providers for this algorithm, empty if not available
       * @param algo_spec algorithm name
       */
@@ -6881,19 +9774,19 @@ class BOTAN_PUBLIC_API(2, 0) Cipher_Mode : public SymmetricAlgorithm {
                                                           std::string_view provider = "");
 
    protected:
-      /*
+      /**
       * Prepare for processing a message under the specified nonce
       */
       virtual void start_msg(const uint8_t nonce[], size_t nonce_len) = 0;
 
-      /*
+      /**
       * Process message blocks
       * Input must be a multiple of update_granularity.
       */
       virtual size_t process_msg(uint8_t msg[], size_t msg_len) = 0;
 
-      /*
-      * Finishes a message
+      /**
+      * Finish processing a message
       */
       virtual void finish_msg(secure_vector<uint8_t>& final_block, size_t offset = 0) = 0;
 
@@ -6947,6 +9840,12 @@ class BOTAN_PUBLIC_API(2, 0) Cipher_Mode : public SymmetricAlgorithm {
       */
       size_t process(std::span<uint8_t> msg) { return this->process_msg(msg.data(), msg.size()); }
 
+      /**
+      * Process message blocks in place
+      * @param msg the message to be processed
+      * @param msg_len length of msg in bytes
+      * @return bytes written in-place
+      */
       size_t process(uint8_t msg[], size_t msg_len) { return this->process_msg(msg, msg_len); }
 
       /**
@@ -7049,17 +9948,20 @@ class BOTAN_PUBLIC_API(2, 0) Cipher_Mode : public SymmetricAlgorithm {
       virtual bool requires_entire_message() const { return false; }
 
       /**
+      * Return the smallest input accepted by finish()
       * @return required minimum size to finalize() - may be any
       *         length larger than this.
       */
       virtual size_t minimum_final_size() const = 0;
 
       /**
+      * Return the default nonce length for this mode
       * @return the default size for a nonce
       */
       virtual size_t default_nonce_length() const = 0;
 
       /**
+      * Test if a nonce length is valid for this mode
       * @return true iff nonce_len is a valid length for the nonce
       */
       virtual bool valid_nonce_length(size_t nonce_len) const = 0;
@@ -7079,11 +9981,13 @@ class BOTAN_PUBLIC_API(2, 0) Cipher_Mode : public SymmetricAlgorithm {
       bool authenticated() const { return this->tag_size() > 0; }
 
       /**
+      * Return the authentication tag length of this mode
       * @return the size of the authentication tag used (in bytes)
       */
       virtual size_t tag_size() const { return 0; }
 
       /**
+      * Return the name of the provider implementing this object
       * @return provider information about this implementation. Default is "base",
       * might also return "sse2", "avx2", "openssl", or some other arbitrary string.
       */
@@ -7201,6 +10105,11 @@ class BOTAN_PUBLIC_API(2, 0) DataSource {
       */
       [[nodiscard]] virtual size_t read(uint8_t out[], size_t length) = 0;
 
+      /**
+      * Test whether at least n further bytes can be read
+      * @param n the number of bytes required
+      * @return true if at least n bytes remain
+      */
       virtual bool check_available(size_t n) = 0;
 
       /**
@@ -7259,15 +10168,25 @@ class BOTAN_PUBLIC_API(2, 0) DataSource {
       size_t discard_next(size_t N);
 
       /**
-      * @return number of bytes read so far.
+      * Count the bytes consumed from this source so far
+      * @return number of bytes read so far
       */
       virtual size_t get_bytes_read() const = 0;
 
+      /// Default constructor
       DataSource() = default;
+
       virtual ~DataSource() = default;
+
+      // No copy available
       DataSource(const DataSource&) = delete;
-      DataSource(DataSource&&) = default;
       DataSource& operator=(const DataSource&) = delete;
+
+      /// Move constructor
+      DataSource(DataSource&&) = default;
+
+      /// Move assignment
+      /// @return reference to this
       DataSource& operator=(DataSource&&) = default;
 };
 
@@ -7276,9 +10195,34 @@ class BOTAN_PUBLIC_API(2, 0) DataSource {
 */
 class BOTAN_PUBLIC_API(2, 0) DataSource_Memory final : public DataSource {
    public:
+      /**
+      * Read from the source, advancing the internal offset
+      * @param buf the byte array to write the result to
+      * @param length the length of the byte array buf
+      * @return length in bytes that was actually read and put into buf
+      */
       size_t read(uint8_t buf[], size_t length) override;
+
+      /**
+      * Read from the source without modifying the internal offset
+      * @param buf the byte array to write the result to
+      * @param length the length of the byte array buf
+      * @param offset the offset into the stream to read at
+      * @return length in bytes that was actually read and put into buf
+      */
       size_t peek(uint8_t buf[], size_t length, size_t offset) const override;
+
+      /**
+      * Test whether at least n further bytes can be read
+      * @param n the number of bytes required
+      * @return true if at least n bytes remain
+      */
       bool check_available(size_t n) override;
+
+      /**
+      * Test whether the source still has data that can be read
+      * @return true if there is no more data to read, false otherwise
+      */
       bool end_of_data() const override;
 
       /**
@@ -7292,7 +10236,7 @@ class BOTAN_PUBLIC_API(2, 0) DataSource_Memory final : public DataSource {
       * @param in the byte array to read from
       * @param length the length of the byte array
       */
-      DataSource_Memory(const uint8_t in[], size_t length) : m_source(in, in + length), m_offset(0) {}
+      DataSource_Memory(const uint8_t in[], size_t length) : DataSource_Memory(std::span<const uint8_t>(in, length)) {}
 
       /**
       * Construct a memory source that reads from a secure_vector
@@ -7304,14 +10248,23 @@ class BOTAN_PUBLIC_API(2, 0) DataSource_Memory final : public DataSource {
       * Construct a memory source that reads from an arbitrary byte buffer
       * @param in the MemoryRegion to read from
       */
-      explicit DataSource_Memory(std::span<const uint8_t> in) : m_source(in.begin(), in.end()), m_offset(0) {}
+      explicit DataSource_Memory(std::span<const uint8_t> in) : m_offset(0) {
+         // Guard against forming a range from a null pointer (eg an empty span)
+         if(!in.empty()) {
+            m_source.assign(in.begin(), in.end());
+         }
+      }
 
       /**
       * Construct a memory source that reads from a std::vector
       * @param in the MemoryRegion to read from
       */
-      explicit DataSource_Memory(const std::vector<uint8_t>& in) : m_source(in.begin(), in.end()), m_offset(0) {}
+      explicit DataSource_Memory(const std::vector<uint8_t>& in) : DataSource_Memory(std::span<const uint8_t>(in)) {}
 
+      /**
+      * Count the bytes consumed from this source so far
+      * @return number of bytes read so far
+      */
       size_t get_bytes_read() const override { return m_offset; }
 
    private:
@@ -7324,12 +10277,47 @@ class BOTAN_PUBLIC_API(2, 0) DataSource_Memory final : public DataSource {
 */
 class BOTAN_PUBLIC_API(2, 0) DataSource_Stream final : public DataSource {
    public:
+      /**
+      * Read from the source, advancing the internal offset
+      * @param buf the byte array to write the result to
+      * @param length the length of the byte array buf
+      * @return length in bytes that was actually read and put into buf
+      */
       size_t read(uint8_t buf[], size_t length) override;
+
+      /**
+      * Read from the source without modifying the internal offset
+      * @param buf the byte array to write the result to
+      * @param length the length of the byte array buf
+      * @param offset the offset into the stream to read at
+      * @return length in bytes that was actually read and put into buf
+      */
       size_t peek(uint8_t buf[], size_t length, size_t offset) const override;
+
+      /**
+      * Test whether at least n further bytes can be read
+      * @param n the number of bytes required
+      * @return true if at least n bytes remain
+      */
       bool check_available(size_t n) override;
+
+      /**
+      * Test whether the source still has data that can be read
+      * @return true if there is no more data to read, false otherwise
+      */
       bool end_of_data() const override;
+
+      /**
+      * Return the id of this data source
+      * @return a string representing the id of this data source
+      */
       std::string id() const override;
 
+      /**
+      * Construct a Stream-Based DataSource from an istream
+      * @param in the stream to read from
+      * @param id an identifier for this source, used in error messages
+      */
       BOTAN_FUTURE_EXPLICIT DataSource_Stream(std::istream& in, std::string_view id = "<std::istream>");
 
 #if defined(BOTAN_TARGET_OS_HAS_FILESYSTEM)
@@ -7341,6 +10329,7 @@ class BOTAN_PUBLIC_API(2, 0) DataSource_Stream final : public DataSource {
       BOTAN_FUTURE_EXPLICIT DataSource_Stream(std::string_view filename, bool use_binary = false);
 #endif
 
+      // Stream data sources are not copyable or moveable
       DataSource_Stream(const DataSource_Stream&) = delete;
       DataSource_Stream(DataSource_Stream&&) = delete;
       DataSource_Stream& operator=(const DataSource_Stream&) = delete;
@@ -7348,6 +10337,10 @@ class BOTAN_PUBLIC_API(2, 0) DataSource_Stream final : public DataSource {
 
       ~DataSource_Stream() override;
 
+      /**
+      * Count the bytes consumed from this source so far
+      * @return number of bytes read so far
+      */
       size_t get_bytes_read() const override { return m_total_read; }
 
    private:
@@ -7369,6 +10362,9 @@ class BigInt;
 */
 class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
    public:
+      /**
+      * Callback type invoked with each chunk of encoded output
+      */
       typedef std::function<void(const uint8_t[], size_t)> append_fn;
 
       /**
@@ -7396,6 +10392,12 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
       */
       BOTAN_FUTURE_EXPLICIT DER_Encoder(append_fn append) : m_append_output(std::move(append)) {}
 
+      /**
+      * Return the encoded contents
+      *
+      * Throws Invalid_State if any constructed encoding is still open, or if
+      * this encoder was constructed with an output vector or append function.
+      */
       secure_vector<uint8_t> get_contents();
 
       /**
@@ -7407,23 +10409,76 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
       */
       BOTAN_DEPRECATED("Use DER_Encoder(vector) instead") std::vector<uint8_t> get_contents_unlocked();
 
+      /**
+      * Start a constructed encoding with the given tagging. Must be closed with
+      * end_cons(). Contents are emitted in the order they are encoded.
+      *
+      * @param type_tag the type tag of the constructed encoding
+      * @param class_tag the class tag of the constructed encoding
+      */
       DER_Encoder& start_cons(ASN1_Type type_tag, ASN1_Class class_tag);
 
+      /**
+      * Start a SEQUENCE. Must be closed with end_cons().
+      */
       DER_Encoder& start_sequence() { return start_cons(ASN1_Type::Sequence, ASN1_Class::Universal); }
 
+      /**
+      * Start a SET/SET OF. Must be closed with end_cons(). Contents are DER sorted.
+      */
       DER_Encoder& start_set() { return start_cons(ASN1_Type::Set, ASN1_Class::Universal); }
 
+      /**
+       * Start a SET/SET OF with an alternate tag. Contents are still DER sorted.
+       *
+       * @param type_tag the type tag of the constructed encoding
+       * @param class_tag the class tag of the constructed encoding
+       */
+      DER_Encoder& start_set(ASN1_Type type_tag, ASN1_Class class_tag);
+
+      /**
+      * Start a SET/SET OF with a context specific tag. Contents are still DER sorted.
+      *
+      * @param tag the context specific tag number
+      */
+      DER_Encoder& start_set(uint32_t tag) { return start_set(ASN1_Type(tag), ASN1_Class::ContextSpecific); }
+
+      /**
+      * Start an IMPLICIT context specific constructed encoding
+      *
+      * @param tag the context specific tag number
+      */
       DER_Encoder& start_context_specific(uint32_t tag) {
          return start_cons(ASN1_Type(tag), ASN1_Class::ContextSpecific);
       }
 
+      /**
+      * Start an EXPLICIT context specific constructed encoding
+      *
+      * @param tag the context specific tag number
+      */
       DER_Encoder& start_explicit_context_specific(uint32_t tag) {
          return start_cons(ASN1_Type(tag), ASN1_Class::ExplicitContextSpecific);
       }
 
+      /**
+      * Finish the innermost open constructed encoding
+      *
+      * Throws Invalid_State if no constructed encoding is open.
+      */
       DER_Encoder& end_cons();
 
+      /**
+      * Start a context specific constructed encoding, an alias for
+      * start_context_specific()
+      *
+      * @param type_tag the context specific tag number
+      */
       DER_Encoder& start_explicit(uint16_t type_tag);
+
+      /**
+      * Finish the innermost open constructed encoding, an alias for end_cons()
+      */
       DER_Encoder& end_explicit();
 
       /**
@@ -7431,39 +10486,154 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
       */
       DER_Encoder& raw_bytes(const uint8_t val[], size_t len);
 
+      /**
+      * Insert raw bytes directly into the output stream
+      */
       DER_Encoder& raw_bytes(std::span<const uint8_t> val) { return raw_bytes(val.data(), val.size()); }
 
+      /**
+      * Encode a NULL
+      */
       DER_Encoder& encode_null();
-      DER_Encoder& encode(bool b);
-      DER_Encoder& encode(size_t s);
-      DER_Encoder& encode(const BigInt& n);
-      DER_Encoder& encode(const uint8_t val[], size_t len, ASN1_Type real_type);
 
-      template <typename Alloc>
-      DER_Encoder& encode(const std::vector<uint8_t, Alloc>& vec, ASN1_Type real_type) {
-         return encode(vec.data(), vec.size(), real_type);
+      /**
+      * Encode a BOOLEAN
+      */
+      DER_Encoder& encode(bool b);
+
+      /**
+      * Encode an INTEGER
+      */
+      DER_Encoder& encode(size_t s);
+
+      /**
+      * Encode an INTEGER
+      */
+      DER_Encoder& encode(const BigInt& n);
+
+      /**
+      * Encode an OCTET STRING or an octet aligned BIT STRING
+      *
+      * @param val the contents of the object
+      * @param real_type either ASN1_Type::OctetString or ASN1_Type::BitString
+      */
+      DER_Encoder& encode(std::span<const uint8_t> val, ASN1_Type real_type);
+
+      /**
+       * Encode a BIT STRING, with `bits` not including the initial unused-bits octet.
+       */
+      DER_Encoder& encode_bitstring(std::span<const uint8_t> bits,
+                                    size_t unused_bits = 0,
+                                    ASN1_Type type_tag = ASN1_Type::BitString,
+                                    ASN1_Class class_tag = ASN1_Class::Universal);
+
+      /**
+      * Encode a BIT STRING
+      *
+      * @param bits the value to encode
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      */
+      DER_Encoder& encode_bitstring(const ASN1_BitString& bits,
+                                    ASN1_Type type_tag = ASN1_Type::BitString,
+                                    ASN1_Class class_tag = ASN1_Class::Universal);
+
+      /**
+      * Encode a BIT STRING with no unused bits
+      *
+      * @param bytes the bits to encode
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      */
+      DER_Encoder& encode_octet_aligned_bitstring(std::span<const uint8_t> bytes,
+                                                  ASN1_Type type_tag = ASN1_Type::BitString,
+                                                  ASN1_Class class_tag = ASN1_Class::Universal) {
+         return encode_bitstring(bytes, 0, type_tag, class_tag);
       }
 
+      /**
+      * Helper for encoding BIT STRING elements that are actually bit sets, rather
+      * than being OCTET STRINGS with the wrong type.
+      */
+      DER_Encoder& encode_named_bitstring(uint64_t bits,
+                                          size_t width,
+                                          ASN1_Type type_tag = ASN1_Type::BitString,
+                                          ASN1_Class class_tag = ASN1_Class::Universal);
+
+      /**
+      * Encode an OCTET STRING or an octet aligned BIT STRING
+      *
+      * @param val the contents of the object
+      * @param len the length of val in bytes
+      * @param real_type either ASN1_Type::OctetString or ASN1_Type::BitString
+      */
+      DER_Encoder& encode(const uint8_t val[], size_t len, ASN1_Type real_type) {
+         return this->encode(std::span{val, len}, real_type);
+      }
+
+      /**
+      * Encode a BOOLEAN with an IMPLICIT tagging
+      *
+      * @param b the value to encode
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      */
       DER_Encoder& encode(bool b, ASN1_Type type_tag, ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
+      /**
+      * Encode an INTEGER with an IMPLICIT tagging
+      *
+      * @param s the value to encode
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      */
       DER_Encoder& encode(size_t s, ASN1_Type type_tag, ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
+      /**
+      * Encode an INTEGER with an IMPLICIT tagging
+      *
+      * @param n the value to encode
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      */
       DER_Encoder& encode(const BigInt& n, ASN1_Type type_tag, ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
-      DER_Encoder& encode(const uint8_t v[],
-                          size_t len,
+      /**
+      * Encode an OCTET STRING or octet aligned BIT STRING with an IMPLICIT tagging
+      *
+      * @param value the contents of the object
+      * @param real_type either ASN1_Type::OctetString or ASN1_Type::BitString
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      */
+      DER_Encoder& encode(std::span<const uint8_t> value,
                           ASN1_Type real_type,
                           ASN1_Type type_tag,
                           ASN1_Class class_tag = ASN1_Class::ContextSpecific);
 
-      template <typename Alloc>
-      DER_Encoder& encode(const std::vector<uint8_t, Alloc>& bytes,
+      /**
+      * Encode an OCTET STRING or octet aligned BIT STRING with an IMPLICIT tagging
+      *
+      * @param v the contents of the object
+      * @param len the length of v in bytes
+      * @param real_type either ASN1_Type::OctetString or ASN1_Type::BitString
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      */
+      DER_Encoder& encode(const uint8_t v[],
+                          size_t len,
                           ASN1_Type real_type,
                           ASN1_Type type_tag,
-                          ASN1_Class class_tag) {
-         return encode(bytes.data(), bytes.size(), real_type, type_tag, class_tag);
+                          ASN1_Class class_tag = ASN1_Class::ContextSpecific) {
+         return encode(std::span{v, len}, real_type, type_tag, class_tag);
       }
 
+      /**
+      * Encode a value unless it is equal to the DEFAULT
+      *
+      * @param value the value to encode
+      * @param default_value the value which should be omitted
+      */
       template <typename T>
       BOTAN_DEPRECATED("Use the version that takes a std::optional")
       DER_Encoder& encode_optional(const T& value, const T& default_value) {
@@ -7473,6 +10643,11 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
          return (*this);
       }
 
+      /**
+      * Encode a value if it is set, otherwise write nothing
+      *
+      * @param value the value to encode
+      */
       template <typename T>
       DER_Encoder& encode_optional(const std::optional<T>& value) {
          if(value) {
@@ -7481,6 +10656,11 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
          return (*this);
       }
 
+      /**
+      * Encode each element of the vector in turn
+      *
+      * @param values the values to encode
+      */
       template <typename T>
       DER_Encoder& encode_list(const std::vector<T>& values) {
          for(size_t i = 0; i != values.size(); ++i) {
@@ -7489,13 +10669,18 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
          return (*this);
       }
 
-      /*
+      /**
       * Request for an object to encode itself to this stream
+      *
+      * @param obj the object to encode
       */
       DER_Encoder& encode(const ASN1_Object& obj);
 
-      /*
-      * Conditionally write some values to the stream
+      /**
+      * Write the contents of another encoder to this stream if pred is true
+      *
+      * @param pred if false nothing is written
+      * @param enc the encoder whose contents are written
       */
       DER_Encoder& encode_if(bool pred, DER_Encoder& enc) {
          if(pred) {
@@ -7504,6 +10689,12 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
          return (*this);
       }
 
+      /**
+      * Encode an object if pred is true
+      *
+      * @param pred if false nothing is written
+      * @param obj the object to encode
+      */
       DER_Encoder& encode_if(bool pred, const ASN1_Object& obj) {
          if(pred) {
             encode(obj);
@@ -7511,6 +10702,12 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
          return (*this);
       }
 
+      /**
+      * Encode an INTEGER if pred is true
+      *
+      * @param pred if false nothing is written
+      * @param num the value to encode
+      */
       DER_Encoder& encode_if(bool pred, size_t num) {
          if(pred) {
             encode(num);
@@ -7518,6 +10715,12 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
          return (*this);
       }
 
+      /**
+      * Encode a BOOLEAN if pred is true
+      *
+      * @param pred if false nothing is written
+      * @param num the value to encode
+      */
       DER_Encoder& encode_if(bool pred, bool num) {
          if(pred) {
             encode(num);
@@ -7525,25 +10728,87 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
          return (*this);
       }
 
+      /**
+      * Write a tag and length header followed by the given contents
+      *
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      * @param rep the contents of the object
+      * @param length the length of rep in bytes
+      */
       DER_Encoder& add_object(ASN1_Type type_tag, ASN1_Class class_tag, const uint8_t rep[], size_t length);
 
+      /**
+      * Write a tag and length header followed by the given contents
+      *
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      * @param rep the contents of the object
+      */
       DER_Encoder& add_object(ASN1_Type type_tag, ASN1_Class class_tag, std::span<const uint8_t> rep) {
          return add_object(type_tag, class_tag, rep.data(), rep.size());
       }
 
+      /**
+      * Write a tag and length header followed by the given contents
+      *
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      * @param rep the contents of the object
+      */
       DER_Encoder& add_object(ASN1_Type type_tag, ASN1_Class class_tag, const std::vector<uint8_t>& rep) {
          return add_object(type_tag, class_tag, std::span{rep});
       }
 
+      /**
+      * Write a tag and length header followed by the given contents
+      *
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      * @param rep the contents of the object
+      */
       DER_Encoder& add_object(ASN1_Type type_tag, ASN1_Class class_tag, const secure_vector<uint8_t>& rep) {
          return add_object(type_tag, class_tag, std::span{rep});
       }
 
+      /**
+      * Write a tag and length header followed by the given contents
+      *
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      * @param str the contents of the object
+      */
       DER_Encoder& add_object(ASN1_Type type_tag, ASN1_Class class_tag, std::string_view str);
 
+      /**
+      * Write a tag and length header followed by a single byte of contents
+      *
+      * @param type_tag the type tag to encode with
+      * @param class_tag the class tag to encode with
+      * @param val the contents of the object
+      */
       DER_Encoder& add_object(ASN1_Type type_tag, ASN1_Class class_tag, uint8_t val);
 
+      /**
+       * Encode `value` and emit just its body bytes under an IMPLICIT
+       * `type_tag`/`class_tag` (e.g. for `[N] IMPLICIT OBJECT IDENTIFIER` where the
+       * body is an OID's arc bytes but the tag must be `[N]`). The
+       * primitive/constructed bit is copied from `value`.
+       */
+      template <typename T>
+      DER_Encoder& encode_implicit(const T& value,
+                                   ASN1_Type type_tag,
+                                   ASN1_Class class_tag = ASN1_Class::ContextSpecific) {
+         std::vector<uint8_t> tlv;
+         DER_Encoder(tlv).encode(value);
+         return add_object_tlv(type_tag, class_tag, std::move(tlv));
+      }
+
    private:
+      DER_Encoder& add_object_tlv(ASN1_Type type_tag, ASN1_Class class_tag, std::vector<uint8_t> tlv);
+
+      DER_Encoder& start_cons(ASN1_Type type_tag, ASN1_Class class_tag, bool sort_contents);
+
       class DER_Sequence final {
          public:
             uint32_t tag_of() const;
@@ -7554,17 +10819,19 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
 
             void add_bytes(const uint8_t hdr[], size_t hdr_len, const uint8_t val[], size_t val_len);
 
-            DER_Sequence(ASN1_Type type_tag, ASN1_Class class_tag);
+            DER_Sequence(ASN1_Type type_tag, ASN1_Class class_tag, bool sort_contents);
 
             DER_Sequence(DER_Sequence&& seq) noexcept :
                   m_type_tag(seq.m_type_tag),
                   m_class_tag(seq.m_class_tag),
+                  m_sort_contents(seq.m_sort_contents),
                   m_contents(std::move(seq.m_contents)),
                   m_set_contents(std::move(seq.m_set_contents)) {}
 
             DER_Sequence& operator=(DER_Sequence&& seq) noexcept {
                std::swap(m_type_tag, seq.m_type_tag);
                std::swap(m_class_tag, seq.m_class_tag);
+               std::swap(m_sort_contents, seq.m_sort_contents);
                std::swap(m_contents, seq.m_contents);
                std::swap(m_set_contents, seq.m_set_contents);
                return (*this);
@@ -7577,6 +10844,7 @@ class BOTAN_PUBLIC_API(2, 0) DER_Encoder final {
          private:
             ASN1_Type m_type_tag;
             ASN1_Class m_class_tag;
+            bool m_sort_contents;
             secure_vector<uint8_t> m_contents;
             std::vector<secure_vector<uint8_t>> m_set_contents;
       };
@@ -7613,6 +10881,10 @@ enum class EC_Group_Encoding : uint8_t {
    EC_DOMPAR_ENC_OID = NamedCurve
 };
 
+/**
+* This enum indicates the format used to encode an elliptic curve point
+* as an octet string, as specified in SEC1 section 2.3.3
+*/
 enum class EC_Point_Format : uint8_t {
    Uncompressed = 0,
    Compressed = 1,
@@ -7640,19 +10912,48 @@ class EC_Point;
 class EC_Group_Data;
 class EC_AffinePoint_Data;
 
-/// Elliptic Curve Point in Affine Representation
-///
+/**
+* Elliptic Curve Point in Affine Representation
+*/
 class BOTAN_PUBLIC_API(3, 6) EC_AffinePoint final {
    public:
       /// Point deserialization. Throws if wrong length or not a valid point
       ///
-      /// This accepts SEC1 compressed or uncompressed formats
+      /// This accepts SEC1 compressed or uncompressed formats. It also (for
+      /// backward compatibility) accepts the deprecated hybrid format, and
+      /// the encoding of the identity element as a single zero byte. Prefer
+      /// deserialize_compressed or deserialize_uncompressed, which accept
+      /// exactly one well-defined encoding.
       EC_AffinePoint(const EC_Group& group, std::span<const uint8_t> bytes);
 
       /// Point deserialization. Returns nullopt if wrong length or not a valid point
       ///
-      /// This accepts SEC1 compressed or uncompressed formats
+      /// This accepts SEC1 compressed or uncompressed formats. It also (for
+      /// backward compatibility) accepts the deprecated hybrid format, and
+      /// the encoding of the identity element as a single zero byte. Prefer
+      /// deserialize_compressed or deserialize_uncompressed, which accept
+      /// exactly one well-defined encoding.
       static std::optional<EC_AffinePoint> deserialize(const EC_Group& group, std::span<const uint8_t> bytes);
+
+      /// Point deserialization, accepting only the SEC1 compressed format
+      ///
+      /// The encoding must be exactly 1 + field_element_bytes long, with a
+      /// header byte of either 0x02 or 0x03. All other encodings (including
+      /// the uncompressed, hybrid, and identity encodings) are rejected.
+      ///
+      /// Returns nullopt if the encoding was rejected or not a valid point
+      static std::optional<EC_AffinePoint> deserialize_compressed(const EC_Group& group,
+                                                                  std::span<const uint8_t> bytes);
+
+      /// Point deserialization, accepting only the SEC1 uncompressed format
+      ///
+      /// The encoding must be exactly 1 + 2*field_element_bytes long, with a
+      /// header byte of 0x04. All other encodings (including the compressed,
+      /// hybrid, and identity encodings) are rejected.
+      ///
+      /// Returns nullopt if the encoding was rejected or not a valid point
+      static std::optional<EC_AffinePoint> deserialize_uncompressed(const EC_Group& group,
+                                                                    std::span<const uint8_t> bytes);
 
       /// Create a point from a pair (x,y) of integers
       ///
@@ -7825,17 +11126,47 @@ class BOTAN_PUBLIC_API(3, 6) EC_AffinePoint final {
          return bytes;
       }
 
+      /**
+      * Test if two points are equal
+      * @param other the point to compare against
+      * @return true if the two points are equal
+      */
       bool operator==(const EC_AffinePoint& other) const;
 
+      /**
+      * Test if two points are unequal
+      * @param other the point to compare against
+      * @return true if the two points are not equal
+      */
       bool operator!=(const EC_AffinePoint& other) const { return !(*this == other); }
 
       /// Return an encoding depending on the requested format
       std::vector<uint8_t> serialize(EC_Point_Format format) const;
 
+      /**
+      * Copy constructor
+      * @param other the point to copy
+      */
       EC_AffinePoint(const EC_AffinePoint& other);
+
+      /**
+      * Move constructor
+      * @param other the point to move from
+      */
       EC_AffinePoint(EC_AffinePoint&& other) noexcept;
 
+      /**
+      * Copy assignment
+      * @param other the point to copy
+      * @return reference to this
+      */
       EC_AffinePoint& operator=(const EC_AffinePoint& other);
+
+      /**
+      * Move assignment
+      * @param other the point to move from
+      * @return reference to this
+      */
       EC_AffinePoint& operator=(EC_AffinePoint&& other) noexcept;
 
 #if defined(BOTAN_HAS_LEGACY_EC_POINT)
@@ -7850,11 +11181,23 @@ class BOTAN_PUBLIC_API(3, 6) EC_AffinePoint final {
       EC_Point to_legacy_point() const;
 #endif
 
+      /**
+      * Multiply by the group generator returning a complete point
+      * @param scalar the scalar to multiply the generator by
+      * @param rng a random number generator, used for blinding
+      * @return the resulting point
+      */
       BOTAN_DEPRECATED("Use version without workspace arg")
       static EC_AffinePoint g_mul(const EC_Scalar& scalar, RandomNumberGenerator& rng, std::vector<BigInt>& /*ws*/) {
          return EC_AffinePoint::g_mul(scalar, rng);
       }
 
+      /**
+      * Multiply a point by a scalar returning a complete point
+      * @param scalar the scalar to multiply this point by
+      * @param rng a random number generator, used for blinding
+      * @return the resulting point
+      */
       BOTAN_DEPRECATED("Use version without workspace arg")
       EC_AffinePoint mul(const EC_Scalar& scalar, RandomNumberGenerator& rng, std::vector<BigInt>& /*ws*/) const {
          return this->mul(scalar, rng);
@@ -7869,10 +11212,19 @@ class BOTAN_PUBLIC_API(3, 6) EC_AffinePoint final {
 
       ~EC_AffinePoint();
 
+      /**
+      * For internal use only
+      */
       const EC_AffinePoint_Data& _inner() const { return inner(); }
 
+      /**
+      * For internal use only
+      */
       static EC_AffinePoint _from_inner(std::unique_ptr<EC_AffinePoint_Data> inner);
 
+      /**
+      * For internal use only
+      */
       const std::shared_ptr<const EC_Group_Data>& _group() const;
 
    private:
@@ -7977,6 +11329,15 @@ class BOTAN_PUBLIC_API(3, 6) EC_Scalar final {
       */
       static EC_Scalar gk_x_mod_order(const EC_Scalar& scalar, RandomNumberGenerator& rng);
 
+      /**
+      * Compute the elliptic curve scalar multiplication (g*k) where g is the
+      * standard base point on the curve. Then extract the x coordinate of
+      * the resulting point, and reduce it modulo the group order.
+      *
+      * @param scalar the scalar k to multiply the base point by
+      * @param rng a random number generator, used for blinding
+      * @return the x coordinate of g*k reduced modulo the group order
+      */
       BOTAN_DEPRECATED("Use version without workspace arg")
       static EC_Scalar
          gk_x_mod_order(const EC_Scalar& scalar, RandomNumberGenerator& rng, std::vector<BigInt>& /*ws*/) {
@@ -8105,16 +11466,45 @@ class BOTAN_PUBLIC_API(3, 6) EC_Scalar final {
 
       friend bool operator==(const EC_Scalar& x, const EC_Scalar& y) { return x.is_eq(y); }
 
+      /**
+      * Copy constructor
+      * @param other the scalar to copy
+      */
       EC_Scalar(const EC_Scalar& other);
+
+      /**
+      * Move constructor
+      * @param other the scalar to move from
+      */
       EC_Scalar(EC_Scalar&& other) noexcept;
 
+      /**
+      * Copy assignment
+      * @param other the scalar to copy
+      * @return reference to this
+      */
       EC_Scalar& operator=(const EC_Scalar& other);
+
+      /**
+      * Move assignment
+      * @param other the scalar to move from
+      * @return reference to this
+      */
       EC_Scalar& operator=(EC_Scalar&& other) noexcept;
 
       ~EC_Scalar();
 
+      /**
+      * For internal use only
+      * @return the inner representation of this scalar
+      */
       const EC_Scalar_Data& _inner() const { return inner(); }
 
+      /**
+      * For internal use only
+      * @param inner the inner representation to wrap
+      * @return a scalar wrapping the provided inner representation
+      */
       static EC_Scalar _from_inner(std::unique_ptr<EC_Scalar_Data> inner);
 
    private:
@@ -8271,6 +11661,11 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
       */
       explicit EC_Group(std::span<const uint8_t> der);
 
+      /**
+      * Decode a DER encoded ECC domain parameter set
+      * @param der the bytes of the DER encoding
+      * @param der_len the length of der in bytes
+      */
       BOTAN_DEPRECATED("Use EC_Group(std::span)")
       EC_Group(const uint8_t der[], size_t der_len) : EC_Group(std::span{der, der_len}) {}
 
@@ -8305,6 +11700,11 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
       */
       static EC_Group from_name(std::string_view name);
 
+      /**
+      * Initialize an EC group from the PEM/ASN.1 encoding
+      * @param pem the PEM encoded group
+      * @return the decoded group
+      */
       BOTAN_DEPRECATED("Use EC_Group::from_PEM") static EC_Group EC_Group_from_PEM(std::string_view pem) {
          return EC_Group::from_PEM(pem);
       }
@@ -8326,12 +11726,34 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
 
       ~EC_Group();
 
+      /**
+      * Copy constructor
+      */
       EC_Group(const EC_Group&);
+
+      /**
+      * Move constructor
+      */
       EC_Group(EC_Group&&) = default;
 
+      /**
+      * Copy assignment
+      * @return reference to this
+      */
       EC_Group& operator=(const EC_Group&);
+
+      /**
+      * Move assignment
+      * @return reference to this
+      */
       EC_Group& operator=(EC_Group&&) = default;
 
+      /**
+      * Return true if this group has been initialized with domain parameters
+      *
+      * This is only false for groups created using the deprecated default
+      * constructor.
+      */
       bool initialized() const { return (m_data != nullptr); }
 
       /**
@@ -8340,8 +11762,17 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
        */
       bool verify_group(RandomNumberGenerator& rng, bool strong = false) const;
 
+      /**
+      * Test if two groups describe the same curve
+      * @param other the group to compare against
+      * @return true if the two groups are equal
+      */
       bool operator==(const EC_Group& other) const;
 
+      /**
+      * Return how this group was created, eg from a builtin table or by
+      * decoding an external encoding
+      */
       EC_Group_Source source() const;
 
       /**
@@ -8435,7 +11866,9 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
       */
       size_t get_order_bytes() const;
 
-      /// Table for computing g*x + h*y
+      /**
+      * Table for computing g*x + h*y
+      */
       class BOTAN_PUBLIC_API(3, 6) Mul2Table final {
          public:
             /**
@@ -8480,14 +11913,41 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
                                              const EC_Scalar& y) const;
 
             ~Mul2Table();
+
             Mul2Table(const Mul2Table& other) = delete;
-            Mul2Table(Mul2Table&& other) noexcept;
             Mul2Table& operator=(const Mul2Table& other) = delete;
+
+            /**
+            * Move constructor
+            * @param other the table to move from
+            */
+            Mul2Table(Mul2Table&& other) noexcept;
+
+            /**
+            * Move assignment
+            * @param other the table to move from
+            * @return reference to this
+            */
             Mul2Table& operator=(Mul2Table&& other) noexcept;
 
          private:
             std::unique_ptr<EC_Mul2Table_Data> m_tbl;
       };
+
+      /**
+      * Return true if RFC 9380 hash to curve is supported for this group
+      * with the specified hash function
+      *
+      * If this returns true then EC_AffinePoint::hash_to_curve_ro and
+      * EC_AffinePoint::hash_to_curve_nu will work for this group and hash.
+      *
+      * This checks that the hash function is available and satisfies the
+      * RFC 9380 requirements for this group (in particular that the hash
+      * output is at least twice the target security level), that the curve
+      * implementation supports hash to curve, and that the required message
+      * expansion (currently just expand_message_xmd) is included in the build.
+      */
+      bool hash_to_curve_supported(std::string_view hash_fn) const;
 
       /**
       * Return the OID of these domain parameters
@@ -8539,30 +11999,47 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
       */
       bool has_cofactor() const;
 
-      /*
+      /**
+      * Look up the parameters of a builtin group by OID
+      *
       * For internal use only
+      *
+      * @param oid the OID of the group to look up
+      * @return the group data, or nullptr if the OID is not a known group
+      *
       * TODO(Botan4): Move this to an internal header
       */
       static std::shared_ptr<EC_Group_Data> EC_group_info(const OID& oid);
 
-      /*
+      /**
+      * Discard all cached and application registered group data
+      *
       * For internal use only
       *
       * @warning this invalidates pointers and can cause memory corruption.
       * This function exists only to be called in tests.
       *
+      * @return the number of groups which were discarded
+      *
       * TODO(Botan4): Move this to an internal header
       */
       static size_t clear_registered_curve_data();
 
-      /*
+      /**
+      * Identify a builtin group by its order
+      *
       * For internal use only
+      *
+      * @param order the group order to look up
+      * @return the OID of the matching group, or an empty OID if none matches
+      *
       * TODO(Botan4): Move this to an internal header
       */
       static OID EC_group_identity_from_order(const BigInt& order);
 
-      /*
+      /**
       * For internal use only
+      * @return the inner representation of this group
       */
       const std::shared_ptr<EC_Group_Data>& _data() const { return m_data; }
 
@@ -8584,6 +12061,14 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
          return EC_AffinePoint(*this, std::span{bits, len}).to_legacy_point();
       }
 
+      /**
+      * OS2ECP (Octet String To Elliptic Curve Point)
+      *
+      * Deserialize an encoded point. Verifies that the point is on the curve.
+      *
+      * @param encoded_point the encoded point
+      * @return the decoded point
+      */
       BOTAN_DEPRECATED("Use EC_AffinePoint::deserialize")
       EC_Point OS2ECP(std::span<const uint8_t> encoded_point) const {
          return EC_AffinePoint(*this, encoded_point).to_legacy_point();
@@ -8763,22 +12248,28 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
       */
       BOTAN_DEPRECATED("Deprecated no replacement") bool a_is_zero() const { return get_a().is_zero(); }
 
-      /*
+      /**
       * Reduce x modulo the order
+      * @param x the value to reduce
+      * @return x reduced modulo the group order
       */
       BOTAN_DEPRECATED("Use EC_Scalar") BigInt mod_order(const BigInt& x) const {
          return EC_Scalar::from_bytes_mod_order(*this, x.serialize()).to_bigint();
       }
 
-      /*
+      /**
       * Return inverse of x modulo the order
+      * @param x the value to invert
+      * @return the multiplicative inverse of x modulo the group order
       */
       BOTAN_DEPRECATED("Use EC_Scalar") BigInt inverse_mod_order(const BigInt& x) const {
          return EC_Scalar::from_bigint(*this, x).invert().to_bigint();
       }
 
-      /*
+      /**
       * Reduce (x*x) modulo the order
+      * @param x the value to square
+      * @return (x*x) reduced modulo the group order
       */
       BOTAN_DEPRECATED("Use EC_Scalar") BigInt square_mod_order(const BigInt& x) const {
          auto xs = EC_Scalar::from_bigint(*this, x);
@@ -8786,8 +12277,11 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
          return xs.to_bigint();
       }
 
-      /*
+      /**
       * Reduce (x*y) modulo the order
+      * @param x the first factor
+      * @param y the second factor
+      * @return (x*y) reduced modulo the group order
       */
       BOTAN_DEPRECATED("Use EC_Scalar") BigInt multiply_mod_order(const BigInt& x, const BigInt& y) const {
          auto xs = EC_Scalar::from_bigint(*this, x);
@@ -8795,8 +12289,12 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
          return (xs * ys).to_bigint();
       }
 
-      /*
+      /**
       * Reduce (x*y*z) modulo the order
+      * @param x the first factor
+      * @param y the second factor
+      * @param z the third factor
+      * @return (x*y*z) reduced modulo the group order
       */
       BOTAN_DEPRECATED("Use EC_Scalar")
       BigInt multiply_mod_order(const BigInt& x, const BigInt& y, const BigInt& z) const {
@@ -8806,14 +12304,21 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
          return (xs * ys * zs).to_bigint();
       }
 
-      /*
+      /**
       * Return x^3 modulo the order
+      * @param x the value to cube
+      * @return (x*x*x) reduced modulo the group order
       */
       BOTAN_DEPRECATED("Deprecated no replacement") BigInt cube_mod_order(const BigInt& x) const {
          auto xs = EC_Scalar::from_bigint(*this, x);
          return (xs * xs * xs).to_bigint();
       }
 
+      /**
+      * Return the size in bytes of a point encoded in the given format
+      * @param format the point encoding format
+      * @return the length of the encoding in bytes
+      */
       BOTAN_DEPRECATED("Just serialize the point and check") size_t point_size(EC_Point_Format format) const {
          // Hybrid and standard format are (x,y), compressed is y, +1 format byte
          if(format == EC_Point_Format::Compressed) {
@@ -8846,6 +12351,12 @@ class BOTAN_PUBLIC_API(2, 0) EC_Group final {
       bool m_explicit_encoding = false;
 };
 
+/**
+* Test if two groups describe different curves
+* @param lhs the first group
+* @param rhs the second group
+* @return true if the two groups are not equal
+*/
 inline bool operator!=(const EC_Group& lhs, const EC_Group& rhs) {
    return !(lhs == rhs);
 }
@@ -8957,11 +12468,11 @@ class BOTAN_PUBLIC_API(3, 0) Asymmetric_Key /* NOLINT(*special-member-functions)
        * Generate another (cryptographically independent) key pair using the
        * same algorithm parameters as this key. This is most useful for algorithms
        * that support PublicKeyOperation::KeyAgreement to generate a fitting ephemeral
-       * key pair. For other key types it might throw Not_Implemented.
+       * key pair. For other key types it might throw `Not_Implemented`.
        */
       virtual std::unique_ptr<Private_Key> generate_another(RandomNumberGenerator& rng) const = 0;
 
-      /*
+      /**
       * Test the key values for consistency.
       *
       * Note this function is always "best effort"; for many algorithms it is
@@ -9014,28 +12525,32 @@ class BOTAN_PUBLIC_API(2, 0) Public_Key : public virtual Asymmetric_Key {
       BOTAN_DEPRECATED("Use object_identifier") OID get_oid() const { return this->object_identifier(); }
 
       /**
-      * @return X.509 AlgorithmIdentifier for this key
+      * Return the X.509 AlgorithmIdentifier for this key
       */
       virtual AlgorithmIdentifier algorithm_identifier() const = 0;
 
       /**
-      * @return binary public key bits, with no additional encoding
+      * Return the raw public key bits (algorithm specific) with no extra encoding
       *
       * For key agreements this is an alias for PK_Key_Agreement_Key::public_value.
       *
-      * Note: some algorithms (for example RSA) do not have an obvious encoding
+      * @note some algorithms (for example RSA) do not have an obvious encoding
       * for this value due to having many different values, and thus throw
-      * Not_Implemented when invoking this method.
+      * `Not_Implemented` when invoking this method.
       */
       virtual std::vector<uint8_t> raw_public_key_bits() const = 0;
 
       /**
-      * @return BER encoded public key bits
+      * Return the subject public key encoding of this public key
+      *
+      * @note this excludes the parameters field and may not be reliably decodable
       */
       virtual std::vector<uint8_t> public_key_bits() const = 0;
 
       /**
-      * @return X.509 subject key encoding for this key object
+      * Return the SubjectPublicKeyInfo encoding of this public key
+      *
+      * This is the subjectPublicKey field plus the algorithm-specific parameters
       */
       std::vector<uint8_t> subject_public_key() const;
 
@@ -9147,16 +12662,19 @@ class BOTAN_PUBLIC_API(2, 0) Public_Key : public virtual Asymmetric_Key {
 class BOTAN_PUBLIC_API(2, 0) Private_Key : public virtual Public_Key {
    public:
       /**
-      * @return BER encoded private key bits
+      * Return the PKCS8 private key encoding
+      *
+      * @note this encoding omits the outer PKCS8 algorithm identifiers and will
+      * not be portably decodable on its own. Prefer `private_key_info`.
       */
       virtual secure_vector<uint8_t> private_key_bits() const = 0;
 
       /**
-      * @return binary private key bits, with no additional encoding
+      * Return the binary private key bits, with no additional encoding
       *
-      * Note: some algorithms (for example RSA) do not have an obvious encoding
+      * @note some algorithms (for example RSA) do not have an obvious encoding
       * for this value due to having many different values, and thus not implement
-      * this function. The default implementation throws Not_Implemented
+      * this function. The default implementation throws `Not_Implemented`
       */
       virtual secure_vector<uint8_t> raw_private_key_bits() const;
 
@@ -9169,13 +12687,15 @@ class BOTAN_PUBLIC_API(2, 0) Private_Key : public virtual Public_Key {
       virtual std::unique_ptr<Public_Key> public_key() const = 0;
 
       /**
-      * @return PKCS #8 private key encoding for this key object
+      * Return PKCS #8 private key encoding for this key object
       */
       secure_vector<uint8_t> private_key_info() const;
 
       /**
-      * @return PKCS #8 AlgorithmIdentifier for this key
-      * Might be different from the X.509 identifier, but normally is not
+      * Return the PKCS #8 AlgorithmIdentifier for this key
+      *
+      * @note normally this is the same as the public key identifier, but a few
+      * oddball algorithms use a different value
       */
       virtual AlgorithmIdentifier pkcs8_algorithm_identifier() const { return algorithm_identifier(); }
 
@@ -9270,8 +12790,8 @@ class BOTAN_PUBLIC_API(2, 0) Private_Key : public virtual Public_Key {
 */
 class BOTAN_PUBLIC_API(2, 0) PK_Key_Agreement_Key : public virtual Private_Key {
    public:
-      /*
-      * @return public component of this key
+      /**
+      * Return the public value used to effect key exchange
       */
       virtual std::vector<uint8_t> public_value() const = 0;
 };
@@ -9415,6 +12935,9 @@ class BOTAN_PUBLIC_API(2, 0) EC_PublicKey : public virtual Public_Key {
       */
       EC_PublicKey(const AlgorithmIdentifier& alg_id, std::span<const uint8_t> key_bits);
 
+      static const AlgorithmIdentifier& assert_algorithm_identifier(const AlgorithmIdentifier& alg_id,
+                                                                    std::string_view alg_name);
+
       EC_PublicKey() = default;
 
       std::shared_ptr<const EC_PublicKey_Data> m_public_key;                // NOLINT(*non-private-member-variable*)
@@ -9541,7 +13064,7 @@ class BOTAN_PUBLIC_API(2, 0) ECDSA_PublicKey : public virtual EC_PublicKey {
       * @param key_bits DER encoded public key bits
       */
       ECDSA_PublicKey(const AlgorithmIdentifier& alg_id, std::span<const uint8_t> key_bits) :
-            EC_PublicKey(alg_id, key_bits) {}
+            EC_PublicKey(assert_algorithm_identifier(alg_id, "ECDSA"), key_bits) {}
 
       /**
       * Recover a public key from a signature/msg pair
@@ -9595,7 +13118,7 @@ class BOTAN_PUBLIC_API(2, 0) ECDSA_PrivateKey final : public ECDSA_PublicKey,
       * @param key_bits ECPrivateKey bits
       */
       ECDSA_PrivateKey(const AlgorithmIdentifier& alg_id, std::span<const uint8_t> key_bits) :
-            EC_PrivateKey(alg_id, key_bits) {}
+            EC_PrivateKey(assert_algorithm_identifier(alg_id, "ECDSA"), key_bits) {}
 
       /**
       * Create a private key from a given secret @p x
@@ -9658,12 +13181,14 @@ class BOTAN_PUBLIC_API(2, 0) HashFunction : public Buffered_Computation {
       static std::unique_ptr<HashFunction> create_or_throw(std::string_view algo_spec, std::string_view provider = "");
 
       /**
+      * List the providers available for a given hash
       * @return list of available providers for this algorithm, empty if not available
       * @param algo_spec algorithm name
       */
       static std::vector<std::string> providers(std::string_view algo_spec);
 
       /**
+      * Return the name of the provider implementing this object
       * @return provider information about this implementation. Default is "base",
       * might also return "sse2", "avx2", "openssl", or some other arbitrary string.
       */
@@ -9675,14 +13200,25 @@ class BOTAN_PUBLIC_API(2, 0) HashFunction : public Buffered_Computation {
       virtual void clear() = 0;
 
       /**
+      * Return the name of this hash function
       * @return the hash function name
       */
       virtual std::string name() const = 0;
 
       /**
+      * Return the internal block size of this hash function
       * @return hash block size as defined for this algorithm
       */
       virtual size_t hash_block_size() const { return 0; }
+
+      /**
+      * Return an estimate, in bits, of the security level of this hash
+      * function, with respect to collision resistance. For most hashes this is
+      * simply half the output length, matching the generic birthday attack.
+      * It is lower for hash functions with a known collision attack, and zero
+      * for checksums and any hash where finding collisions is trivial.
+      */
+      virtual size_t security_level() const { return 4 * output_length(); }
 
       /**
       * Return a new hash object with the same state as *this. This
@@ -9696,11 +13232,13 @@ class BOTAN_PUBLIC_API(2, 0) HashFunction : public Buffered_Computation {
       virtual std::unique_ptr<HashFunction> copy_state() const = 0;
 
       /**
+      * Create a new uninitialized object of the same type
       * @return new object representing the same algorithm as *this
       */
       virtual std::unique_ptr<HashFunction> new_object() const = 0;
 
       /**
+      * Create a new uninitialized object of the same type
       * @return new object representing the same algorithm as *this
       */
       HashFunction* clone() const { return this->new_object().release(); }
@@ -9836,7 +13374,10 @@ namespace Botan {
 
 #if defined(BOTAN_TARGET_OS_HAS_THREADS)
 
+/// The mutex type used by the library
 using mutex_type = std::mutex;
+
+/// The recursive mutex type used by the library
 using recursive_mutex_type = std::recursive_mutex;
 
 template <typename T>
@@ -9893,6 +13434,8 @@ namespace Botan {
 class BOTAN_PUBLIC_API(2, 0) Stateful_RNG : public RandomNumberGenerator {
    public:
       /**
+      * Create a Stateful_RNG which reseeds from both an RNG and entropy sources
+      *
       * @param rng is a reference to some RNG which will be used
       * to perform the periodic reseeding
       * @param entropy_sources will be polled to perform reseeding periodically
@@ -9903,6 +13446,8 @@ class BOTAN_PUBLIC_API(2, 0) Stateful_RNG : public RandomNumberGenerator {
             m_underlying_rng(&rng), m_entropy_sources(&entropy_sources), m_reseed_interval(reseed_interval) {}
 
       /**
+      * Create a Stateful_RNG which reseeds from another RNG
+      *
       * @param rng is a reference to some RNG which will be used
       * to perform the periodic reseeding
       * @param reseed_interval specifies a limit of how many times
@@ -9912,6 +13457,8 @@ class BOTAN_PUBLIC_API(2, 0) Stateful_RNG : public RandomNumberGenerator {
             m_underlying_rng(&rng), m_reseed_interval(reseed_interval) {}
 
       /**
+      * Create a Stateful_RNG which reseeds from entropy sources
+      *
       * @param entropy_sources will be polled to perform reseeding periodically
       * @param reseed_interval specifies a limit of how many times
       * the RNG will be called before automatic reseeding is performed
@@ -9931,10 +13478,24 @@ class BOTAN_PUBLIC_API(2, 0) Stateful_RNG : public RandomNumberGenerator {
       */
       void initialize_with(std::span<const uint8_t> input);
 
+      /**
+      * Consume this input and mark the RNG as initialized regardless
+      * of the length of the input or the current seeded state of the RNG.
+      * @param input the seed material
+      * @param length the number of bytes in input
+      */
       void initialize_with(const uint8_t input[], size_t length) { this->initialize_with(std::span(input, length)); }
 
+      /**
+      * Test whether this RNG has been seeded
+      * @return true if this RNG is seeded and ready for use
+      */
       bool is_seeded() const final;
 
+      /**
+      * Test whether this RNG accepts externally provided input
+      * @return false if this RNG is known to ignore provided inputs
+      */
       bool accepts_input() const final { return true; }
 
       /**
@@ -9942,6 +13503,11 @@ class BOTAN_PUBLIC_API(2, 0) Stateful_RNG : public RandomNumberGenerator {
       */
       void force_reseed();
 
+      /**
+      * Reseed this RNG from another RNG
+      * @param rng the RNG to draw seed material from
+      * @param poll_bits the number of bits to collect
+      */
       void reseed_from_rng(RandomNumberGenerator& rng, size_t poll_bits = RandomNumberGenerator::DefaultPollBits) final;
 
       /**
@@ -9952,11 +13518,13 @@ class BOTAN_PUBLIC_API(2, 0) Stateful_RNG : public RandomNumberGenerator {
                                  size_t poll_bits = RandomNumberGenerator::DefaultPollBits) final;
 
       /**
+      * Return the security level of this DRBG
       * @return intended security level of this DRBG
       */
       virtual size_t security_level() const = 0;
 
       /**
+      * Return the largest number of bytes this DRBG will produce per request
       * Some DRBGs have a notion of the maximum number of bytes per
       * request.  Longer requests (to randomize) will be treated as
       * multiple requests, and may initiate reseeding multiple times,
@@ -9968,17 +13536,39 @@ class BOTAN_PUBLIC_API(2, 0) Stateful_RNG : public RandomNumberGenerator {
       */
       virtual size_t max_number_of_bytes_per_request() const = 0;
 
+      /**
+      * Return how many requests may be made before automatic reseeding
+      * @return the reseed interval, or zero if automatic reseeding is disabled
+      */
       size_t reseed_interval() const { return m_reseed_interval; }
 
+      /**
+      * Clear all internally held values of this RNG
+      */
       void clear() final;
 
    protected:
+      /**
+      * Reseed if the reseed interval has elapsed, or throw if unseeded
+      */
       void reseed_check();
 
+      /**
+      * Generate output, incorporating the provided input
+      * @param output the buffer to fill
+      * @param input additional input to incorporate
+      */
       virtual void generate_output(std::span<uint8_t> output, std::span<const uint8_t> input) = 0;
 
+      /**
+      * Incorporate the provided input into the RNG state
+      * @param input the seed material
+      */
       virtual void update(std::span<const uint8_t> input) = 0;
 
+      /**
+      * Clear the subclass specific portion of the RNG state
+      */
       virtual void clear_state() = 0;
 
    private:
@@ -10130,10 +13720,22 @@ class BOTAN_PUBLIC_API(2, 0) HMAC_DRBG final : public Stateful_RNG {
       HMAC_DRBG(HMAC_DRBG&& rng) = delete;
       HMAC_DRBG& operator=(HMAC_DRBG&& rng) = delete;
 
+      /**
+      * Return the name of this RNG type
+      * @return the name of this RNG type
+      */
       std::string name() const override;
 
+      /**
+      * Return the security level of this DRBG
+      * @return the estimated security level in bits
+      */
       size_t security_level() const override;
 
+      /**
+      * Return the largest number of bytes this DRBG will produce per request
+      * @return the maximum request size in bytes
+      */
       size_t max_number_of_bytes_per_request() const override { return m_max_number_of_bytes_per_request; }
 
    private:
@@ -10178,11 +13780,13 @@ class BOTAN_PUBLIC_API(2, 0) KDF /* NOLINT(*-special-member-functions*) */ {
       static std::unique_ptr<KDF> create_or_throw(std::string_view algo_spec, std::string_view provider = "");
 
       /**
+      * List the providers available for a given KDF
       * @return list of available providers for this algorithm, empty if not available
       */
       static std::vector<std::string> providers(std::string_view algo_spec);
 
       /**
+      * Return the name of this KDF
       * @return KDF name
       */
       virtual std::string name() const = 0;
@@ -10367,11 +13971,13 @@ class BOTAN_PUBLIC_API(2, 0) KDF /* NOLINT(*-special-member-functions*) */ {
       }
 
       /**
+      * Create a new uninitialized object of the same type
       * @return new object representing the same algorithm as *this
       */
       virtual std::unique_ptr<KDF> new_object() const = 0;
 
       /**
+      * Create a new uninitialized object of the same type
       * @return new object representing the same algorithm as *this
       */
       KDF* clone() const { return this->new_object().release(); }
@@ -10434,7 +14040,8 @@ class BOTAN_PUBLIC_API(2, 0) MessageAuthenticationCode : public Buffered_Computa
       static std::unique_ptr<MessageAuthenticationCode> create(std::string_view algo_spec,
                                                                std::string_view provider = "");
 
-      /*
+      /**
+      * Create an instance based on a name, throwing if it is not available
       * Create an instance based on a name
       * If provider is empty then best available is chosen.
       * @param algo_spec algorithm name
@@ -10445,12 +14052,14 @@ class BOTAN_PUBLIC_API(2, 0) MessageAuthenticationCode : public Buffered_Computa
                                                                         std::string_view provider = "");
 
       /**
+      * List the providers available for a given MAC
       * @return list of available providers for this algorithm, empty if not available
       */
       static std::vector<std::string> providers(std::string_view algo_spec);
 
       /**
       * Prepare for processing a message under the specified nonce
+      * Calling start() abandons any partial message and begins a new one.
       *
       * Most MACs neither require nor support a nonce; for these algorithms
       * calling start() is optional and calling it with anything other than
@@ -10492,6 +14101,7 @@ class BOTAN_PUBLIC_API(2, 0) MessageAuthenticationCode : public Buffered_Computa
       bool verify_mac(std::span<const uint8_t> in) { return verify_mac_result(in); }
 
       /**
+      * Create a new uninitialized object of the same type
       * @return new object representing the same algorithm as *this
       */
       virtual std::unique_ptr<MessageAuthenticationCode> new_object() const = 0;
@@ -10502,6 +14112,7 @@ class BOTAN_PUBLIC_API(2, 0) MessageAuthenticationCode : public Buffered_Computa
       MessageAuthenticationCode* clone() const { return this->new_object().release(); }
 
       /**
+      * Return the name of the provider implementing this object
       * @return provider information about this implementation. Default is "base",
       * might also return "sse2", "avx2", "openssl", or some other arbitrary string.
       */
@@ -10519,10 +14130,10 @@ class BOTAN_PUBLIC_API(2, 0) MessageAuthenticationCode : public Buffered_Computa
       /**
       * Prepare for processing a message under the specified nonce
       *
-      * If the MAC does not support nonces, it should not override the default
-      * implementation.
+      * This should reset any state associated with any message currently being
+      * processed.
       */
-      virtual void start_msg(std::span<const uint8_t> nonce);
+      virtual void start_msg(std::span<const uint8_t> nonce) = 0;
 
       /**
       * Verify the MACs final result
@@ -10530,6 +14141,9 @@ class BOTAN_PUBLIC_API(2, 0) MessageAuthenticationCode : public Buffered_Computa
       virtual bool verify_mac_result(std::span<const uint8_t> in);
 };
 
+/**
+* A shorter alias for MessageAuthenticationCode
+*/
 typedef MessageAuthenticationCode MAC;
 
 }  // namespace Botan
@@ -10830,6 +14444,12 @@ inline constexpr ToT typecast_copy(const FromR& src) {
    return dst;
 }
 
+/**
+* Copy the bytes of an array of trivially copyable objects into a byte array
+* @param out the output byte array, must have room for sizeof(T)*N bytes
+* @param in the input array
+* @param N the number of elements in the input array
+*/
 // TODO: deprecate and replace
 template <typename T>
 inline constexpr void typecast_copy(uint8_t out[], T in[], size_t N)
@@ -10839,6 +14459,12 @@ inline constexpr void typecast_copy(uint8_t out[], T in[], size_t N)
    typecast_copy(std::span<uint8_t>(out, sizeof(T) * N), std::span<const T>(in, N));
 }
 
+/**
+* Reinterpret a byte array as an array of trivial objects
+* @param out the output array, must have room for N elements
+* @param in the input byte array, must hold sizeof(T)*N bytes
+* @param N the number of elements to produce
+*/
 // TODO: deprecate and replace
 template <typename T>
 inline constexpr void typecast_copy(T out[], const uint8_t in[], size_t N)
@@ -10848,6 +14474,11 @@ inline constexpr void typecast_copy(T out[], const uint8_t in[], size_t N)
    typecast_copy(std::span<T>(out, N), std::span<const uint8_t>(in, N * sizeof(T)));
 }
 
+/**
+* Copy the bytes of a single object into a byte array
+* @param out the output byte array, must have room for sizeof(T) bytes
+* @param in the object to copy from
+*/
 // TODO: deprecate and replace
 template <typename T>
 inline constexpr void typecast_copy(uint8_t out[], const T& in) {
@@ -10855,6 +14486,11 @@ inline constexpr void typecast_copy(uint8_t out[], const T& in) {
    typecast_copy(std::span<uint8_t, sizeof(T)>(out, sizeof(T)), in);
 }
 
+/**
+* Reinterpret a byte array as a single trivial object
+* @param out the object to copy into
+* @param in the input byte array, must hold sizeof(T) bytes
+*/
 // TODO: deprecate and replace
 template <typename T>
    requires std::is_trivial_v<std::decay_t<T>>
@@ -10863,6 +14499,11 @@ inline constexpr void typecast_copy(T& out, const uint8_t in[]) {
    typecast_copy(out, std::span<const uint8_t, sizeof(T)>(in, sizeof(T)));
 }
 
+/**
+* Reinterpret a byte array as a single trivial object
+* @param src the input byte array, must hold sizeof(To) bytes
+* @return the object read from src
+*/
 // TODO: deprecate and replace
 template <typename To>
    requires std::is_trivial_v<To>
@@ -10886,19 +14527,39 @@ BOTAN_DEPRECATED("This function is deprecated") inline constexpr void set_mem(ui
 #endif
 
 #if !defined(BOTAN_IS_BEING_BUILT)
+/**
+* Cast a char pointer to a uint8_t pointer
+* @param s the pointer to cast
+* @return s viewed as a byte pointer
+*/
 inline const uint8_t* cast_char_ptr_to_uint8(const char* s) {
    return reinterpret_cast<const uint8_t*>(s);
 }
 
+/**
+* Cast a char pointer to a uint8_t pointer
+* @param s the pointer to cast
+* @return s viewed as a byte pointer
+*/
 inline uint8_t* cast_char_ptr_to_uint8(char* s) {
    return reinterpret_cast<uint8_t*>(s);
 }
 #endif
 
+/**
+* Cast a uint8_t pointer to a char pointer
+* @param b the pointer to cast
+* @return b viewed as a char pointer
+*/
 inline const char* cast_uint8_ptr_to_char(const uint8_t* b) {
    return reinterpret_cast<const char*>(b);
 }
 
+/**
+* Cast a uint8_t pointer to a char pointer
+* @param b the pointer to cast
+* @return b viewed as a char pointer
+*/
 inline char* cast_uint8_ptr_to_char(uint8_t* b) {
    return reinterpret_cast<char*>(b);
 }
@@ -10926,6 +14587,14 @@ inline bool same_mem(const T* p1, const T* p2, size_t n) {
 
 #if !defined(BOTAN_IS_BEING_BUILT)
 
+/**
+* Copy into a buffer at an offset, truncating to the space available
+* @param buf the buffer to write into
+* @param buf_offset the offset in buf to write at
+* @param input the elements to copy
+* @param input_length the number of elements in input
+* @return the number of elements actually copied
+*/
 template <typename T, typename Alloc>
 BOTAN_DEPRECATED("The buffer_insert functions are deprecated")
 size_t buffer_insert(std::vector<T, Alloc>& buf, size_t buf_offset, const T input[], size_t input_length) {
@@ -10937,6 +14606,13 @@ size_t buffer_insert(std::vector<T, Alloc>& buf, size_t buf_offset, const T inpu
    return to_copy;
 }
 
+/**
+* Copy into a buffer at an offset, truncating to the space available
+* @param buf the buffer to write into
+* @param buf_offset the offset in buf to write at
+* @param input the elements to copy
+* @return the number of elements actually copied
+*/
 template <typename T, typename Alloc, typename Alloc2>
 BOTAN_DEPRECATED("The buffer_insert functions are deprecated")
 size_t buffer_insert(std::vector<T, Alloc>& buf, size_t buf_offset, const std::vector<T, Alloc2>& input) {
@@ -11034,6 +14710,12 @@ inline void xor_buf(uint8_t out[], const uint8_t in[], const uint8_t in2[], size
    xor_buf(std::span{out, length}, std::span{in, length}, std::span{in2, length});
 }
 
+/**
+* XOR the first n bytes of in into out
+* @param out the buffer to XOR into, must hold at least n bytes
+* @param in the buffer to read from, must hold at least n bytes
+* @param n the number of bytes to XOR
+*/
 // TODO: deprecate and replace, use .subspan()
 inline void xor_buf(std::span<uint8_t> out, std::span<const uint8_t> in, size_t n) {
    BOTAN_ARG_CHECK(out.size() >= n, "output span is too small");
@@ -11041,6 +14723,12 @@ inline void xor_buf(std::span<uint8_t> out, std::span<const uint8_t> in, size_t 
    xor_buf(out.first(n), in.first(n));
 }
 
+/**
+* XOR n bytes into the front of a vector
+* @param out the vector to XOR into, must hold at least n bytes
+* @param in the bytes to read from, must point to at least n bytes
+* @param n the number of bytes to XOR
+*/
 // TODO: deprecate and replace, use .subspan()
 template <typename Alloc>
 void xor_buf(std::vector<uint8_t, Alloc>& out, const uint8_t* in, size_t n) {
@@ -11049,6 +14737,13 @@ void xor_buf(std::vector<uint8_t, Alloc>& out, const uint8_t* in, size_t n) {
    xor_buf(std::span{out}.first(n), std::span{in, n});
 }
 
+/**
+* Set the front of a vector to the XOR of two inputs
+* @param out the vector to write into, must hold at least n bytes
+* @param in the first input, must point to at least n bytes
+* @param in2 the second input, must hold at least n bytes
+* @param n the number of bytes to process
+*/
 // TODO: deprecate and replace
 template <typename Alloc, typename Alloc2>
 void xor_buf(std::vector<uint8_t, Alloc>& out, const uint8_t* in, const std::vector<uint8_t, Alloc2>& in2, size_t n) {
@@ -11058,6 +14753,12 @@ void xor_buf(std::vector<uint8_t, Alloc>& out, const uint8_t* in, const std::vec
    xor_buf(std::span{out}.first(n), std::span{in, n}, std::span{in2}.first(n));
 }
 
+/**
+* XOR a vector into another, growing the destination if it is shorter
+* @param out the vector to XOR into
+* @param in the vector to read from
+* @return reference to out
+*/
 template <typename Alloc, typename Alloc2>
 std::vector<uint8_t, Alloc>& operator^=(std::vector<uint8_t, Alloc>& out, const std::vector<uint8_t, Alloc2>& in) {
    if(out.size() < in.size()) {
@@ -11100,6 +14801,7 @@ BigInt BOTAN_PUBLIC_API(2, 0) gcd(const BigInt& x, const BigInt& y);
 BOTAN_DEPRECATED("Deprecated no replacement") BigInt BOTAN_PUBLIC_API(2, 0) lcm(const BigInt& x, const BigInt& y);
 
 /**
+* Square an integer
 * @param x an integer
 * @return (x*x)
 */
@@ -11154,6 +14856,7 @@ BOTAN_DEPRECATED("Deprecated no replacement")
 BigInt BOTAN_PUBLIC_API(3, 0) sqrt_modulo_prime(const BigInt& x, const BigInt& p);
 
 /**
+* Count the low zero bits of an integer
 * @param x an integer
 * @return count of the low zero bits in x, or, equivalently, the
 *         largest value of n such that 2^n divides x evenly. Returns
@@ -11246,6 +14949,7 @@ namespace Botan {
 
 class Path_Validation_Restrictions;
 class Certificate_Store;
+class URI;
 
 namespace OCSP {
 
@@ -11254,6 +14958,8 @@ class BOTAN_PUBLIC_API(2, 0) CertID final : public ASN1_Object {
       CertID() = default;
 
       CertID(const X509_Certificate& issuer, const BigInt& subject_serial);
+
+      CertID(const X509_Certificate& issuer, const X509_Serial_Number& subject_serial);
 
       bool is_id_for(const X509_Certificate& issuer, const X509_Certificate& subject) const;
 
@@ -11267,11 +14973,30 @@ class BOTAN_PUBLIC_API(2, 0) CertID final : public ASN1_Object {
       AlgorithmIdentifier m_hash_id;
       std::vector<uint8_t> m_issuer_dn_hash;
       std::vector<uint8_t> m_issuer_key_hash;
-      BigInt m_subject_serial;
+      X509_Serial_Number m_subject_serial;
 };
 
 class BOTAN_PUBLIC_API(2, 0) SingleResponse final : public ASN1_Object {
    public:
+      SingleResponse() = default;
+
+      /**
+      * Create a SingleResponse asserting a good status, as emitted by an
+      * OCSP responder. All times must be tagged as GeneralizedTime; an
+      * unset next_update omits the optional nextUpdate field.
+      */
+      static SingleResponse good(CertID certid, X509_Time this_update, X509_Time next_update);
+
+      /// As good(), but asserting an unknown status
+      static SingleResponse unknown(CertID certid, X509_Time this_update, X509_Time next_update);
+
+      /// As good(), but asserting a revoked status with the given RevokedInfo
+      static SingleResponse revoked(CertID certid,
+                                    X509_Time revocation_time,
+                                    std::optional<CRL_Code> reason,
+                                    X509_Time this_update,
+                                    X509_Time next_update);
+
       const CertID& certid() const { return m_certid; }
 
       size_t cert_status() const { return m_cert_status; }
@@ -11280,6 +15005,12 @@ class BOTAN_PUBLIC_API(2, 0) SingleResponse final : public ASN1_Object {
 
       const X509_Time& next_update() const { return m_nextupdate; }
 
+      /// The revocationTime; set only when cert_status() is 1 (revoked)
+      const std::optional<X509_Time>& revocation_time() const { return m_revocation_time; }
+
+      /// The revocationReason, when cert_status() is 1 and one was provided
+      const std::optional<CRL_Code>& revocation_reason() const { return m_revocation_reason; }
+
       void encode_into(DER_Encoder& to) const override;
 
       void decode_from(BER_Decoder& from) override;
@@ -11287,10 +15018,19 @@ class BOTAN_PUBLIC_API(2, 0) SingleResponse final : public ASN1_Object {
       bool has_unknown_critical_extension() const { return m_has_unknown_critical_ext; }
 
    private:
+      SingleResponse(CertID certid,
+                     size_t cert_status,
+                     std::optional<X509_Time> revocation_time,
+                     std::optional<CRL_Code> revocation_reason,
+                     X509_Time this_update,
+                     X509_Time next_update);
+
       CertID m_certid;
       size_t m_cert_status = 2;  // unknown
       X509_Time m_thisupdate;
       X509_Time m_nextupdate;
+      std::optional<X509_Time> m_revocation_time;
+      std::optional<CRL_Code> m_revocation_reason;
       bool m_has_unknown_critical_ext = false;
 };
 
@@ -11362,6 +15102,8 @@ class BOTAN_PUBLIC_API(2, 0) Response final {
       /**
       * Create a fake OCSP response from a given status code.
       * @param status the status code the check functions will return
+      *
+      * TODO(Botan4) make this constructor private
       */
       BOTAN_FUTURE_EXPLICIT Response(Certificate_Status_Code status);
 
@@ -11470,7 +15212,30 @@ class BOTAN_PUBLIC_API(2, 0) Response final {
       const std::vector<X509_Certificate>& certificates() const { return m_certs; }
 
       /**
-      * @return the dummy response if this is a 'fake' OCSP response otherwise std::nullopt
+       * @return the SingleResponses included in this response (empty for a 'fake'
+       *         or non-successful response)
+       */
+      const std::vector<SingleResponse>& responses() const { return m_responses; }
+
+      /**
+      * Return a fake OCSP response indicating the server was not available
+      * This is not normally useful for applications
+      */
+      static Response dummy_server_not_available_response() {
+         return Response(Certificate_Status_Code::OCSP_SERVER_NOT_AVAILABLE);
+      }
+
+      /**
+      * Return a fake OCSP response indicating there was no usable OCSP URL
+      * This is not normally useful for applications
+      */
+      static Response dummy_no_revocation_url_response() {
+         return Response(Certificate_Status_Code::OCSP_NO_REVOCATION_URL);
+      }
+
+      /**
+      * Return the dummy response if this is a 'fake' OCSP response otherwise std::nullopt
+      * This is not normally useful for applications
       */
       std::optional<Certificate_Status_Code> dummy_status() const { return m_dummy_response_status; }
 
@@ -11498,14 +15263,28 @@ class BOTAN_PUBLIC_API(2, 0) Response final {
 #if defined(BOTAN_HAS_HTTP_UTIL)
 
 /**
-* Makes an online OCSP request via HTTP and returns the (unverified) OCSP response.
+* Makes an online OCSP request via HTTP and returns the (unverified!) OCSP response.
 * @param issuer issuer certificate
 * @param subject_serial the subject's serial number
 * @param ocsp_responder the OCSP responder to query
 * @param timeout a timeout on the HTTP request
 * @return OCSP response
 */
-BOTAN_PUBLIC_API(3, 0)
+BOTAN_PUBLIC_API(3, 13)
+Response online_check(const X509_Certificate& issuer,
+                      const BigInt& subject_serial,
+                      const URI& ocsp_responder,
+                      std::chrono::milliseconds timeout = std::chrono::milliseconds(3000));
+
+/**
+* Makes an online OCSP request via HTTP and returns the (unverified!) OCSP response.
+* @param issuer issuer certificate
+* @param subject_serial the subject's serial number
+* @param ocsp_responder the OCSP responder to query
+* @param timeout a timeout on the HTTP request
+* @return OCSP response
+*/
+BOTAN_DEPRECATED_API("Prefer version taking a URI")
 Response online_check(const X509_Certificate& issuer,
                       const BigInt& subject_serial,
                       std::string_view ocsp_responder,
@@ -11542,10 +15321,25 @@ BOTAN_DEPRECATED("Use OID::register_oid") inline void add_oid(const OID& oid, st
    OID::register_oid(oid, name);
 }
 
+/**
+* Register an OID to string mapping.
+* @param oid the oid to register
+* @param name the name to be associated with the oid
+*/
 BOTAN_DEPRECATED("Use OID::register_oid") BOTAN_UNSTABLE_API void add_oid2str(const OID& oid, std::string_view name);
 
+/**
+* Register a string to OID mapping.
+* @param oid the oid to register
+* @param name the name to be associated with the oid
+*/
 BOTAN_DEPRECATED("Use OID::register_oid") BOTAN_UNSTABLE_API void add_str2oid(const OID& oid, std::string_view name);
 
+/**
+* Register an OID to string mapping.
+* @param oidstr the oid to register, as a dotted decimal string
+* @param name the name to be associated with the oid
+*/
 BOTAN_DEPRECATED("Use OID::register_oid") inline void add_oidstr(const char* oidstr, const char* name) {
    OID::register_oid(OID(oidstr), name);
 }
@@ -11555,8 +15349,8 @@ BOTAN_DEPRECATED("Use OID::register_oid") inline void add_oidstr(const char* oid
 * @param oid the OID to look up
 * @return name associated with this OID, or an empty string
 */
-BOTAN_DEPRECATED("Use OID::human_name_or_empty") inline std::string oid2str_or_empty(const OID& oid) {
-   return oid.human_name_or_empty();
+BOTAN_DEPRECATED("Use OID::registered_name") inline std::string oid2str_or_empty(const OID& oid) {
+   return oid.registered_name().value_or("");
 }
 
 /**
@@ -11569,18 +15363,34 @@ BOTAN_DEPRECATED("Use OID::from_name") inline OID str2oid_or_empty(std::string_v
    return OID::from_name(name).value_or(OID());
 }
 
-BOTAN_DEPRECATED("Use OID::human_name_or_empty") inline std::string oid2str_or_throw(const OID& oid) {
-   std::string s = oid.human_name_or_empty();
-   if(s.empty()) {
+/**
+* Resolve an OID
+* @param oid the OID to look up
+* @return name associated with this OID
+* @throws Lookup_Error if the OID is not registered
+*/
+BOTAN_DEPRECATED("Use OID::registered_name") inline std::string oid2str_or_throw(const OID& oid) {
+   if(const auto name = oid.registered_name()) {
+      return *name;
+   } else {
       throw Lookup_Error("No name associated with OID " + oid.to_string());
    }
-   return s;
 }
 
-BOTAN_DEPRECATED("Use OID::human_name_or_empty") inline std::string lookup(const OID& oid) {
+/**
+* Resolve an OID
+* @param oid the OID to look up
+* @return name associated with this OID, or an empty string
+*/
+BOTAN_DEPRECATED("Use OID::registered_name") inline std::string lookup(const OID& oid) {
    return oid.human_name_or_empty();
 }
 
+/**
+* Find the OID associated with a name
+* @param name the name to resolve
+* @return OID associated with the specified name, or an empty OID
+*/
 BOTAN_DEPRECATED("Use OID::from_name") inline OID lookup(std::string_view name) {
    return OID::from_name(name).value_or(OID());
 }
@@ -12795,6 +16605,13 @@ BOTAN_PUBLIC_API(2, 0) extern ReturnValue* ThrowException;
 const Bbool True = CK_TRUE;
 const Bbool False = CK_FALSE;
 
+inline Ulong checked_ulong_cast(size_t v) {
+   if(v > std::numeric_limits<Ulong>::max()) {
+      throw Invalid_Argument("PKCS #11 value exceeds CK_ULONG range");
+   }
+   return static_cast<Ulong>(v);
+}
+
 inline Flags flags(Flag flags) {
    return static_cast<Flags>(flags);
 }
@@ -13020,7 +16837,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
       static bool C_GetInterface(const Dynamically_Loaded_Library& pkcs11_module,
                                  const Utf8Char* interface_name_ptr,
                                  const Version* version_ptr,
-                                 Interface* interface_ptr_ptr,
+                                 Interface** interface_ptr_ptr,
                                  Flags flags,
                                  ReturnValue* return_value = ThrowException);
 
@@ -13216,7 +17033,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
 
          return C_InitToken(slot_id,
                             reinterpret_cast<Utf8Char*>(const_cast<uint8_t*>(so_pin.data())),
-                            static_cast<Ulong>(so_pin.size()),
+                            checked_ulong_cast(so_pin.size()),
                             reinterpret_cast<Utf8Char*>(const_cast<char*>(padded_label.c_str())),
                             return_value);
       }
@@ -13263,7 +17080,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
                      ReturnValue* return_value = ThrowException) const {
          return C_InitPIN(session,
                           reinterpret_cast<Utf8Char*>(const_cast<uint8_t*>(pin.data())),
-                          static_cast<Ulong>(pin.size()),
+                          checked_ulong_cast(pin.size()),
                           return_value);
       }
 
@@ -13315,9 +17132,9 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
                     ReturnValue* return_value = ThrowException) const {
          return C_SetPIN(session,
                          reinterpret_cast<Utf8Char*>(const_cast<uint8_t*>(old_pin.data())),
-                         static_cast<Ulong>(old_pin.size()),
+                         checked_ulong_cast(old_pin.size()),
                          reinterpret_cast<Utf8Char*>(const_cast<uint8_t*>(new_pin.data())),
-                         static_cast<Ulong>(new_pin.size()),
+                         checked_ulong_cast(new_pin.size()),
                          return_value);
       }
 
@@ -13496,7 +17313,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
          return C_Login(session,
                         user_type,
                         reinterpret_cast<Utf8Char*>(const_cast<uint8_t*>(pin.data())),
-                        static_cast<Ulong>(pin.size()),
+                        checked_ulong_cast(pin.size()),
                         return_value);
       }
 
@@ -13694,7 +17511,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
          const bool success = C_GetAttributeValue(session,
                                                   object,
                                                   const_cast<Attribute*>(getter_template.data()),
-                                                  static_cast<Ulong>(getter_template.size()),
+                                                  checked_ulong_cast(getter_template.size()),
                                                   return_value);
 
          if(!success) {
@@ -13712,7 +17529,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
          return C_GetAttributeValue(session,
                                     object,
                                     const_cast<Attribute*>(getter_template.data()),
-                                    static_cast<Ulong>(getter_template.size()),
+                                    checked_ulong_cast(getter_template.size()),
                                     return_value);
       }
 
@@ -13768,13 +17585,13 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
          for(auto& entry : attribute_values) {
             setter_template.emplace_back(Attribute{static_cast<CK_ATTRIBUTE_TYPE>(entry.first),
                                                    entry.second.data(),
-                                                   static_cast<CK_ULONG>(entry.second.size())});
+                                                   checked_ulong_cast(entry.second.size())});
          }
 
          return C_SetAttributeValue(session,
                                     object,
                                     const_cast<Attribute*>(setter_template.data()),
-                                    static_cast<Ulong>(setter_template.size()),
+                                    checked_ulong_cast(setter_template.size()),
                                     return_value);
       }
 
@@ -13906,7 +17723,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
          Ulong encrypted_size = 0;
          if(!C_Encrypt(session,
                        const_cast<Byte*>((plaintext_data.data())),
-                       static_cast<Ulong>(plaintext_data.size()),
+                       checked_ulong_cast(plaintext_data.size()),
                        nullptr,
                        &encrypted_size,
                        return_value)) {
@@ -13916,7 +17733,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
          encrypted_data.resize(encrypted_size);
          if(!C_Encrypt(session,
                        const_cast<Byte*>(plaintext_data.data()),
-                       static_cast<Ulong>(plaintext_data.size()),
+                       checked_ulong_cast(plaintext_data.size()),
                        encrypted_data.data(),
                        &encrypted_size,
                        return_value)) {
@@ -14139,7 +17956,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
          Ulong decrypted_size = 0;
          if(!C_Decrypt(session,
                        const_cast<Byte*>((encrypted_data.data())),
-                       static_cast<Ulong>(encrypted_data.size()),
+                       checked_ulong_cast(encrypted_data.size()),
                        nullptr,
                        &decrypted_size,
                        return_value)) {
@@ -14149,7 +17966,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
          decrypted_data.resize(decrypted_size);
          if(!C_Decrypt(session,
                        const_cast<Byte*>(encrypted_data.data()),
-                       static_cast<Ulong>(encrypted_data.size()),
+                       checked_ulong_cast(encrypted_data.size()),
                        decrypted_data.data(),
                        &decrypted_size,
                        return_value)) {
@@ -14473,14 +18290,14 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
                   std::vector<uint8_t, TAllocB>& signature,
                   ReturnValue* return_value = ThrowException) const {
          Ulong signature_size = 0;
-         if(!C_Sign(session, data.data(), static_cast<Ulong>(data.size()), nullptr, &signature_size, return_value)) {
+         if(!C_Sign(session, data.data(), checked_ulong_cast(data.size()), nullptr, &signature_size, return_value)) {
             return false;
          }
 
          signature.resize(signature_size);
          if(!C_Sign(session,
                     data.data(),
-                    static_cast<Ulong>(data.size()),
+                    checked_ulong_cast(data.size()),
                     signature.data(),
                     &signature_size,
                     return_value)) {
@@ -14528,7 +18345,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
       bool C_SignUpdate(SessionHandle session,
                         const std::vector<uint8_t, TAlloc>& part,
                         ReturnValue* return_value = ThrowException) const {
-         return C_SignUpdate(session, part.data(), static_cast<Ulong>(part.size()), return_value);
+         return C_SignUpdate(session, part.data(), checked_ulong_cast(part.size()), return_value);
       }
 
       /**
@@ -14795,9 +18612,9 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
                     ReturnValue* return_value = ThrowException) const {
          return C_Verify(session,
                          data.data(),
-                         static_cast<Ulong>(data.size()),
+                         checked_ulong_cast(data.size()),
                          signature.data(),
-                         static_cast<Ulong>(signature.size()),
+                         checked_ulong_cast(signature.size()),
                          return_value);
       }
 
@@ -14839,7 +18656,7 @@ class BOTAN_PUBLIC_API(2, 0) LowLevel {
       bool C_VerifyUpdate(SessionHandle session,
                           std::vector<uint8_t, TAlloc> part,
                           ReturnValue* return_value = ThrowException) const {
-         return C_VerifyUpdate(session, part.data(), static_cast<Ulong>(part.size()), return_value);
+         return C_VerifyUpdate(session, part.data(), checked_ulong_cast(part.size()), return_value);
       }
 
       /**
@@ -15731,7 +19548,7 @@ class BOTAN_PUBLIC_API(2, 0) Session final {
       /// Takes ownership of a session
       Session(Slot& slot, SessionHandle handle);
 
-      Session(Session&& other) = default;
+      Session(Session&& other) noexcept;
       Session& operator=(Session&& other) = delete;
 
       // Dtor calls C_CloseSession() and eventually C_Logout. A copy could close the session while the origin still exists
@@ -15882,10 +19699,14 @@ class BOTAN_PUBLIC_API(2, 0) ObjectFinder final {
       */
       ObjectFinder(Session& session, const std::vector<Attribute>& search_template);
 
-      ObjectFinder(const ObjectFinder& other) = default;
+      ObjectFinder(const ObjectFinder& other) = delete;
       ObjectFinder& operator=(const ObjectFinder& other) = delete;
 
-      ObjectFinder(ObjectFinder&& other) = default;
+      ObjectFinder(ObjectFinder&& other) noexcept :
+            m_session(other.m_session), m_search_terminated(other.m_search_terminated) {
+         other.m_search_terminated = true;
+      }
+
       ObjectFinder& operator=(ObjectFinder&& other) = delete;
 
       /// Terminates a search for token and session objects (calls C_FindObjectsFinal)
@@ -16323,11 +20144,18 @@ class BOTAN_PUBLIC_API(2, 0) Object {
 template <typename T>
 std::vector<T> Object::search(Session& session, const std::vector<Attribute>& search_template) {
    const ObjectFinder finder(session, search_template);
-   const std::vector<ObjectHandle> handles = finder.find();
    std::vector<T> result;
-   result.reserve(handles.size());
-   for(const auto& handle : handles) {
-      result.emplace_back(T(session, handle));
+   // C_FindObjects returns up to the requested batch; the search is exhausted
+   // when a call yields zero handles. Loop until then so callers see all matches.
+   for(;;) {
+      const std::vector<ObjectHandle> handles = finder.find();
+      if(handles.empty()) {
+         break;
+      }
+      result.reserve(result.size() + handles.size());
+      for(const auto& handle : handles) {
+         result.emplace_back(T(session, handle));
+      }
    }
    return result;
 }
@@ -16861,7 +20689,7 @@ class BOTAN_PUBLIC_API(3, 7) MechanismWrapper final {
       */
       inline void set_ecdh_salt(const uint8_t salt[], size_t salt_len) {
          m_parameters->ecdh_params.pSharedData = const_cast<uint8_t*>(salt);
-         m_parameters->ecdh_params.ulSharedDataLen = static_cast<Ulong>(salt_len);
+         m_parameters->ecdh_params.ulSharedDataLen = checked_ulong_cast(salt_len);
       }
 
       /**
@@ -16871,7 +20699,7 @@ class BOTAN_PUBLIC_API(3, 7) MechanismWrapper final {
       */
       inline void set_ecdh_other_key(const uint8_t other_key[], size_t other_key_len) {
          m_parameters->ecdh_params.pPublicData = const_cast<uint8_t*>(other_key);
-         m_parameters->ecdh_params.ulPublicDataLen = static_cast<Ulong>(other_key_len);
+         m_parameters->ecdh_params.ulPublicDataLen = checked_ulong_cast(other_key_len);
       }
 
       /// @return a pointer to the CK_MECHANISM struct that can be passed to the cryptoki functions
@@ -16881,6 +20709,9 @@ class BOTAN_PUBLIC_API(3, 7) MechanismWrapper final {
 
       /// @return the size of the padding in bytes (for encryption/decryption)
       inline size_t padding_size() const { return m_padding_size; }
+
+      /// @return the KDF type for an ECDH mechanism
+      inline KeyDerivation ecdh_kdf() const { return static_cast<KeyDerivation>(m_parameters->ecdh_params.kdf); }
 
       /// Holds the mechanism parameters for OAEP, PSS and ECDH
       ///
@@ -17194,6 +21025,11 @@ class BOTAN_PUBLIC_API(2, 0) PKCS11_X509_Certificate final : public Object,
       static const ObjectClass Class = ObjectClass::Certificate;
 
       /**
+      * Return the certificate
+      */
+      const X509_Certificate& certificate() const;
+
+      /**
       * Create a PKCS11_X509_Certificate object from an existing PKCS#11 X509 cert
       * @param session the session to use
       * @param handle the handle of the X.509 certificate
@@ -17222,30 +21058,43 @@ class RandomNumberGenerator;
 class BOTAN_PUBLIC_API(2, 0) OctetString final {
    public:
       /**
+      * Return the length of this octet string
       * @return size of this octet string in bytes
       */
       size_t length() const { return m_data.size(); }
 
+      /**
+      * Return the length of this octet string
+      * @return size of this octet string in bytes
+      */
       size_t size() const { return m_data.size(); }
 
+      /**
+      * Test whether this octet string is empty
+      * @return true if this string holds no bytes
+      */
       bool empty() const { return m_data.empty(); }
 
       /**
+      * Return the contents of this octet string
       * @return this object as a secure_vector<uint8_t>
       */
       secure_vector<uint8_t> bits_of() const { return m_data; }
 
       /**
+      * Return a pointer to the first byte
       * @return start of this string
       */
       const uint8_t* begin() const { return m_data.data(); }
 
       /**
+      * Return a pointer one past the last byte
       * @return end of this string
       */
       const uint8_t* end() const { return begin() + m_data.size(); }
 
       /**
+      * Format this octet string as a hex string
       * @return this encoded as hex
       */
       std::string to_string() const;
@@ -17384,22 +21233,25 @@ class BOTAN_PUBLIC_API(2, 0) PBKDF /* NOLINT(*-special-member-functions) */ {
       static std::unique_ptr<PBKDF> create_or_throw(std::string_view algo_spec, std::string_view provider = "");
 
       /**
+      * List the providers available for a given PBKDF
       * @return list of available providers for this algorithm, empty if not available
       */
       static std::vector<std::string> providers(std::string_view algo_spec);
 
       /**
+      * Create a new uninitialized object of the same type
       * @return new instance of this same algorithm
       */
       virtual std::unique_ptr<PBKDF> new_object() const = 0;
 
       /**
+      * Create a new uninitialized object of the same type
       * @return new instance of this same algorithm
       */
       PBKDF* clone() const { return this->new_object().release(); }
 
       /**
-      * @return name of this PBKDF
+      * Return free-form string identifying this algorithm
       */
       virtual std::string name() const = 0;
 
@@ -17563,8 +21415,8 @@ class BOTAN_PUBLIC_API(2, 0) PBKDF /* NOLINT(*-special-member-functions) */ {
       }
 };
 
-/*
-* Compatibility typedef
+/**
+* Compatibility typedef for PBKDF
 */
 typedef PBKDF S2K;
 
@@ -17579,6 +21431,11 @@ inline PBKDF* get_pbkdf(std::string_view algo_spec, std::string_view provider = 
    return PBKDF::create_or_throw(algo_spec, provider).release();
 }
 
+/**
+* Password based key derivation function factory method
+* @param algo_spec the name of the desired PBKDF algorithm
+* @return pointer to newly allocated object of that type
+*/
 BOTAN_DEPRECATED("Use PasswordHashFamily + PasswordHash") inline PBKDF* get_s2k(std::string_view algo_spec) {
    return PBKDF::create_or_throw(algo_spec).release();
 }
@@ -17601,6 +21458,9 @@ class BOTAN_PUBLIC_API(2, 8) PasswordHash /* NOLINT(*-special-member-functions) 
    public:
       virtual ~PasswordHash() = default;
 
+      /**
+      * Return a free-form string identifying the algorithm and parameters
+      */
       virtual std::string to_string() const = 0;
 
       /**
@@ -17634,11 +21494,15 @@ class BOTAN_PUBLIC_API(2, 8) PasswordHash /* NOLINT(*-special-member-functions) 
       virtual size_t total_memory_usage() const { return 0; }
 
       /**
+      * Query if this password hash supports a symmetric key
+      *
       * @returns true if this password hash supports supplying a key
       */
       virtual bool supports_keyed_operation() const { return false; }
 
       /**
+      * Query if this password hash supports associated data
+      *
       * @returns true if this password hash supports supplying associated data
       */
       virtual bool supports_associated_data() const { return false; }
@@ -17746,6 +21610,9 @@ class BOTAN_PUBLIC_API(2, 8) PasswordHash /* NOLINT(*-special-member-functions) 
                               size_t key_len) const;
 };
 
+/**
+* A factory for PasswordHash parameter sets of a particular algorithm
+*/
 class BOTAN_PUBLIC_API(2, 8) PasswordHashFamily /* NOLINT(*-special-member-functions) */ {
    public:
       /**
@@ -17766,6 +21633,7 @@ class BOTAN_PUBLIC_API(2, 8) PasswordHashFamily /* NOLINT(*-special-member-funct
                                                                  std::string_view provider = "");
 
       /**
+      * List the providers available for a given password hash
       * @return list of available providers for this algorithm, empty if not available
       */
       static std::vector<std::string> providers(std::string_view algo_spec);
@@ -17773,6 +21641,7 @@ class BOTAN_PUBLIC_API(2, 8) PasswordHashFamily /* NOLINT(*-special-member-funct
       virtual ~PasswordHashFamily() = default;
 
       /**
+      * Return the name of this password hash family
       * @return name of this PasswordHash
       */
       virtual std::string name() const = 0;
@@ -17874,6 +21743,8 @@ class BOTAN_PUBLIC_API(2, 8) PasswordHashFamily /* NOLINT(*-special-member-funct
       * - For PBKDF2, PGP-S2K, and Bcrypt-PBKDF, i1 is iterations
       * - Scrypt uses N, r, p for i{1-3}
       * - Argon2 family uses memory (in KB), iterations, and parallelism for i{1-3}
+      * - PKCS12-KDF uses iterations for i1 (the hash and id are fixed by the family name,
+      *   e.g. "PKCS12-KDF(SHA-256,1)")
       *
       * All unneeded parameters should be set to 0 or left blank.
       */
@@ -18164,6 +22035,12 @@ class BOTAN_UNSTABLE_API Decryption /* NOLINT(*special-member-functions) */ {
       virtual secure_vector<uint8_t> decrypt(uint8_t& valid_mask, std::span<const uint8_t> ctext) = 0;
 
       virtual size_t plaintext_length(size_t ctext_len) const = 0;
+
+      /**
+      * Given the plaintext length, return an upper bound on the ciphertext
+      * length that decrypt() expects for this key and padding.
+      */
+      virtual size_t ciphertext_length(size_t ptext_len) const = 0;
 
       virtual ~Decryption() = default;
 };
@@ -18673,6 +22550,12 @@ class BOTAN_PUBLIC_API(3, 7) PSS_Params final : public ASN1_Object {
          return PSS_Params::from_padding_name(padding_name);
       }
 
+      /**
+      * Create PSS parameters using MGF1 with the same hash as the message hash
+      *
+      * @param hash_fn the name of the hash function to use
+      * @param salt_len the salt length in bytes
+      */
       PSS_Params(std::string_view hash_fn, size_t salt_len);
 
       /**
@@ -18680,20 +22563,44 @@ class BOTAN_PUBLIC_API(3, 7) PSS_Params final : public ASN1_Object {
       */
       BOTAN_FUTURE_EXPLICIT PSS_Params(std::span<const uint8_t> der);
 
+      /**
+      * Return the AlgorithmIdentifier of the hash used to hash the message
+      */
       const AlgorithmIdentifier& hash_algid() const { return m_hash; }
 
+      /**
+      * Return the AlgorithmIdentifier of the mask generation function
+      */
       const AlgorithmIdentifier& mgf_algid() const { return m_mgf; }
 
+      /**
+      * Return the AlgorithmIdentifier of the hash used within the mask generation function
+      */
       const AlgorithmIdentifier& mgf_hash_algid() const { return m_mgf_hash; }
 
+      /**
+      * Return the salt length in bytes
+      */
       size_t salt_length() const { return m_salt_len; }
 
+      /**
+      * Return the trailer field; only a value of 1 is supported
+      */
       size_t trailer_field() const { return m_trailer_field; }
 
+      /**
+      * Return the name of the hash used to hash the message
+      */
       std::string hash_function() const { return hash_algid().oid().to_formatted_string(); }
 
+      /**
+      * Return the name of the mask generation function; only MGF1 is supported
+      */
       std::string mgf_function() const { return mgf_algid().oid().to_formatted_string(); }
 
+      /**
+      * Return the DER encoding of these RSASSA-PSS-params
+      */
       std::vector<uint8_t> serialize() const;
 
       void encode_into(DER_Encoder& to) const override;
@@ -18751,7 +22658,7 @@ class BOTAN_PUBLIC_API(2, 0) PK_Encryptor {
       /**
       * Return an upper bound on the ciphertext length
       */
-      virtual size_t ciphertext_length(size_t ctext_len) const = 0;
+      virtual size_t ciphertext_length(size_t ptext_len) const = 0;
 
       PK_Encryptor() = default;
       virtual ~PK_Encryptor() = default;
@@ -18827,6 +22734,12 @@ class BOTAN_PUBLIC_API(2, 0) PK_Decryptor {
       * ciphertext input length
       */
       virtual size_t plaintext_length(size_t ctext_len) const = 0;
+
+      /**
+      * Return an upper bound on the ciphertext length for a particular
+      * plaintext input length.
+      */
+      virtual size_t ciphertext_length(size_t ptext_len) const = 0;
 
       PK_Decryptor() = default;
       virtual ~PK_Decryptor() = default;
@@ -19235,7 +23148,9 @@ class BOTAN_PUBLIC_API(2, 0) PK_Decryptor_EME final : public PK_Decryptor {
                        std::string_view padding,
                        std::string_view provider = "");
 
-      size_t plaintext_length(size_t ptext_len) const override;
+      size_t plaintext_length(size_t ctext_len) const override;
+
+      size_t ciphertext_length(size_t ptext_len) const override;
 
       ~PK_Decryptor_EME() override;
 
@@ -19547,8 +23462,17 @@ namespace Botan {
 */
 class BOTAN_PUBLIC_API(2, 0) Modular_Reducer final {
    public:
+      /**
+      * Return the modulus of this reducer
+      * @return the modulus
+      */
       const BigInt& get_modulus() const { return m_modulus; }
 
+      /**
+      * Reduce a value modulo p
+      * @param x the value to reduce
+      * @return (x % p)
+      */
       BigInt reduce(const BigInt& x) const;
 
       /**
@@ -19590,8 +23514,15 @@ class BOTAN_PUBLIC_API(2, 0) Modular_Reducer final {
       */
       void reduce(BigInt& out, const BigInt& x, secure_vector<word>& /*ws*/) const { out = reduce(x); }
 
+      /**
+      * Test whether this reducer was initialized with a non-zero modulus
+      * @return true if a modulus is set
+      */
       bool initialized() const { return (m_mod_words != 0); }
 
+      /**
+      * Create an uninitialized Modular_Reducer
+      */
       BOTAN_DEPRECATED("Use for_public_modulus or for_secret_modulus") Modular_Reducer() : m_mod_words(0) {}
 
       /**
@@ -19624,6 +23555,9 @@ struct sqlite3_stmt;
 
 namespace Botan {
 
+/**
+* An SQL_Database implementation backed by SQLite3
+*/
 class BOTAN_PUBLIC_API(2, 0) Sqlite3_Database final : public SQL_Database {
    public:
       /**
@@ -19638,19 +23572,51 @@ class BOTAN_PUBLIC_API(2, 0) Sqlite3_Database final : public SQL_Database {
 
       ~Sqlite3_Database() override;
 
+      // Database handles are not copyable or moveable
       Sqlite3_Database(const Sqlite3_Database& other) = delete;
       Sqlite3_Database(Sqlite3_Database&& other) = delete;
       Sqlite3_Database& operator=(const Sqlite3_Database& other) = delete;
       Sqlite3_Database& operator=(Sqlite3_Database&& other) = delete;
 
+      /**
+      * Count the rows of a table
+      * @param table_name the table to count
+      * @return the number of rows in the table
+      */
       size_t row_count(std::string_view table_name) override;
 
-      void create_table(std::string_view table_schema) override;
+      /**
+      * Create a table
+      * @param schema the name and columns of the table to create
+      */
+      void create_table(const Table_Schema& schema) override;
 
+      /**
+      * Count the rows modified by the most recently executed statement
+      * @return the number of rows inserted, updated or deleted
+      */
       size_t rows_changed_by_last_statement() override;
 
+      /**
+      * Create a new statement for execution
+      * @param sql the SQL text of the statement
+      * @return the prepared statement
+      */
       std::shared_ptr<Statement> new_statement(std::string_view sql) const override;
 
+      /**
+      * Prepare an insert-or-replace statement
+      * @param table the table to upsert into
+      * @param columns the columns to write, in placeholder order
+      * @return the prepared statement
+      */
+      std::shared_ptr<Statement> upsert(std::string_view table,
+                                        std::initializer_list<std::string_view> columns) const override;
+
+      /**
+      * Query whether this database may be used from multiple threads
+      * @return true if SQLite3 was compiled with threading support
+      */
       bool is_threadsafe() const override;
 
    private:
@@ -19661,15 +23627,16 @@ class BOTAN_PUBLIC_API(2, 0) Sqlite3_Database final : public SQL_Database {
             void bind(int column, std::chrono::system_clock::time_point time) override;
             void bind(int column, const std::vector<uint8_t>& val) override;
             void bind(int column, const uint8_t* data, size_t len) override;
+            void bind_null(int column) override;
 
-            std::pair<const uint8_t*, size_t> get_blob(int column) override;
-            std::string get_str(int column) override;
+            std::span<const uint8_t> get_blob(int column) override;
+            std::optional<std::string> get_str(int column) override;
             size_t get_size_t(int column) override;
 
             size_t spin() override;
             bool step() override;
 
-            Sqlite3_Statement(sqlite3* db, std::string_view base_sql);
+            Sqlite3_Statement(std::shared_ptr<sqlite3> db, std::string_view base_sql);
             ~Sqlite3_Statement() override;
 
             Sqlite3_Statement(const Sqlite3_Statement& other) = delete;
@@ -19678,10 +23645,13 @@ class BOTAN_PUBLIC_API(2, 0) Sqlite3_Database final : public SQL_Database {
             Sqlite3_Statement& operator=(Sqlite3_Statement&& other) = delete;
 
          private:
+            // m_db is declared before m_stmt so the prepared statement is
+            // finalized before the connection's refcount is released.
+            std::shared_ptr<sqlite3> m_db;
             sqlite3_stmt* m_stmt;
       };
 
-      sqlite3* m_db;
+      std::shared_ptr<sqlite3> m_db;
 };
 
 }  // namespace Botan
@@ -19691,9 +23661,13 @@ namespace Botan {
 template <typename T, typename Tag, typename... Capabilities>
 class Strong;
 
+/**
+ * Trait that detects whether the given types are a Strong<> instantiation
+ */
 template <typename... Ts>
 struct is_strong_type : std::false_type {};
 
+/// @copydoc is_strong_type
 template <typename... Ts>
 struct is_strong_type<Strong<Ts...>> : std::true_type {};
 
@@ -19736,33 +23710,65 @@ namespace detail {
 template <typename CapabilityT, typename... Tags>
 constexpr bool has_capability = (std::is_same_v<CapabilityT, Tags> || ...);
 
+/**
+ * Storage for the wrapped value of a strong type, and access to it via get()
+ */
 template <typename T>
 class Strong_Base {
    private:
       T m_value;
 
    public:
+      /// The type wrapped by this strong type
       using wrapped_type = T;
 
    public:
+      /// Default constructor, value initializes the wrapped value
       Strong_Base() = default;
+
+      /// Copy constructor
       Strong_Base(const Strong_Base&) = default;
+
+      /// Move constructor
       Strong_Base(Strong_Base&&) noexcept = default;
+
+      /// Copy assignment
+      /// @return reference to this
       Strong_Base& operator=(const Strong_Base&) = default;
+
+      /// Move assignment
+      /// @return reference to this
       Strong_Base& operator=(Strong_Base&&) noexcept = default;
+
       ~Strong_Base() = default;
 
+      /// Wrap the given value
+      /// @param v the value to wrap
       constexpr explicit Strong_Base(T v) : m_value(std::move(v)) {}
 
+      /// Access the wrapped value
+      /// @return reference to the wrapped value
       constexpr T& get() & { return m_value; }
 
+      /// Access the wrapped value
+      /// @return const reference to the wrapped value
       constexpr const T& get() const& { return m_value; }
 
+      /// Access the wrapped value
+      /// @return rvalue reference to the wrapped value
       constexpr T&& get() && { return std::move(m_value); }
 
+      /// Access the wrapped value
+      /// @return const rvalue reference to the wrapped value
       constexpr const T&& get() const&& { return std::move(m_value); }
 };
 
+/**
+ * Adds functionality to Strong_Base depending on the wrapped type
+ *
+ * The primary template adds nothing; the specializations below expose
+ * container and contiguous container operations where applicable.
+ */
 template <typename T>
 class Strong_Adapter : public Strong_Base<T> {
    public:
@@ -19775,66 +23781,111 @@ class Strong_Adapter<T> : public Strong_Base<T> {
       using Strong_Base<T>::Strong_Base;
 };
 
+/**
+ * Forwards the container interface of the wrapped type
+ */
 template <concepts::container T>
 class Container_Strong_Adapter_Base : public Strong_Base<T> {
    public:
+      /// The element type of the wrapped container
       using value_type = typename T::value_type;
+
+      /// The size type of the wrapped container
       using size_type = typename T::size_type;
+
+      /// The iterator type of the wrapped container
       using iterator = typename T::iterator;
+
+      /// The const iterator type of the wrapped container
       using const_iterator = typename T::const_iterator;
 
    public:
       using Strong_Base<T>::Strong_Base;
 
+      /// Create a container holding the given number of default constructed elements
+      /// @param size the number of elements
       explicit Container_Strong_Adapter_Base(size_t size)
          requires(concepts::resizable_container<T>)
             : Container_Strong_Adapter_Base(T(size)) {}
 
+      /// Create a container from the elements of an iterator range
+      /// @param begin start of the range
+      /// @param end one past the end of the range
       template <typename InputIt>
       Container_Strong_Adapter_Base(InputIt begin, InputIt end) : Container_Strong_Adapter_Base(T(begin, end)) {}
 
    public:
+      /// Iterate the wrapped container
+      /// @return an iterator to the first element
       decltype(auto) begin() noexcept(noexcept(this->get().begin())) { return this->get().begin(); }
 
+      /// Iterate the wrapped container
+      /// @return a const iterator to the first element
       decltype(auto) begin() const noexcept(noexcept(this->get().begin())) { return this->get().begin(); }
 
+      /// Iterate the wrapped container
+      /// @return an iterator one past the last element
       decltype(auto) end() noexcept(noexcept(this->get().end())) { return this->get().end(); }
 
+      /// Iterate the wrapped container
+      /// @return a const iterator one past the last element
       decltype(auto) end() const noexcept(noexcept(this->get().end())) { return this->get().end(); }
 
+      /// Iterate the wrapped container
+      /// @return a const iterator to the first element
       decltype(auto) cbegin() noexcept(noexcept(this->get().cbegin())) { return this->get().cbegin(); }
 
+      /// Iterate the wrapped container
+      /// @return a const iterator to the first element
       decltype(auto) cbegin() const noexcept(noexcept(this->get().cbegin())) { return this->get().cbegin(); }
 
+      /// Iterate the wrapped container
+      /// @return a const iterator one past the last element
       decltype(auto) cend() noexcept(noexcept(this->get().cend())) { return this->get().cend(); }
 
+      /// Iterate the wrapped container
+      /// @return a const iterator one past the last element
       decltype(auto) cend() const noexcept(noexcept(this->get().cend())) { return this->get().cend(); }
 
+      /// Query the size of the wrapped container
+      /// @return the number of elements
       size_type size() const noexcept(noexcept(this->get().size())) { return this->get().size(); }
 
+      /// Query whether the wrapped container is empty
+      /// @return true if the container holds no elements
       bool empty() const noexcept(noexcept(this->get().empty()))
          requires(concepts::has_empty<T>)
       {
          return this->get().empty();
       }
 
+      /// Change the number of elements held
+      /// @param size the new number of elements
       void resize(size_type size) noexcept(noexcept(this->get().resize(size)))
          requires(concepts::resizable_container<T>)
       {
          this->get().resize(size);
       }
 
+      /// Preallocate storage for the given number of elements
+      /// @param size the number of elements to reserve capacity for
       void reserve(size_type size) noexcept(noexcept(this->get().reserve(size)))
          requires(concepts::reservable_container<T>)
       {
          this->get().reserve(size);
       }
 
+      /// Element access
+      /// @param i the index of the element
+      /// @return const reference to the element at index i
       template <typename U>
       decltype(auto) operator[](U&& i) const noexcept(noexcept(this->get().operator[](i))) {
          return this->get()[std::forward<U>(i)];
       }
 
+      /// Element access
+      /// @param i the index of the element
+      /// @return reference to the element at index i
       template <typename U>
       decltype(auto) operator[](U&& i) noexcept(noexcept(this->get().operator[](i))) {
          return this->get()[std::forward<U>(i)];
@@ -19890,6 +23941,10 @@ class Strong final : public detail::Strong_Adapter<T> {
    public:
       using detail::Strong_Adapter<T>::Strong_Adapter;
 
+      /**
+      * Check whether this strong type was declared with the given capability tag
+      * @return true if CapabilityT is one of this type's Capabilities
+      */
       template <typename CapabilityT>
       constexpr static bool has_capability() {
          return (std::is_same_v<CapabilityT, Capabilities> || ...);
@@ -19954,13 +24009,20 @@ template <typename T, typename ParamT>
 
 namespace detail {
 
+/**
+ * Resolves to the type wrapped by a strong type, or to T itself if T is
+ * not a strong type
+ */
 template <typename T>
 struct wrapped_type_helper {
+      /// The resolved type
       using type = T;
 };
 
+/// @copydoc wrapped_type_helper
 template <concepts::strong_type T>
 struct wrapped_type_helper<T> {
+      /// The resolved type
       using type = typename T::wrapped_type;
 };
 
@@ -19978,197 +24040,407 @@ struct wrapped_type_helper<T> {
 template <typename T>
 using strong_type_wrapped_type = typename detail::wrapped_type_helper<std::remove_cvref_t<T>>::type;
 
+/**
+ * Write the wrapped value to an output stream
+ * @param os the output stream
+ * @param v the strong type to write
+ * @return reference to the output stream
+ */
 template <typename T, typename... Tags>
    requires(concepts::streamable<T>)
 decltype(auto) operator<<(std::ostream& os, const Strong<T, Tags...>& v) {
    return os << v.get();
 }
 
+/**
+ * Compare for equality
+ * @param lhs the first operand (strong type)
+ * @param rhs the second operand (strong type)
+ * @return true if lhs and rhs are equal
+ */
 template <typename T, typename... Tags>
    requires(std::equality_comparable<T>)
 bool operator==(const Strong<T, Tags...>& lhs, const Strong<T, Tags...>& rhs) {
    return lhs.get() == rhs.get();
 }
 
+/**
+ * Three-way comparison
+ * @param lhs the first operand (strong type)
+ * @param rhs the second operand (strong type)
+ * @return the ordering of lhs relative to rhs
+ */
 template <typename T, typename... Tags>
    requires(std::three_way_comparable<T>)
 auto operator<=>(const Strong<T, Tags...>& lhs, const Strong<T, Tags...>& rhs) {
    return lhs.get() <=> rhs.get();
 }
 
+/**
+ * Three-way comparison
+ * @param a the first operand (plain number)
+ * @param b the second operand (strong type)
+ * @return the ordering of a relative to b
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
 auto operator<=>(T1 a, Strong<T2, Tags...> b) {
    return a <=> b.get();
 }
 
+/**
+ * Three-way comparison
+ * @param a the first operand (strong type)
+ * @param b the second operand (plain number)
+ * @return the ordering of a relative to b
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
 auto operator<=>(Strong<T1, Tags...> a, T2 b) {
    return a.get() <=> b;
 }
 
+/**
+ * Compare for equality
+ * @param a the first operand (plain number)
+ * @param b the second operand (strong type)
+ * @return true if a and b are equal
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
 auto operator==(T1 a, Strong<T2, Tags...> b) {
    return a == b.get();
 }
 
+/**
+ * Compare for equality
+ * @param a the first operand (strong type)
+ * @param b the second operand (plain number)
+ * @return true if a and b are equal
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
 auto operator==(Strong<T1, Tags...> a, T2 b) {
    return a.get() == b;
 }
 
+/**
+ * Add the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator+(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a + b.get());
 }
 
+/**
+ * Add the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator+(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() + b);
 }
 
+/**
+ * Add the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator+(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() + b.get());
 }
 
+/**
+ * Subtract the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator-(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a - b.get());
 }
 
+/**
+ * Subtract the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator-(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() - b);
 }
 
+/**
+ * Subtract the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator-(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() - b.get());
 }
 
+/**
+ * Multiply the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator*(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a * b.get());
 }
 
+/**
+ * Multiply the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator*(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() * b);
 }
 
+/**
+ * Multiply the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator*(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() * b.get());
 }
 
+/**
+ * Divide the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator/(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a / b.get());
 }
 
+/**
+ * Divide the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator/(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() / b);
 }
 
+/**
+ * Divide the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator/(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() / b.get());
 }
 
+/**
+ * Bitwise XOR of the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator^(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a ^ b.get());
 }
 
+/**
+ * Bitwise XOR of the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator^(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() ^ b);
 }
 
+/**
+ * Bitwise XOR of the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator^(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() ^ b.get());
 }
 
+/**
+ * Bitwise AND of the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator&(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a & b.get());
 }
 
+/**
+ * Bitwise AND of the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator&(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() & b);
 }
 
+/**
+ * Bitwise AND of the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator&(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() & b.get());
 }
 
+/**
+ * Bitwise OR of the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator|(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a | b.get());
 }
 
+/**
+ * Bitwise OR of the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator|(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() | b);
 }
 
+/**
+ * Bitwise OR of the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator|(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() | b.get());
 }
 
+/**
+ * Right shift the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator>>(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a >> b.get());
 }
 
+/**
+ * Right shift the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator>>(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() >> b);
 }
 
+/**
+ * Right shift the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator>>(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() >> b.get());
 }
 
+/**
+ * Left shift the wrapped values
+ * @param a the left hand operand (plain number)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator<<(T1 a, Strong<T2, Tags...> b) {
    return Strong<T2, Tags...>(a << b.get());
 }
 
+/**
+ * Left shift the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (plain number)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr decltype(auto) operator<<(Strong<T1, Tags...> a, T2 b) {
    return Strong<T1, Tags...>(a.get() << b);
 }
 
+/**
+ * Left shift the wrapped values
+ * @param a the left hand operand (strong type)
+ * @param b the right hand operand (strong type)
+ * @return the result, wrapped in the strong type
+ */
 template <std::integral T, typename... Tags>
 constexpr decltype(auto) operator<<(Strong<T, Tags...> a, Strong<T, Tags...> b) {
    return Strong<T, Tags...>(a.get() << b.get());
 }
 
+/**
+ * Add to the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator+=(Strong<T1, Tags...>& a, T2 b) {
@@ -20176,12 +24448,24 @@ constexpr auto operator+=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Add to the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator+=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() += b.get();
    return a;
 }
 
+/**
+ * Subtract from the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator-=(Strong<T1, Tags...>& a, T2 b) {
@@ -20189,12 +24473,24 @@ constexpr auto operator-=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Subtract from the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator-=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() -= b.get();
    return a;
 }
 
+/**
+ * Multiply in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator*=(Strong<T1, Tags...>& a, T2 b) {
@@ -20202,12 +24498,24 @@ constexpr auto operator*=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Multiply in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator*=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() *= b.get();
    return a;
 }
 
+/**
+ * Divide in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator/=(Strong<T1, Tags...>& a, T2 b) {
@@ -20215,12 +24523,24 @@ constexpr auto operator/=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Divide in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator/=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() /= b.get();
    return a;
 }
 
+/**
+ * Bitwise XOR in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator^=(Strong<T1, Tags...>& a, T2 b) {
@@ -20228,12 +24548,24 @@ constexpr auto operator^=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Bitwise XOR in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator^=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() ^= b.get();
    return a;
 }
 
+/**
+ * Bitwise AND in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator&=(Strong<T1, Tags...>& a, T2 b) {
@@ -20241,12 +24573,24 @@ constexpr auto operator&=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Bitwise AND in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator&=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() &= b.get();
    return a;
 }
 
+/**
+ * Bitwise OR in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator|=(Strong<T1, Tags...>& a, T2 b) {
@@ -20254,12 +24598,24 @@ constexpr auto operator|=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Bitwise OR in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator|=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() |= b.get();
    return a;
 }
 
+/**
+ * Right shift in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator>>=(Strong<T1, Tags...>& a, T2 b) {
@@ -20267,12 +24623,24 @@ constexpr auto operator>>=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Right shift in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator>>=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() >>= b.get();
    return a;
 }
 
+/**
+ * Left shift in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (plain number)
+ * @return reference to a
+ */
 template <std::integral T1, std::integral T2, typename... Tags>
    requires(detail::has_capability<EnableArithmeticWithPlainNumber, Tags...>)
 constexpr auto operator<<=(Strong<T1, Tags...>& a, T2 b) {
@@ -20280,12 +24648,23 @@ constexpr auto operator<<=(Strong<T1, Tags...>& a, T2 b) {
    return a;
 }
 
+/**
+ * Left shift in place the wrapped value
+ * @param a the strong type to modify
+ * @param b the right hand operand (strong type)
+ * @return reference to a
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator<<=(Strong<T, Tags...>& a, Strong<T, Tags...> b) {
    a.get() <<= b.get();
    return a;
 }
 
+/**
+ * Increment the wrapped value (postfix)
+ * @param a the strong type to modify
+ * @return the value before the operation
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator++(Strong<T, Tags...>& a, int) {
    auto tmp = a;
@@ -20293,12 +24672,22 @@ constexpr auto operator++(Strong<T, Tags...>& a, int) {
    return tmp;
 }
 
+/**
+ * Increment the wrapped value (prefix)
+ * @param a the strong type to modify
+ * @return the value after the operation
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator++(Strong<T, Tags...>& a) {
    ++a.get();
    return a;
 }
 
+/**
+ * Decrement the wrapped value (postfix)
+ * @param a the strong type to modify
+ * @return the value before the operation
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator--(Strong<T, Tags...>& a, int) {
    auto tmp = a;
@@ -20306,6 +24695,11 @@ constexpr auto operator--(Strong<T, Tags...>& a, int) {
    return tmp;
 }
 
+/**
+ * Decrement the wrapped value (prefix)
+ * @param a the strong type to modify
+ * @return the value after the operation
+ */
 template <std::integral T, typename... Tags>
 constexpr auto operator--(Strong<T, Tags...>& a) {
    --a.get();
@@ -20333,16 +24727,30 @@ class StrongSpan final {
          conditional_t<std::is_const_v<T>, std::span<const typename T::value_type>, std::span<typename T::value_type>>;
 
    public:
+      /// The element type of the underlying span
       using value_type = typename underlying_span::value_type;
+
+      /// The size type of the underlying span
       using size_type = typename underlying_span::size_type;
+
+      /// The iterator type of the underlying span
       using iterator = typename underlying_span::iterator;
+
+      /// The pointer type of the underlying span
       using pointer = typename underlying_span::pointer;
+
+      /// The const pointer type of the underlying span
       using const_pointer = typename underlying_span::const_pointer;
 
+      /// Default constructor, creates an empty span
       StrongSpan() = default;
 
+      /// Annotate a plain span with this strong type's information
+      /// @param span the span to annotate
       explicit StrongSpan(underlying_span span) : m_span(span) {}
 
+      /// Create a span covering the contents of a strong type
+      /// @param strong the strong type to view
       // NOLINTNEXTLINE(*-explicit-conversions)
       StrongSpan(T& strong) : m_span(strong) {}
 
@@ -20356,54 +24764,94 @@ class StrongSpan final {
       //       a declaration of an ordinary copy constructor. The existence of a copy constructor
       //       is interpreted as "not cheap to copy", setting off the `performance-unnecessary-value-param` check.
       //       See also: https://github.com/randombit/botan/issues/3591
+      /// Convert a StrongSpan<T> to a StrongSpan<const T>
+      /// @param other the span to convert
       template <concepts::contiguous_strong_type T2>
       // NOLINTNEXTLINE(*-explicit-conversions)
       StrongSpan(const StrongSpan<T2>& other)
          requires(std::is_same_v<T2, std::remove_const_t<T>>)
             : m_span(other.get()) {}
 
+      /// Copy constructor
+      /// @param other the span to copy
       StrongSpan(const StrongSpan& other) = default;
+
+      /// Move constructor
+      /// @param other the span to move from
       StrongSpan(StrongSpan&& other) = default;
+
+      /// Copy assignment
+      /// @param other the span to copy
+      /// @return reference to this
       StrongSpan& operator=(const StrongSpan& other) = default;
+
+      /// Move assignment
+      /// @param other the span to move from
+      /// @return reference to this
       StrongSpan& operator=(StrongSpan&& other) = default;
 
       ~StrongSpan() = default;
 
       /**
+       * Access the underlying span
        * @returns the underlying std::span without any type constraints
        */
       underlying_span get() const { return m_span; }
 
       /**
+       * Access the underlying span
        * @returns the underlying std::span without any type constraints
        */
       underlying_span get() { return m_span; }
 
+      /// Access the underlying storage
+      /// @return a pointer to the first element
       decltype(auto) data() noexcept(noexcept(this->m_span.data())) { return this->m_span.data(); }
 
+      /// Access the underlying storage
+      /// @return a const pointer to the first element
       decltype(auto) data() const noexcept(noexcept(this->m_span.data())) { return this->m_span.data(); }
 
+      /// Query the size of the span
+      /// @return the number of elements
       decltype(auto) size() const noexcept(noexcept(this->m_span.size())) { return this->m_span.size(); }
 
+      /// Query whether the span is empty
+      /// @return true if the span covers no elements
       bool empty() const noexcept(noexcept(this->m_span.empty())) { return this->m_span.empty(); }
 
+      /// Iterate the span
+      /// @return an iterator to the first element
       decltype(auto) begin() noexcept(noexcept(this->m_span.begin())) { return this->m_span.begin(); }
 
+      /// Iterate the span
+      /// @return a const iterator to the first element
       decltype(auto) begin() const noexcept(noexcept(this->m_span.begin())) { return this->m_span.begin(); }
 
+      /// Iterate the span
+      /// @return an iterator one past the last element
       decltype(auto) end() noexcept(noexcept(this->m_span.end())) { return this->m_span.end(); }
 
+      /// Iterate the span
+      /// @return a const iterator one past the last element
       decltype(auto) end() const noexcept(noexcept(this->m_span.end())) { return this->m_span.end(); }
 
+      /// Element access
+      /// @param i the index of the element
+      /// @return reference to the element at index i
       decltype(auto) operator[](typename underlying_span::size_type i) const noexcept { return this->m_span[i]; }
 
    private:
       underlying_span m_span;
 };
 
+/**
+ * Trait that detects whether the given type is a StrongSpan<> instantiation
+ */
 template <typename>
 struct is_strong_span : std::false_type {};
 
+/// @copydoc is_strong_span
 template <typename T>
 struct is_strong_span<StrongSpan<T>> : std::true_type {};
 
@@ -20421,20 +24869,40 @@ namespace Botan {
 */
 BOTAN_PUBLIC_API(2, 0) RandomNumberGenerator& system_rng();
 
-/*
+/**
 * Instantiable reference to the system RNG.
 */
 class BOTAN_PUBLIC_API(2, 0) System_RNG final : public RandomNumberGenerator {
    public:
+      /**
+      * Return the name of this RNG type
+      * @return the name of this RNG type
+      */
       std::string name() const override { return system_rng().name(); }
 
+      /**
+      * Test whether this RNG has been seeded
+      * @return true if this RNG is seeded and ready for use
+      */
       bool is_seeded() const override { return system_rng().is_seeded(); }
 
+      /**
+      * Test whether this RNG accepts externally provided input
+      * @return false if this RNG is known to ignore provided inputs
+      */
       bool accepts_input() const override { return system_rng().accepts_input(); }
 
+      /**
+      * Clear all internally held values of this RNG
+      */
       void clear() override { system_rng().clear(); }
 
    protected:
+      /**
+      * Fill the output buffer, first incorporating the provided input
+      * @param out the buffer to fill
+      * @param in additional input to incorporate
+      */
       void fill_bytes_with_input(std::span<uint8_t> out, std::span<const uint8_t> in) override {
          system_rng().randomize_with_input(out, in);
       }
@@ -20697,9 +25165,11 @@ class BOTAN_PUBLIC_API(2, 0) X509_CA final {
       * so you can call it directly and then modify the extensions before
       * creating a certificate using X509_CA::make_cert.
       */
-      static Extensions choose_extensions(const PKCS10_Request& req,
-                                          const X509_Certificate& ca_certificate,
-                                          std::string_view hash_fn);
+      static Extensions choose_extensions(const PKCS10_Request& req, const X509_Certificate& ca_certificate);
+
+      BOTAN_DEPRECATED("Use the overload that does not take a hash function name (SKID is now always SHA-1)")
+      static Extensions
+         choose_extensions(const PKCS10_Request& req, const X509_Certificate& ca_certificate, std::string_view hash_fn);
 
       /**
       * Interface for creating new certificates
@@ -20806,7 +25276,7 @@ class BOTAN_PUBLIC_API(2, 0) X509_CA final {
 
    public:
       X509_CRL make_crl(const std::vector<CRL_Entry>& entries,
-                        uint32_t crl_number,
+                        const BigInt& crl_number,
                         RandomNumberGenerator& rng,
                         std::chrono::system_clock::time_point issue_time,
                         std::chrono::seconds next_update) const;
@@ -20862,6 +25332,8 @@ class BOTAN_PUBLIC_API(2, 0) Basic_Constraints final : public Certificate_Extens
    private:
       std::string oid_name() const override { return "X509v3.BasicConstraints"; }
 
+      bool is_appropriate_context(Extension_Context context) const override;
+
       std::vector<uint8_t> encode_inner() const override;
       void decode_inner(const std::vector<uint8_t>& in) override;
 
@@ -20891,6 +25363,8 @@ class BOTAN_PUBLIC_API(2, 0) Key_Usage final : public Certificate_Extension {
    private:
       std::string oid_name() const override { return "X509v3.KeyUsage"; }
 
+      bool is_appropriate_context(Extension_Context context) const override;
+
       bool should_encode() const override { return !m_constraints.empty(); }
 
       std::vector<uint8_t> encode_inner() const override;
@@ -20908,6 +25382,17 @@ class BOTAN_PUBLIC_API(2, 0) Subject_Key_ID final : public Certificate_Extension
 
       explicit Subject_Key_ID(const std::vector<uint8_t>& k) : m_key_id(k) {}
 
+      /**
+      * Derive the key identifier from the public key, using the first
+      * method given in RFC 5280 4.2.1.2:
+      *
+      *    (1) The keyIdentifier is composed of the 160-bit SHA-1 hash of
+      *    the value of the BIT STRING subjectPublicKey (excluding the tag,
+      *    length, and number of unused bits).
+      */
+      explicit Subject_Key_ID(const Public_Key& pub_key);
+
+      BOTAN_DEPRECATED("Use Subject_Key_ID(const Public_Key&)")
       Subject_Key_ID(const std::vector<uint8_t>& public_key, std::string_view hash_fn);
 
       std::unique_ptr<Certificate_Extension> copy() const override {
@@ -20923,6 +25408,8 @@ class BOTAN_PUBLIC_API(2, 0) Subject_Key_ID final : public Certificate_Extension
    private:
       std::string oid_name() const override { return "X509v3.SubjectKeyIdentifier"; }
 
+      bool is_appropriate_context(Extension_Context context) const override;
+
       bool should_encode() const override { return (!m_key_id.empty()); }
 
       std::vector<uint8_t> encode_inner() const override;
@@ -20936,15 +25423,30 @@ class BOTAN_PUBLIC_API(2, 0) Subject_Key_ID final : public Certificate_Extension
 */
 class BOTAN_PUBLIC_API(2, 0) Authority_Key_ID final : public Certificate_Extension {
    public:
-      std::unique_ptr<Certificate_Extension> copy() const override {
-         return std::make_unique<Authority_Key_ID>(m_key_id);
-      }
+      std::unique_ptr<Certificate_Extension> copy() const override { return std::make_unique<Authority_Key_ID>(*this); }
 
       Authority_Key_ID() = default;
 
       explicit Authority_Key_ID(const std::vector<uint8_t>& k) : m_key_id(k) {}
 
+      /**
+      * The authorityCertIssuer and authorityCertSerialNumber fields, which
+      * identify the certificate holding the authority's signing key.
+      */
+      struct Authority_Cert_Identifier final {
+            AlternativeName issuer;
+            X509_Serial_Number serial_number;
+      };
+
+      Authority_Key_ID(const std::vector<uint8_t>& k, Authority_Cert_Identifier authority_cert) :
+            m_key_id(k), m_authority_cert(std::move(authority_cert)) {}
+
       const std::vector<uint8_t>& get_key_id() const { return m_key_id; }
+
+      /**
+      * The authorityCertIssuer/authorityCertSerialNumber fields, if present
+      */
+      const std::optional<Authority_Cert_Identifier>& authority_cert_identifier() const { return m_authority_cert; }
 
       static OID static_oid() { return OID({2, 5, 29, 35}); }
 
@@ -20953,12 +25455,15 @@ class BOTAN_PUBLIC_API(2, 0) Authority_Key_ID final : public Certificate_Extensi
    private:
       std::string oid_name() const override { return "X509v3.AuthorityKeyIdentifier"; }
 
-      bool should_encode() const override { return (!m_key_id.empty()); }
+      bool is_appropriate_context(Extension_Context context) const override;
+
+      bool should_encode() const override { return !m_key_id.empty() || m_authority_cert.has_value(); }
 
       std::vector<uint8_t> encode_inner() const override;
       void decode_inner(const std::vector<uint8_t>& in) override;
 
       std::vector<uint8_t> m_key_id;
+      std::optional<Authority_Cert_Identifier> m_authority_cert;
 };
 
 /**
@@ -20980,6 +25485,8 @@ class BOTAN_PUBLIC_API(2, 4) Subject_Alternative_Name final : public Certificate
 
    private:
       std::string oid_name() const override { return "X509v3.SubjectAlternativeName"; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
 
       bool should_encode() const override { return m_alt_name.has_items(); }
 
@@ -21008,6 +25515,8 @@ class BOTAN_PUBLIC_API(2, 0) Issuer_Alternative_Name final : public Certificate_
 
    private:
       std::string oid_name() const override { return "X509v3.IssuerAlternativeName"; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
 
       bool should_encode() const override { return m_alt_name.has_items(); }
 
@@ -21039,6 +25548,8 @@ class BOTAN_PUBLIC_API(2, 0) Extended_Key_Usage final : public Certificate_Exten
    private:
       std::string oid_name() const override { return "X509v3.ExtendedKeyUsage"; }
 
+      bool is_appropriate_context(Extension_Context context) const override;
+
       bool should_encode() const override { return (!m_oids.empty()); }
 
       std::vector<uint8_t> encode_inner() const override;
@@ -21064,7 +25575,7 @@ class BOTAN_PUBLIC_API(2, 0) Name_Constraints final : public Certificate_Extensi
                     const std::optional<X509_Certificate>& issuer,
                     const std::vector<X509_Certificate>& cert_path,
                     std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                    size_t pos) override;
+                    size_t pos) const override;
 
       const NameConstraints& get_name_constraints() const { return m_name_constraints; }
 
@@ -21074,6 +25585,8 @@ class BOTAN_PUBLIC_API(2, 0) Name_Constraints final : public Certificate_Extensi
 
    private:
       std::string oid_name() const override { return "X509v3.NameConstraints"; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
 
       bool should_encode() const override { return true; }
 
@@ -21089,12 +25602,12 @@ class BOTAN_PUBLIC_API(2, 0) Name_Constraints final : public Certificate_Extensi
 class BOTAN_PUBLIC_API(2, 0) Certificate_Policies final : public Certificate_Extension {
    public:
       std::unique_ptr<Certificate_Extension> copy() const override {
-         return std::make_unique<Certificate_Policies>(m_oids);
+         return std::make_unique<Certificate_Policies>(*this);
       }
 
       Certificate_Policies() = default;
 
-      explicit Certificate_Policies(const std::vector<OID>& o) : m_oids(o) {}
+      explicit Certificate_Policies(const std::vector<OID>& oids);
 
       const std::vector<OID>& get_policy_oids() const { return m_oids; }
 
@@ -21106,10 +25619,12 @@ class BOTAN_PUBLIC_API(2, 0) Certificate_Policies final : public Certificate_Ext
                     const std::optional<X509_Certificate>& issuer,
                     const std::vector<X509_Certificate>& cert_path,
                     std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                    size_t pos) override;
+                    size_t pos) const override;
 
    private:
       std::string oid_name() const override { return "X509v3.CertificatePolicies"; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
 
       bool should_encode() const override { return (!m_oids.empty()); }
 
@@ -21117,6 +25632,7 @@ class BOTAN_PUBLIC_API(2, 0) Certificate_Policies final : public Certificate_Ext
       void decode_inner(const std::vector<uint8_t>& in) override;
 
       std::vector<OID> m_oids;
+      bool m_has_duplicate = false;
 };
 
 /**
@@ -21124,46 +25640,126 @@ class BOTAN_PUBLIC_API(2, 0) Certificate_Policies final : public Certificate_Ext
 */
 class BOTAN_PUBLIC_API(2, 0) Authority_Information_Access final : public Certificate_Extension {
    public:
-      std::unique_ptr<Certificate_Extension> copy() const override {
-         return std::make_unique<Authority_Information_Access>(m_ocsp_responders, m_ca_issuers);
-      }
+      /**
+      * An AccessDescription preserving accessMethod plus a raw view of the
+      * accessLocation GeneralName.
+      *
+      *     AccessDescription  ::=  SEQUENCE {
+      *          accessMethod          OBJECT IDENTIFIER,
+      *          accessLocation        GeneralName }
+      */
+      class BOTAN_PUBLIC_API(3, 13) AccessDescription final {
+         public:
+            AccessDescription(OID method,
+                              ASN1_Type location_tag,
+                              ASN1_Class location_class,
+                              std::vector<uint8_t> location_value) :
+                  m_method(std::move(method)),
+                  m_location_tag(location_tag),
+                  m_location_class(location_class),
+                  m_location_value(std::move(location_value)) {}
+
+            const OID& access_method() const { return m_method; }
+
+            /**
+            * The GeneralName CHOICE tag (the [n] of the access location).
+            */
+            ASN1_Type location_tag() const { return m_location_tag; }
+
+            ASN1_Class location_class() const { return m_location_class; }
+
+            /**
+            * The raw value bytes of the accessLocation, without the leading
+            * tag/length. For a URI accessLocation this is the IA5String value;
+            * for directoryName it is the DER of the Name.
+            */
+            const std::vector<uint8_t>& location_value() const { return m_location_value; }
+
+            /**
+            * If location is a URI (tag 6 IMPLICIT IA5String), return the string;
+            * nullopt otherwise.
+            */
+            std::optional<std::string> location_as_uri_string() const;
+
+         private:
+            OID m_method;
+            ASN1_Type m_location_tag;
+            ASN1_Class m_location_class;
+            std::vector<uint8_t> m_location_value;
+      };
+
+      std::unique_ptr<Certificate_Extension> copy() const override;
 
       Authority_Information_Access() = default;
 
-      BOTAN_DEPRECATED("Use constructor with list of OCSP responders")
+      BOTAN_DEPRECATED("Use constructor with list of OCSP responder URIs")
       explicit Authority_Information_Access(std::string_view ocsp,
-                                            const std::vector<std::string>& ca_issuers = std::vector<std::string>()) :
-            m_ocsp_responders{std::string(ocsp)}, m_ca_issuers(ca_issuers) {}
+                                            const std::vector<std::string>& ca_issuers = std::vector<std::string>());
 
-      explicit Authority_Information_Access(std::vector<std::string> ocsp_responders,
-                                            std::vector<std::string> ca_issuers = std::vector<std::string>()) :
-            m_ocsp_responders(std::move(ocsp_responders)), m_ca_issuers(std::move(ca_issuers)) {}
+      BOTAN_DEPRECATED("Use constructor that accepts URI types")
+      explicit Authority_Information_Access(const std::vector<std::string>& ocsp_responders,
+                                            const std::vector<std::string>& ca_issuers = std::vector<std::string>());
 
-      BOTAN_DEPRECATED("Use ocsp_responders") std::string ocsp_responder() const {
+      explicit Authority_Information_Access(std::vector<URI> ocsp_responders,
+                                            std::vector<URI> ca_issuers = std::vector<URI>());
+
+      /**
+      * Construct an AIA from raw AccessDescriptions, allowing the caller to
+      * emit access methods beyond id-ad-ocsp / id-ad-caIssuers and access
+      * locations beyond URIs. The typed URI accessors (ocsp_responder_uris,
+      * ca_issuer_uris) are also populated from any URI-form entries whose
+      * accessMethod is id-ad-ocsp or id-ad-caIssuers so the two views stay
+      * consistent.
+      */
+      explicit Authority_Information_Access(std::vector<AccessDescription> access_descriptions);
+
+      /**
+      * Append a single AccessDescription. URI-form id-ad-ocsp / id-ad-caIssuers
+      * entries also populate the corresponding typed URI accessor list.
+      */
+      void add_access_description(AccessDescription ad);
+
+      BOTAN_DEPRECATED("Use ocsp_responder_uris") std::string ocsp_responder() const {
          if(m_ocsp_responders.empty()) {
             return {};
          }
-         return m_ocsp_responders[0];
+         return m_ocsp_responders[0].original_input();
       }
 
-      const std::vector<std::string>& ocsp_responders() const { return m_ocsp_responders; }
+      BOTAN_DEPRECATED("Use ocsp_responder_uris") std::vector<std::string> ocsp_responders() const;
+
+      const std::vector<URI>& ocsp_responder_uris() const { return m_ocsp_responders; }
+
+      /**
+      * The full set of AccessDescriptions, including access methods that are
+      * not id-ad-ocsp or id-ad-caIssuers and access locations that are not URIs
+      */
+      const std::vector<AccessDescription>& access_descriptions() const { return m_access_descriptions; }
 
       static OID static_oid() { return OID({1, 3, 6, 1, 5, 5, 7, 1, 1}); }
 
       OID oid_of() const override { return static_oid(); }
 
-      const std::vector<std::string>& ca_issuers() const { return m_ca_issuers; }
+      BOTAN_DEPRECATED("Use ca_issuer_uris") std::vector<std::string> ca_issuers() const;
+
+      const std::vector<URI>& ca_issuer_uris() const { return m_ca_issuers; }
 
    private:
       std::string oid_name() const override { return "PKIX.AuthorityInformationAccess"; }
 
-      bool should_encode() const override { return (!m_ocsp_responders.empty() || !m_ca_issuers.empty()); }
+      bool is_appropriate_context(Extension_Context context) const override;
+
+      bool should_encode() const override {
+         // The URI lists are views into the general AccessDescription list
+         return !m_access_descriptions.empty();
+      }
 
       std::vector<uint8_t> encode_inner() const override;
       void decode_inner(const std::vector<uint8_t>& in) override;
 
-      std::vector<std::string> m_ocsp_responders;
-      std::vector<std::string> m_ca_issuers;
+      std::vector<URI> m_ocsp_responders;
+      std::vector<URI> m_ca_issuers;
+      std::vector<AccessDescription> m_access_descriptions;
 };
 
 /**
@@ -21173,11 +25769,15 @@ class BOTAN_PUBLIC_API(2, 0) CRL_Number final : public Certificate_Extension {
    public:
       std::unique_ptr<Certificate_Extension> copy() const override;
 
-      CRL_Number() : m_has_value(false), m_crl_number(0) {}
+      CRL_Number() : m_has_value(false), m_crl_number(BigInt::zero()) {}
 
-      BOTAN_FUTURE_EXPLICIT CRL_Number(size_t n) : m_has_value(true), m_crl_number(n) {}
+      BOTAN_FUTURE_EXPLICIT CRL_Number(size_t n) : CRL_Number(BigInt::from_u64(n)) {}
 
-      size_t get_crl_number() const;
+      explicit CRL_Number(BigInt n);
+
+      const BigInt& crl_number() const;
+
+      BOTAN_DEPRECATED("Use crl_number") size_t get_crl_number() const;
 
       static OID static_oid() { return OID({2, 5, 29, 20}); }
 
@@ -21186,13 +25786,15 @@ class BOTAN_PUBLIC_API(2, 0) CRL_Number final : public Certificate_Extension {
    private:
       std::string oid_name() const override { return "X509v3.CRLNumber"; }
 
+      bool is_appropriate_context(Extension_Context context) const override;
+
       bool should_encode() const override { return m_has_value; }
 
       std::vector<uint8_t> encode_inner() const override;
       void decode_inner(const std::vector<uint8_t>& in) override;
 
       bool m_has_value;
-      size_t m_crl_number;
+      BigInt m_crl_number;
 };
 
 /**
@@ -21215,6 +25817,8 @@ class BOTAN_PUBLIC_API(2, 0) CRL_ReasonCode final : public Certificate_Extension
    private:
       std::string oid_name() const override { return "X509v3.ReasonCode"; }
 
+      bool is_appropriate_context(Extension_Context context) const override;
+
       bool should_encode() const override { return (m_reason != CRL_Code::Unspecified); }
 
       std::vector<uint8_t> encode_inner() const override;
@@ -21224,35 +25828,107 @@ class BOTAN_PUBLIC_API(2, 0) CRL_ReasonCode final : public Certificate_Extension
 };
 
 /**
-* CRL Distribution Points Extension
-* todo enforce restrictions from RFC 5280 4.2.1.13
+* DistributionPointName used by CRLDistributionPoints and
+* IssuingDistributionPoint (RFC 5280 4.2.1.13 / 5.2.5).
+*
+*     DistributionPointName ::= CHOICE {
+*          fullName                [0]     GeneralNames,
+*          nameRelativeToCRLIssuer [1]     RelativeDistinguishedName }
+*
+* Currently only the fullName CHOICE arm is supported; nameRelativeToCRLIssuer
+* is rejected at decode time.
+*/
+class BOTAN_PUBLIC_API(3, 13) DistributionPointName final : public ASN1_Object {
+   public:
+      DistributionPointName() = default;
+
+      explicit DistributionPointName(AlternativeName full_name) : m_full_name(std::move(full_name)) {}
+
+      void encode_into(DER_Encoder& to) const override;
+      void decode_from(BER_Decoder& from) override;
+
+      /**
+      * The fullName GeneralNames
+      *
+      * In the current implementation this will always be set, it returns an
+      * optional to help any future addition of nameRelativeToCRLIssuer, in
+      * which case full_name would return nullopt and another getter would
+      * return the relative name.
+      */
+      const std::optional<AlternativeName>& full_name() const { return m_full_name; }
+
+   private:
+      std::optional<AlternativeName> m_full_name;
+};
+
+/**
+* CRL Distribution Points Extension (RFC 5280 4.2.1.13)
 */
 class BOTAN_PUBLIC_API(2, 0) CRL_Distribution_Points final : public Certificate_Extension {
    public:
+      /*
+      * DistributionPoint ::= SEQUENCE {
+      *      distributionPoint       [0]     DistributionPointName OPTIONAL,
+      *      reasons                 [1]     ReasonFlags OPTIONAL,
+      *      cRLIssuer               [2]     GeneralNames OPTIONAL }
+      */
       class BOTAN_PUBLIC_API(2, 0) Distribution_Point final : public ASN1_Object {
          public:
             void encode_into(DER_Encoder& to) const override;
             void decode_from(BER_Decoder& from) override;
 
-            explicit Distribution_Point(const AlternativeName& name = AlternativeName()) : m_point(name) {}
+            Distribution_Point() = default;
 
-            const AlternativeName& point() const { return m_point; }
+            explicit Distribution_Point(const AlternativeName& name) : m_dp_name(DistributionPointName(name)) {}
+
+            Distribution_Point(std::optional<DistributionPointName> dp_name,
+                               std::optional<ReasonFlags> reasons,
+                               std::optional<AlternativeName> crl_issuer) :
+                  m_dp_name(std::move(dp_name)), m_reasons(reasons), m_crl_issuer(std::move(crl_issuer)) {}
+
+            /**
+            * Return the optional distribution point name
+            */
+            const std::optional<DistributionPointName>& distribution_point_name() const { return m_dp_name; }
+
+            /**
+            * Return the optional reason flags
+            */
+            const std::optional<ReasonFlags>& reasons() const { return m_reasons; }
+
+            /**
+            * Return the optional CRL issuer name
+            */
+            const std::optional<AlternativeName>& crl_issuer() const { return m_crl_issuer; }
+
+            /**
+            * Deprecated compatibility shim. Raises Invalid_State if the distributionPoint
+            * field is absent or the name is a relative name.
+            *
+            * Prefer distribution_point_name(), which surfaces both the OPTIONAL field and
+            * the CHOICE arm explicitly.
+            */
+            BOTAN_DEPRECATED("Use distribution_point_name()") const AlternativeName& point() const;
 
          private:
-            AlternativeName m_point;
+            std::optional<DistributionPointName> m_dp_name;
+            std::optional<ReasonFlags> m_reasons;
+            std::optional<AlternativeName> m_crl_issuer;
       };
 
       std::unique_ptr<Certificate_Extension> copy() const override {
-         return std::make_unique<CRL_Distribution_Points>(m_distribution_points);
+         return std::make_unique<CRL_Distribution_Points>(*this);
       }
 
       CRL_Distribution_Points() = default;
 
-      explicit CRL_Distribution_Points(const std::vector<Distribution_Point>& points) : m_distribution_points(points) {}
+      explicit CRL_Distribution_Points(const std::vector<Distribution_Point>& points);
 
       const std::vector<Distribution_Point>& distribution_points() const { return m_distribution_points; }
 
-      const std::vector<std::string>& crl_distribution_urls() const { return m_crl_distribution_urls; }
+      BOTAN_DEPRECATED("Use crl_distribution_point_uris") std::vector<std::string> crl_distribution_urls() const;
+
+      const std::vector<URI>& crl_distribution_point_uris() const { return m_crl_distribution_urls; }
 
       static OID static_oid() { return OID({2, 5, 29, 31}); }
 
@@ -21261,31 +25937,80 @@ class BOTAN_PUBLIC_API(2, 0) CRL_Distribution_Points final : public Certificate_
    private:
       std::string oid_name() const override { return "X509v3.CRLDistributionPoints"; }
 
+      bool is_appropriate_context(Extension_Context context) const override;
+
       bool should_encode() const override { return !m_distribution_points.empty(); }
 
       std::vector<uint8_t> encode_inner() const override;
       void decode_inner(const std::vector<uint8_t>& in) override;
 
       std::vector<Distribution_Point> m_distribution_points;
-      std::vector<std::string> m_crl_distribution_urls;
+      std::vector<URI> m_crl_distribution_urls;
 };
 
 /**
-* CRL Issuing Distribution Point Extension
-* todo enforce restrictions from RFC 5280 5.2.5
+* CRL Issuing Distribution Point Extension (RFC 5280 5.2.5)
+*
+*     IssuingDistributionPoint ::= SEQUENCE {
+*          distributionPoint          [0] DistributionPointName OPTIONAL,
+*          onlyContainsUserCerts      [1] BOOLEAN DEFAULT FALSE,
+*          onlyContainsCACerts        [2] BOOLEAN DEFAULT FALSE,
+*          onlySomeReasons            [3] ReasonFlags OPTIONAL,
+*          indirectCRL                [4] BOOLEAN DEFAULT FALSE,
+*          onlyContainsAttributeCerts [5] BOOLEAN DEFAULT FALSE }
 */
-class CRL_Issuing_Distribution_Point final : public Certificate_Extension {
+class BOTAN_PUBLIC_API(2, 4) CRL_Issuing_Distribution_Point final : public Certificate_Extension {
    public:
       CRL_Issuing_Distribution_Point() = default;
 
+      explicit CRL_Issuing_Distribution_Point(DistributionPointName dp_name) : m_dp_name(std::move(dp_name)) {}
+
+      CRL_Issuing_Distribution_Point(std::optional<DistributionPointName> dp_name,
+                                     bool only_contains_user_certs,
+                                     bool only_contains_ca_certs,
+                                     std::optional<ReasonFlags> only_some_reasons,
+                                     bool indirect_crl,
+                                     bool only_contains_attribute_certs) :
+            m_dp_name(std::move(dp_name)),
+            m_only_contains_user_certs(only_contains_user_certs),
+            m_only_contains_ca_certs(only_contains_ca_certs),
+            m_only_some_reasons(only_some_reasons),
+            m_indirect_crl(indirect_crl),
+            m_only_contains_attribute_certs(only_contains_attribute_certs) {}
+
+      /**
+      * Deprecated compatibility shim for the pre-3.13 API. Extracts the
+      * DistributionPointName from a cert-side Distribution_Point.
+      */
+      BOTAN_DEPRECATED("Use the DistributionPointName constructor")
       explicit CRL_Issuing_Distribution_Point(const CRL_Distribution_Points::Distribution_Point& distribution_point) :
-            m_distribution_point(distribution_point) {}
+            m_dp_name(distribution_point.distribution_point_name()) {}
 
       std::unique_ptr<Certificate_Extension> copy() const override {
-         return std::make_unique<CRL_Issuing_Distribution_Point>(m_distribution_point);
+         return std::make_unique<CRL_Issuing_Distribution_Point>(*this);
       }
 
-      const AlternativeName& get_point() const { return m_distribution_point.point(); }
+      /**
+      * distributionPoint [0] DistributionPointName OPTIONAL.
+      */
+      const std::optional<DistributionPointName>& distribution_point_name() const { return m_dp_name; }
+
+      bool only_contains_user_certs() const { return m_only_contains_user_certs; }
+
+      bool only_contains_ca_certs() const { return m_only_contains_ca_certs; }
+
+      const std::optional<ReasonFlags>& only_some_reasons() const { return m_only_some_reasons; }
+
+      bool indirect_crl() const { return m_indirect_crl; }
+
+      bool only_contains_attribute_certs() const { return m_only_contains_attribute_certs; }
+
+      /**
+      * Deprecated compatibility shim for the pre-3.13 API. Returns the
+      * fullName GeneralNames; raises Invalid_State if the distributionPoint
+      * field is absent or its CHOICE arm is nameRelativeToCRLIssuer.
+      */
+      BOTAN_DEPRECATED("Use distribution_point_name()") const AlternativeName& get_point() const;
 
       static OID static_oid() { return OID({2, 5, 29, 28}); }
 
@@ -21294,12 +26019,27 @@ class CRL_Issuing_Distribution_Point final : public Certificate_Extension {
    private:
       std::string oid_name() const override { return "X509v3.CRLIssuingDistributionPoint"; }
 
-      bool should_encode() const override { return true; }
+      bool is_appropriate_context(Extension_Context context) const override;
+
+      /**
+      * RFC 5280 5.2.5: "Conforming CRL issuers MUST NOT issue CRLs where
+      * the DER encoding of the issuing distribution point extension is
+      * an empty sequence." Suppress emission when no field is set.
+      */
+      bool should_encode() const override {
+         return m_dp_name.has_value() || m_only_contains_user_certs || m_only_contains_ca_certs ||
+                m_only_some_reasons.has_value() || m_indirect_crl || m_only_contains_attribute_certs;
+      }
 
       std::vector<uint8_t> encode_inner() const override;
       void decode_inner(const std::vector<uint8_t>& in) override;
 
-      CRL_Distribution_Points::Distribution_Point m_distribution_point;
+      std::optional<DistributionPointName> m_dp_name;
+      bool m_only_contains_user_certs = false;
+      bool m_only_contains_ca_certs = false;
+      std::optional<ReasonFlags> m_only_some_reasons;
+      bool m_indirect_crl = false;
+      bool m_only_contains_attribute_certs = false;
 };
 
 /**
@@ -21323,13 +26063,63 @@ class OCSP_NoCheck final : public Certificate_Extension {
 
       OID oid_of() const override { return static_oid(); }
 
+      void validate(const X509_Certificate& subject,
+                    const std::optional<X509_Certificate>& issuer,
+                    const std::vector<X509_Certificate>& cert_path,
+                    std::vector<std::set<Certificate_Status_Code>>& cert_status,
+                    size_t pos) const override;
+
    private:
       std::string oid_name() const override { return "PKIX.OCSP.NoCheck"; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
 
       bool should_encode() const override { return true; }
 
       std::vector<uint8_t> encode_inner() const override;
 
+      void decode_inner(const std::vector<uint8_t>& in) override;
+};
+
+/**
+* No Revocation Available Extension
+*
+* RFC 9608 Section 2
+*
+*    The noRevAvail extension, defined in [X.509-2019-TC2], allows a CA to
+*    indicate that no revocation information will be made available for
+*    this certificate.
+*
+*    This extension MUST NOT be present in CA public key certificates.
+*
+*    Conforming CAs MUST include this extension in certificates for which
+*    no revocation information will be published.  When present,
+*    conforming CAs MUST mark this extension as non-critical.
+*/
+class BOTAN_PUBLIC_API(3, 13) NoRevocationAvailable final : public Certificate_Extension {
+   public:
+      NoRevocationAvailable() = default;
+
+      std::unique_ptr<Certificate_Extension> copy() const override { return std::make_unique<NoRevocationAvailable>(); }
+
+      static OID static_oid() { return OID({2, 5, 29, 56}); }
+
+      OID oid_of() const override { return static_oid(); }
+
+      void validate(const X509_Certificate& subject,
+                    const std::optional<X509_Certificate>& issuer,
+                    const std::vector<X509_Certificate>& cert_path,
+                    std::vector<std::set<Certificate_Status_Code>>& cert_status,
+                    size_t pos) const override;
+
+   private:
+      std::string oid_name() const override { return "X509v3.NoRevocationAvailable"; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
+
+      bool should_encode() const override { return true; }
+
+      std::vector<uint8_t> encode_inner() const override;
       void decode_inner(const std::vector<uint8_t>& in) override;
 };
 
@@ -21387,6 +26177,8 @@ class BOTAN_PUBLIC_API(3, 5) TNAuthList final : public Certificate_Extension {
 
    private:
       std::string oid_name() const override { return "PKIX.TNAuthList"; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
 
       bool should_encode() const override { return true; }
 
@@ -21483,7 +26275,7 @@ class BOTAN_PUBLIC_API(3, 9) IPAddressBlocks final : public Certificate_Extensio
             IPAddress<V> m_min{};
             IPAddress<V> m_max{};
 
-            IPAddress<V> decode_single_address(std::vector<uint8_t> decoded, bool min);
+            IPAddress<V> decode_single_address(const ASN1_BitString& decoded, bool min);
       };
 
       template <Version V>
@@ -21548,7 +26340,7 @@ class BOTAN_PUBLIC_API(3, 9) IPAddressBlocks final : public Certificate_Extensio
                     const std::optional<X509_Certificate>& issuer,
                     const std::vector<X509_Certificate>& cert_path,
                     std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                    size_t pos) override;
+                    size_t pos) const override;
 
       /// Add a single IP address to this extension (for the specified SAFI, if any)
       template <Version V>
@@ -21584,8 +26376,16 @@ class BOTAN_PUBLIC_API(3, 9) IPAddressBlocks final : public Certificate_Extensio
 
       const std::vector<IPAddressFamily>& addr_blocks() const { return m_ip_addr_blocks; }
 
+      /// The number of IPv4 families contained in the extension
+      size_t v4_count() const { return m_v4_count; }
+
+      /// The number of IPv6 families contained in the extension
+      size_t v6_count() const { return m_v6_count; }
+
    private:
       std::string oid_name() const override { return "PKIX.IpAddrBlocks"; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
 
       bool should_encode() const override { return true; }
 
@@ -21593,6 +26393,8 @@ class BOTAN_PUBLIC_API(3, 9) IPAddressBlocks final : public Certificate_Extensio
       void decode_inner(const std::vector<uint8_t>& in) override;
 
       std::vector<IPAddressFamily> m_ip_addr_blocks;
+      size_t m_v4_count = 0;
+      size_t m_v6_count = 0;
 
       void sort_and_merge();
       template <Version V>
@@ -21687,7 +26489,7 @@ class BOTAN_PUBLIC_API(3, 9) ASBlocks final : public Certificate_Extension {
                     const std::optional<X509_Certificate>& issuer,
                     const std::vector<X509_Certificate>& cert_path,
                     std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                    size_t pos) override;
+                    size_t pos) const override;
 
       /// Add a single asnum to this extension
       void add_asnum(asnum_t asnum) { add_asnum(asnum, asnum); }
@@ -21730,6 +26532,8 @@ class BOTAN_PUBLIC_API(3, 9) ASBlocks final : public Certificate_Extension {
 
       std::string oid_name() const override { return "PKIX.AutonomousSysIds"; }
 
+      bool is_appropriate_context(Extension_Context context) const override;
+
       bool should_encode() const override { return true; }
 
       static ASIdentifierChoice add_new(const std::optional<ASIdentifierChoice>& old, asnum_t min, asnum_t max);
@@ -21748,7 +26552,7 @@ class BOTAN_PUBLIC_API(2, 4) Unknown_Extension final : public Certificate_Extens
             m_oid(oid), m_critical(critical), m_failed_to_decode(failed_to_decode) {}
 
       std::unique_ptr<Certificate_Extension> copy() const override {
-         return std::make_unique<Unknown_Extension>(m_oid, m_critical, m_failed_to_decode);
+         return std::make_unique<Unknown_Extension>(*this);
       }
 
       /**
@@ -21778,7 +26582,7 @@ class BOTAN_PUBLIC_API(2, 4) Unknown_Extension final : public Certificate_Extens
                     const std::optional<X509_Certificate>& /*issuer*/,
                     const std::vector<X509_Certificate>& /*cert_path*/,
                     std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                    size_t pos) override {
+                    size_t pos) const override {
          if(m_failed_to_decode) {
             cert_status.at(pos).insert(Certificate_Status_Code::EXTENSION_ENCODING_ERROR);
          } else if(m_critical) {
@@ -21788,6 +26592,8 @@ class BOTAN_PUBLIC_API(2, 4) Unknown_Extension final : public Certificate_Extens
 
    private:
       std::string oid_name() const override { return ""; }
+
+      bool is_appropriate_context(Extension_Context context) const override;
 
       bool should_encode() const override { return true; }
 
@@ -21905,22 +26711,28 @@ class BOTAN_PUBLIC_API(2, 0) Path_Validation_Restrictions final {
       * well as end entity (if OCSP enabled in path validation request)
       * @param max_ocsp_age maximum age of OCSP responses w/o next_update.
       *        If zero, there is no maximum age
-      * @param trusted_ocsp_responders certificate store containing certificates
+      * @param trusted_ocsp_responders optional certificate store containing certificates
       *        of trusted OCSP responders (additionally to the CA's responders)
       * @param ignore_trusted_root_time_range if true, validity checks on the
       *        time range of the trusted root certificate only produce warnings
       * @param require_self_signed_trust_anchors if true, only self-signed certificates
       *        are allowed as trust anchors. Trust anchors based on intermediate
       *        and leaf certificates are forbidden in this case.
+      * @param accept_ocsp_softfail if true then soft fail conditions (the OCSP
+      *        responder being unavailable or returning an error status, no
+      *        responder URL, or the library being built without HTTP support)
+      *        will be accepted as satisfying revocation requirements.
+      *        Not recommended.
       */
       BOTAN_FUTURE_EXPLICIT Path_Validation_Restrictions(
          bool require_rev = false,
          size_t minimum_key_strength = 110,
          bool ocsp_all_intermediates = false,
-         std::chrono::seconds max_ocsp_age = std::chrono::seconds::zero(),
-         std::unique_ptr<Certificate_Store> trusted_ocsp_responders = std::make_unique<Certificate_Store_In_Memory>(),
+         std::chrono::seconds max_ocsp_age = std::chrono::hours(24 * 7),
+         std::unique_ptr<Certificate_Store> trusted_ocsp_responders = nullptr,
          bool ignore_trusted_root_time_range = false,
-         bool require_self_signed_trust_anchors = true);
+         bool require_self_signed_trust_anchors = true,
+         bool accept_ocsp_softfail = false);
 
       /**
       * @param require_rev if true, revocation information is required
@@ -21934,23 +26746,28 @@ class BOTAN_PUBLIC_API(2, 0) Path_Validation_Restrictions final {
       *        rejected.
       * @param max_ocsp_age maximum age of OCSP responses w/o next_update.
       *        If zero, there is no maximum age
-      * @param trusted_ocsp_responders certificate store containing certificates
+      * @param trusted_ocsp_responders optional certificate store containing certificates
       *        of trusted OCSP responders (additionally to the CA's responders)
       * @param ignore_trusted_root_time_range if true, validity checks on the
       *        time range of the trusted root certificate only produce warnings
       * @param require_self_signed_trust_anchors if true, only self-signed certificates
       *        are allowed as trust anchors. Trust anchors based on intermediate
       *        and leaf certificates are forbidden in this case.
+      * @param accept_ocsp_softfail if true then soft fail conditions (the OCSP
+      *        responder being unavailable or returning an error status, no
+      *        responder URL, or the library being built without HTTP support)
+      *        will be accepted as satisfying revocation requirements.
+      *        Not recommended.
       */
-      Path_Validation_Restrictions(
-         bool require_rev,
-         size_t minimum_key_strength,
-         bool ocsp_all_intermediates,
-         const std::set<std::string>& trusted_hashes,
-         std::chrono::seconds max_ocsp_age = std::chrono::seconds::zero(),
-         std::unique_ptr<Certificate_Store> trusted_ocsp_responders = std::make_unique<Certificate_Store_In_Memory>(),
-         bool ignore_trusted_root_time_range = false,
-         bool require_self_signed_trust_anchors = true) :
+      Path_Validation_Restrictions(bool require_rev,
+                                   size_t minimum_key_strength,
+                                   bool ocsp_all_intermediates,
+                                   const std::set<std::string>& trusted_hashes,
+                                   std::chrono::seconds max_ocsp_age = std::chrono::hours(24 * 7),
+                                   std::unique_ptr<Certificate_Store> trusted_ocsp_responders = nullptr,
+                                   bool ignore_trusted_root_time_range = false,
+                                   bool require_self_signed_trust_anchors = true,
+                                   bool accept_ocsp_softfail = false) :
             m_require_revocation_information(require_rev),
             m_ocsp_all_intermediates(ocsp_all_intermediates),
             m_trusted_hashes(trusted_hashes),
@@ -21958,7 +26775,8 @@ class BOTAN_PUBLIC_API(2, 0) Path_Validation_Restrictions final {
             m_max_ocsp_age(max_ocsp_age),
             m_trusted_ocsp_responders(std::move(trusted_ocsp_responders)),
             m_ignore_trusted_root_time_range(ignore_trusted_root_time_range),
-            m_require_self_signed_trust_anchors(require_self_signed_trust_anchors) {}
+            m_require_self_signed_trust_anchors(require_self_signed_trust_anchors),
+            m_accept_ocsp_softfail(accept_ocsp_softfail) {}
 
       /**
       * @return whether revocation information is required
@@ -22016,6 +26834,14 @@ class BOTAN_PUBLIC_API(2, 0) Path_Validation_Restrictions final {
        */
       bool require_self_signed_trust_anchors() const { return m_require_self_signed_trust_anchors; }
 
+      /**
+       * By default OCSP soft-fail conditions (such as a network error)
+       * do not count as satisfying revocation requirements.
+       * This restriction can be removed by setting
+       * accept_ocsp_softfail=true in the constructor.
+       */
+      bool accept_ocsp_softfail() const { return m_accept_ocsp_softfail; }
+
    private:
       bool m_require_revocation_information;
       bool m_ocsp_all_intermediates;
@@ -22025,6 +26851,7 @@ class BOTAN_PUBLIC_API(2, 0) Path_Validation_Restrictions final {
       std::unique_ptr<Certificate_Store> m_trusted_ocsp_responders;
       bool m_ignore_trusted_root_time_range;
       bool m_require_self_signed_trust_anchors;
+      bool m_accept_ocsp_softfail;
 };
 
 /**
@@ -22118,9 +26945,6 @@ class BOTAN_PUBLIC_API(2, 0) Path_Validation_Result final {
 * @param ocsp_timeout timeout for OCSP operations, 0 disables OCSP check
 * @param ocsp_resp additional OCSP responses to consider (eg from peer)
 * @return result of the path validation
-*   note: when enabled, OCSP check is softfail by default: if the OCSP server is not
-*   reachable, Path_Validation_Result::successful_validation() will return true.
-*   Hardfail OCSP check can be achieve by also calling Path_Validation_Result::no_warnings().
 */
 Path_Validation_Result BOTAN_PUBLIC_API(2, 0)
    x509_path_validate(const std::vector<X509_Certificate>& end_certs,
@@ -22219,13 +27043,16 @@ namespace PKIX {
 * @param trusted_certstores list of certificate stores that contain trusted certificates
 * @param end_entity the cert to be validated
 * @param end_entity_extra optional list of additional untrusted certs for path building
+* @param max_paths if set, enumerate at most this many paths and return
+*        EXCEEDED_SEARCH_LIMITS if more paths exist; if nullopt, unbounded
 * @return result of the path building operation (OK or error)
 */
 Certificate_Status_Code BOTAN_PUBLIC_API(3, 11)
    build_all_certificate_paths(std::vector<std::vector<X509_Certificate>>& cert_paths,
                                const std::vector<Certificate_Store*>& trusted_certstores,
                                const X509_Certificate& end_entity,
-                               const std::vector<X509_Certificate>& end_entity_extra);
+                               const std::vector<X509_Certificate>& end_entity_extra,
+                               std::optional<size_t> max_paths = std::nullopt);
 
 /**
 * Same as build_all_certificate_paths but only outputs a single path. If there are
@@ -22239,6 +27066,7 @@ Certificate_Status_Code BOTAN_PUBLIC_API(3, 11)
 * @param trusted_certstores list of certificate stores that contain trusted certificates
 * @param end_entity the cert to be validated
 * @param end_entity_extra optional list of additional untrusted certs for path building
+* @param max_paths if set, examine at most this many candidate paths; if nullopt, unbounded
 * @return result of the path building operation (OK or error)
 */
 BOTAN_DEPRECATED("Use build_all_certificate_paths")
@@ -22246,7 +27074,8 @@ Certificate_Status_Code BOTAN_PUBLIC_API(2, 0)
    build_certificate_path(std::vector<X509_Certificate>& cert_path_out,
                           const std::vector<Certificate_Store*>& trusted_certstores,
                           const X509_Certificate& end_entity,
-                          const std::vector<X509_Certificate>& end_entity_extra);
+                          const std::vector<X509_Certificate>& end_entity_extra,
+                          std::optional<size_t> max_paths = std::nullopt);
 
 /**
 * Check the certificate chain, but not any revocation data

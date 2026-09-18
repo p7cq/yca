@@ -75,11 +75,19 @@ public:
   // shadow ours in this class's scope.
   std::shared_ptr<store::Statement> stmt(std::string_view sql) const;
 
+  // yca's own convenience overload: raw DDL, used by every ensure_*_table
+  // in ca.cpp. Deliberately not virtual/override - see the Table_Schema
+  // overload below, which is the Botan-facing one.
+  void create_table(std::string_view schema);
+
   // Botan::SQL_Database overrides - for Certificate_Store_In_SQL only, see
   // above. Not called anywhere else in yca.
-  void create_table(std::string_view schema) override;
+  void create_table(const Botan::SQL_Database::Table_Schema &schema) override;
   std::shared_ptr<Botan::SQL_Database::Statement>
   new_statement(std::string_view sql) const override;
+  std::shared_ptr<Botan::SQL_Database::Statement>
+  upsert(std::string_view table,
+         std::initializer_list<std::string_view> columns) const override;
   std::size_t row_count(std::string_view table_name) override;
   std::size_t rows_changed_by_last_statement() override;
 

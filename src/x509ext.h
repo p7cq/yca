@@ -63,6 +63,11 @@ public:
   std::unique_ptr<Botan::Certificate_Extension> copy() const override {
     return std::make_unique<Name_Constraints>(m_nc);
   }
+  // nameConstraints is a CA-certificate-only extension (RFC 5280 4.2.1.10);
+  // matches Botan's own Name_Constraints::is_appropriate_context.
+  bool is_appropriate_context(Botan::Extension_Context context) const override {
+    return context == Botan::Extension_Context::Certificate;
+  }
 
 private:
   // An extension with no subtrees at all would be a SEQUENCE {} that

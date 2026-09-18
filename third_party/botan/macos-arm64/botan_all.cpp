@@ -1,5 +1,5 @@
 /*
-* Botan 3.12.0 Amalgamation
+* Botan 3.13.0 Amalgamation
 * (C) 1999-2023 The Botan Authors
 *
 * Botan is released under the Simplified BSD License (see license.txt)
@@ -522,6 +522,45 @@ class AlignmentBuffer final {
 };
 
 }  // namespace Botan
+
+namespace Botan {
+
+class BigInt;
+
+}
+
+namespace Botan::ASN1 {
+
+/**
+* Return the contents octets of the DER encoding of the INTEGER @p n:
+* big-endian two's complement, minimal length. Zero encodes as a single
+* 0x00 octet.
+*/
+std::vector<uint8_t> integer_contents(const BigInt& n);
+
+/**
+* Decode the contents octets of a BER INTEGER (big-endian two's
+* complement). Redundant leading octets are accepted; an empty input is
+* rejected.
+*/
+BigInt integer_from_contents(std::span<const uint8_t> contents);
+
+/*
+* Return true if the bytes are exactly one DER-encoded value of the expected
+* type and class, that is a TLV whose tag plus length header plus contents
+* span the entire buffer with no trailing data. The contents themselves are
+* not otherwise validated.
+*/
+bool is_single_der_object(std::span<const uint8_t> bytes, ASN1_Type expected_type, ASN1_Class expected_class);
+
+/**
+* Return true if the bytes are exactly one DER-encoded SEQUENCE, that is a
+* SEQUENCE whose tag plus length header plus contents span the entire buffer
+* with no trailing data. The contents themselves are not otherwise validated.
+*/
+bool is_der_sequence_header(std::span<const uint8_t> bytes);
+
+}  // namespace Botan::ASN1
 
 namespace Botan {
 
@@ -1161,24 +1200,22 @@ namespace Botan {
 */
 class BOTAN_TEST_API calendar_point final {
    public:
-      /** The year */
+      /** The year, less than or equal to 9999 */
       uint32_t year() const { return m_year; }
 
       /** The month, 1 through 12 for Jan to Dec */
       uint32_t month() const { return m_month; }
 
-      /** The day of the month, 1 through 31 (or 28 or 30 based on month */
+      /** The day of the month, 1 through 31 */
       uint32_t day() const { return m_day; }
 
       /** Hour in 24-hour form, 0 to 23 */
       uint32_t hour() const { return m_hour; }
 
-      /** Minutes in the hour, 0 to 60 */
+      /** Minutes in the hour, 0 to 59 */
       uint32_t minutes() const { return m_minutes; }
 
-      /** Seconds in the minute, 0 to 60, but might be slightly
-      larger to deal with leap seconds on some systems
-      */
+      /** Seconds in the minute, 0 to 59 */
       uint32_t seconds() const { return m_seconds; }
 
       /**
@@ -1190,8 +1227,7 @@ class BOTAN_TEST_API calendar_point final {
       * @param min the minute
       * @param sec the second
       */
-      calendar_point(uint32_t y, uint32_t mon, uint32_t d, uint32_t h, uint32_t min, uint32_t sec) :
-            m_year(y), m_month(mon), m_day(d), m_hour(h), m_minutes(min), m_seconds(sec) {}
+      calendar_point(uint32_t y, uint32_t mon, uint32_t d, uint32_t h, uint32_t min, uint32_t sec);
 
       /**
       * Convert a time_point to a calendar_point
@@ -1201,8 +1237,10 @@ class BOTAN_TEST_API calendar_point final {
 
       /**
       * Return seconds since epoch
+      *
+      * This is negative for dates before 1970
       */
-      uint64_t seconds_since_epoch() const;
+      int64_t seconds_since_epoch() const;
 
       /**
       * Returns an STL timepoint object
@@ -1212,19 +1250,13 @@ class BOTAN_TEST_API calendar_point final {
       */
       std::chrono::system_clock::time_point to_std_timepoint() const;
 
-      /**
-      * Returns a human readable string of the struct's components.
-      * Formatting might change over time. Currently it is RFC339 'iso-date-time'.
-      */
-      std::string to_string() const;
-
    private:
-      uint32_t m_year;
-      uint32_t m_month;
-      uint32_t m_day;
-      uint32_t m_hour;
-      uint32_t m_minutes;
-      uint32_t m_seconds;
+      uint16_t m_year;
+      uint8_t m_month;
+      uint8_t m_day;
+      uint8_t m_hour;
+      uint8_t m_minutes;
+      uint8_t m_seconds;
 };
 
 }  // namespace Botan
@@ -1276,9 +1308,7 @@ class BOTAN_TEST_API BlockCipherModePaddingMethod /* NOLINT(*-special-member-fun
       * @param block_size   size of each block in bytes
       * @return the total number of output bytes (including the padding)
       */
-      virtual size_t output_length(size_t input_length, size_t block_size) const {
-         return ((input_length + block_size) / block_size) * block_size;
-      }
+      virtual size_t output_length(size_t input_length, size_t block_size) const;
 
       /**
       * @return name of the mode
@@ -1538,15 +1568,12 @@ class CTS_Decryption final : public CBC_Decryption {
 
 namespace Botan {
 
-// TODO convert these to take arguments as spans or std::string_view
-
 /**
 * Convert a sequence of UCS-2 (big endian) characters to a UTF-8 string
 * This is used for ASN.1 BMPString type
-* @param ucs2 the sequence of UCS-2 characters
-* @param len length of ucs2 in bytes, must be a multiple of 2
+* @param ucs2 the sequence of UCS-2 characters, length must be a multiple of 2
 */
-BOTAN_TEST_API std::string ucs2_to_utf8(const uint8_t ucs2[], size_t len);
+BOTAN_TEST_API std::string ucs2_to_utf8(std::span<const uint8_t> ucs2);
 
 /**
  * Convert a UTF-8 string to a sequence of UCS-2 (big endian) characters
@@ -1557,15 +1584,14 @@ BOTAN_TEST_API std::string ucs2_to_utf8(const uint8_t ucs2[], size_t len);
  *         surrogate code points, or values outside Unicode), or if a code point exceeds
  *         U+FFFF and cannot be represented in UCS-2
  */
-BOTAN_TEST_API std::vector<uint8_t> utf8_to_ucs2(const std::string& utf8);
+BOTAN_TEST_API std::vector<uint8_t> utf8_to_ucs2(std::string_view utf8);
 
 /**
 * Convert a sequence of UCS-4 (big endian) characters to a UTF-8 string
 * This is used for ASN.1 UniversalString type
-* @param ucs4 the sequence of UCS-4 characters
-* @param len length of ucs4 in bytes, must be a multiple of 4
+* @param ucs4 the sequence of UCS-4 characters, length must be a multiple of 4
 */
-BOTAN_TEST_API std::string ucs4_to_utf8(const uint8_t ucs4[], size_t len);
+BOTAN_TEST_API std::string ucs4_to_utf8(std::span<const uint8_t> ucs4);
 
 /**
  * Convert a UTF-8 string to a sequence of UCS-4 (big endian) characters
@@ -1575,26 +1601,105 @@ BOTAN_TEST_API std::string ucs4_to_utf8(const uint8_t ucs4[], size_t len);
  * @throws Decoding_Error if the input is not valid UTF-8 (including overlong encodings,
  *         surrogate code points, or values outside the Unicode scalar value range U+0000..U+10FFFF)
  */
-BOTAN_TEST_API std::vector<uint8_t> utf8_to_ucs4(const std::string& utf8);
+BOTAN_TEST_API std::vector<uint8_t> utf8_to_ucs4(std::string_view utf8);
 
-BOTAN_TEST_API std::string latin1_to_utf8(const uint8_t latin1[], size_t len);
+BOTAN_TEST_API std::string latin1_to_utf8(std::span<const uint8_t> latin1);
 
 /**
 * Return true if this string seems to contain a valid sequence of UTF-8
 */
-bool is_valid_utf8(const std::string& str);
+bool is_valid_utf8(std::string_view str);
+
+/**
+* Return true if c is a control character (0x00..0x1F) or DEL (0x7F)
+*/
+BOTAN_TEST_API bool is_ascii_control_char(char c);
+
+/**
+* Return true if the Unicode code point cp is a control character: a C0 control
+* (U+0000..U+001F), DEL (U+007F), or a C1 control (U+0080..U+009F)
+*/
+BOTAN_TEST_API bool is_unicode_control_char(uint32_t cp);
+
+/**
+* Map the low four bits of b to an uppercase hex digit ('0'..'9','A'..'F')
+*/
+inline constexpr char nibble_to_hex(uint8_t b) {
+   const uint8_t n = b & 0x0F;
+   return static_cast<char>(n < 10 ? '0' + n : 'A' + (n - 10));
+}
+
+/**
+* Decode the UTF-8 code point beginning at utf8[pos], advancing pos past it
+* @throws Decoding_Error if the bytes at pos are not a valid UTF-8 sequence
+*/
+uint32_t next_utf8_codepoint(std::string_view utf8, size_t& pos);
+
+/**
+* Return a copy of utf8 with control characters escaped for safe display
+*
+* C0 controls (0x00..0x1F), DEL (0x7F), and C1 controls (U+0080..U+009F) are
+* each replaced by a "\xHH" escape per byte; all other code points, including
+* printable non-ASCII, are passed through unchanged. Any byte that is not part
+* of a valid UTF-8 sequence is escaped individually.
+*/
+BOTAN_TEST_API std::string escape_control_chars(std::string_view utf8);
 
 /**
 * Return a string containing 'c', quoted and possibly escaped
 *
-* This is used when creating an error message nothing an invalid character
-* in some codex (for example during hex decoding)
+* This is used when creating an error message noting an invalid character
+* in some codec (for example during hex decoding)
 *
-* Currently this function escapes tab, newlines and carriage return
-* as "\t", "\n", and "\r", and also escapes characters > 0x7F as
-* "\xHH" where HH is the hex code.
+* Tab, newline, and carriage return are escaped as "\t", "\n", and "\r".
+* Any other control character (or DEL), and any byte above 0x7F, is escaped
+* as "\xHH" where HH is the hex code.
 */
 std::string format_char_for_display(char c);
+
+/**
+* Character classifier
+*/
+class CharacterValidityTable final {
+   public:
+      static constexpr CharacterValidityTable alpha_numeric_plus(std::string_view extras) {
+         TableStorage tbl{};
+
+         set_tbl_range(tbl, "0123456789");
+         set_tbl_range(tbl, "abcdefghijklmnopqrstuvwxyz");
+         set_tbl_range(tbl, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+         set_tbl_range(tbl, extras);
+
+         return CharacterValidityTable(tbl);
+      }
+
+      constexpr bool operator()(char c) const {
+         const uint8_t uc = static_cast<uint8_t>(c);
+         return ((m_tbl[uc / 32] >> (uc % 32)) & 1) != 0;
+      }
+
+      constexpr CharacterValidityTable invert() const {
+         TableStorage inverted = m_tbl;
+         for(auto& v : inverted) {
+            v = ~v;
+         }
+         return CharacterValidityTable(inverted);
+      }
+
+   private:
+      using TableStorage = std::array<uint32_t, 8>;  // 256 bits of storage
+
+      static constexpr void set_tbl_range(TableStorage& tbl, std::string_view valid_chars) {
+         for(const char c : valid_chars) {
+            const uint8_t uc = static_cast<uint8_t>(c);
+            tbl[uc / 32] |= (uint32_t{1} << (uc % 32));
+         }
+      }
+
+      explicit constexpr CharacterValidityTable(TableStorage tbl) : m_tbl(tbl) {}
+
+      TableStorage m_tbl;
+};
 
 }  // namespace Botan
 
@@ -1709,10 +1814,13 @@ size_t base_decode(const Base& base,
    constexpr size_t decoding_bytes_in = std::remove_reference_t<Base>::decoding_bytes_in();
    constexpr size_t decoding_bytes_out = std::remove_reference_t<Base>::decoding_bytes_out();
 
+   input_consumed = 0;
+
    uint8_t* out_ptr = output;
    std::array<uint8_t, decoding_bytes_in> decode_buf{};
    size_t decode_buf_pos = 0;
    size_t final_truncate = 0;
+   bool seen_padding = false;
 
    clear_mem(output, base.decode_max_output(input_length));
 
@@ -1721,8 +1829,15 @@ size_t base_decode(const Base& base,
 
       // This call might throw Invalid_Argument
       if(base.check_bad_char(bin, input[i], ignore_ws)) {
+         // Padding may only appear at the end, so a data symbol must never
+         // follow one (0x81 marks a padding character)
+         if(seen_padding) {
+            throw Invalid_Argument(base.name() + " decoding failed, data follows padding");
+         }
          decode_buf[decode_buf_pos] = bin;
          ++decode_buf_pos;
+      } else if(bin == 0x81) {
+         seen_padding = true;
       }
 
       /*
@@ -1730,6 +1845,22 @@ size_t base_decode(const Base& base,
       */
       if(final_inputs && (i == input_length - 1)) {
          if(decode_buf_pos) {
+            const size_t bits_per_symbol = base.bits_consumed();
+            const size_t pad_bits = (decode_buf_pos * bits_per_symbol) % 8;
+
+            // A trailing symbol contributing only pad bits cannot occur in a
+            // valid encoding; RFC 4648 4 and 6 enumerate the reachable cases
+            if(pad_bits >= bits_per_symbol) {
+               throw Invalid_Argument(base.name() + " decoding failed, invalid length");
+            }
+
+            // RFC 4648 3.5: "decoders MAY chose to reject an encoding if the
+            // pad bits have not been set to zero"
+            const uint8_t pad_mask = static_cast<uint8_t>((1U << pad_bits) - 1);
+            if(decode_buf[decode_buf_pos - 1] & pad_mask) {
+               throw Invalid_Argument(base.name() + " decoding failed, nonzero padding bits");
+            }
+
             for(size_t j = decode_buf_pos; j < decoding_bytes_in; ++j) {
                decode_buf[j] = 0;
             }
@@ -1899,16 +2030,9 @@ class scoped_cleanup final {
 
       scoped_cleanup(const scoped_cleanup&) = delete;
       scoped_cleanup& operator=(const scoped_cleanup&) = delete;
+      scoped_cleanup& operator=(scoped_cleanup&& other) = delete;
 
       scoped_cleanup(scoped_cleanup&& other) noexcept : m_cleanup(std::move(other.m_cleanup)) { other.disengage(); }
-
-      scoped_cleanup& operator=(scoped_cleanup&& other) noexcept {
-         if(this != &other) {
-            m_cleanup = std::move(other.m_cleanup);
-            other.disengage();
-         }
-         return *this;
-      }
 
       ~scoped_cleanup() {
          if(m_cleanup.has_value()) {
@@ -3257,7 +3381,7 @@ class BOTAN_TEST_API Montgomery_Int final {
       /**
       * Create a zero-initialized Montgomery_Int
       */
-      explicit Montgomery_Int(const Montgomery_Params& params) : m_params(params) {}
+      explicit Montgomery_Int(const Montgomery_Params& params);
 
       /**
       * Create a Montgomery_Int from a BigInt
@@ -3559,10 +3683,24 @@ class EC_Group_Data final : public std::enable_shared_from_this<EC_Group_Data> {
 
       std::unique_ptr<EC_Scalar_Data> gk_x_mod_order(const EC_Scalar_Data& scalar, RandomNumberGenerator& rng) const;
 
-      /// Deserialize a point
+      /// Deserialize a point in the SEC1 uncompressed format
       ///
-      /// Returns nullptr if the point encoding was invalid or not on the curve
-      std::unique_ptr<EC_AffinePoint_Data> point_deserialize(std::span<const uint8_t> bytes) const;
+      /// Returns nullptr if the encoding was not in the uncompressed format,
+      /// or if the point is not on the curve
+      std::unique_ptr<EC_AffinePoint_Data> point_deserialize_uncompressed(std::span<const uint8_t> bytes) const;
+
+      /// Deserialize a point in the SEC1 compressed format
+      ///
+      /// Returns nullptr if the encoding was not in the compressed format,
+      /// or if the point is not on the curve
+      std::unique_ptr<EC_AffinePoint_Data> point_deserialize_compressed(std::span<const uint8_t> bytes) const;
+
+      /// Return the identity element (aka the point at infinity)
+      std::unique_ptr<EC_AffinePoint_Data> point_identity() const;
+
+      /// Return true if point_hash_to_curve_ro/point_hash_to_curve_nu will
+      /// work for this group when using the specified hash function
+      bool hash_to_curve_supported(std::string_view hash_fn) const;
 
       std::unique_ptr<EC_AffinePoint_Data> point_hash_to_curve_ro(std::string_view hash_fn,
                                                                   std::span<const uint8_t> input,
@@ -3651,6 +3789,18 @@ class EC_Group_Data final : public std::enable_shared_from_this<EC_Group_Data> {
       EC_Group_Engine m_engine;
 };
 
+/**
+* Instantiate the named hash and return a closure implementing the
+* expand_message function of RFC 9380
+*
+* Throws if the hash is unknown, or too weak for use with a group
+* of order_bits, per the RFC 9380 requirements
+*/
+std::function<void(std::span<uint8_t>)> h2c_expand_message(std::string_view hash_fn,
+                                                           size_t order_bits,
+                                                           std::span<const uint8_t> input,
+                                                           std::span<const uint8_t> domain_sep);
+
 }  // namespace Botan
 
 
@@ -3706,7 +3856,9 @@ class PrimeOrderCurve /* NOLINT(*-special-member-functions) */ {
             Scalar(Scalar&& other) = default;
             Scalar& operator=(const Scalar& other) = default;
             Scalar& operator=(Scalar&& other) = default;
-            ~Scalar() = default;
+
+            // Scalars are commonly secret values so wipe on destruction
+            ~Scalar() { _zeroize(); }
 
             void _zeroize();
 
@@ -3871,12 +4023,22 @@ class PrimeOrderCurve /* NOLINT(*-special-member-functions) */ {
       /// Return the standard generator
       virtual AffinePoint generator() const = 0;
 
-      /// Deserialize a point
+      /// Return the identity element (aka the point at infinity)
+      virtual AffinePoint point_identity() const = 0;
+
+      /// Deserialize a point in the SEC1 uncompressed format
       ///
-      /// Both compressed and uncompressed encodings are accepted
+      /// The input must be exactly 1 + 2*field_element_bytes long and have a
+      /// header byte of 0x04. All other encodings are rejected, as are inputs
+      /// where (x,y) is not a point on the curve.
+      virtual std::optional<AffinePoint> deserialize_point_uncompressed(std::span<const uint8_t> bytes) const = 0;
+
+      /// Deserialize a point in the SEC1 compressed format
       ///
-      /// Note that the deprecated "hybrid" encoding is not supported here
-      virtual std::optional<AffinePoint> deserialize_point(std::span<const uint8_t> bytes) const = 0;
+      /// The input must be exactly 1 + field_element_bytes long and have a
+      /// header byte of 0x02 or 0x03. All other encodings are rejected, as are
+      /// inputs where x is not the affine x coordinate of a point on the curve.
+      virtual std::optional<AffinePoint> deserialize_point_compressed(std::span<const uint8_t> bytes) const = 0;
 
       /// Deserialize a scalar in [1,p)
       ///
@@ -3942,6 +4104,14 @@ class PrimeOrderCurve /* NOLINT(*-special-member-functions) */ {
       * Return a new random scalar
       */
       virtual Scalar random_scalar(RandomNumberGenerator& rng) const = 0;
+
+      /**
+      * Return true if this curve supports RFC 9380 hash to curve
+      *
+      * If this returns false then hash_to_curve_nu and hash_to_curve_ro
+      * will throw Not_Implemented
+      */
+      virtual bool supports_hash_to_curve() const = 0;
 
       /**
       * RFC 9380 hash to curve (NU variant)
@@ -4086,8 +4256,7 @@ class EC_PublicKey_Data final {
    public:
       EC_PublicKey_Data(EC_Group group, EC_AffinePoint pt);
 
-      EC_PublicKey_Data(const EC_Group& group, std::span<const uint8_t> bytes) :
-            EC_PublicKey_Data(group, EC_AffinePoint(group, bytes)) {}
+      EC_PublicKey_Data(const EC_Group& group, std::span<const uint8_t> bytes);
 
       const EC_Group& group() const { return m_group; }
 
@@ -4321,6 +4490,7 @@ class HMAC final : public MessageAuthenticationCode {
    private:
       void add_data(std::span<const uint8_t> input) override;
       void final_result(std::span<uint8_t> output) override;
+      void start_msg(std::span<const uint8_t> nonce) override;
       void key_schedule(std::span<const uint8_t> key) override;
 
       std::unique_ptr<HashFunction> m_hash;
@@ -4372,6 +4542,36 @@ constexpr inline std::optional<T> checked_mul(T a, T b) {
       return {};
    }
    return r;
+}
+
+/**
+* Add @p a and @p b, throwing Invalid_Argument with message @p msg if the
+* addition would overflow.
+*
+* TODO(Botan4) add std::source_location argument
+*/
+template <std::unsigned_integral T>
+constexpr T add_or_throw(T a, T b, std::string_view msg) {
+   if(auto r = checked_add(a, b)) {
+      return r.value();
+   } else {
+      throw Invalid_Argument(msg);
+   }
+}
+
+/**
+* Multiply @p a and @p b, throwing Invalid_Argument with message @p msg if the
+* multiplication would overflow.
+*
+* TODO(Botan4) add std::source_location argument
+*/
+template <std::unsigned_integral T>
+constexpr T mul_or_throw(T a, T b, std::string_view msg) {
+   if(auto r = checked_mul(a, b)) {
+      return r.value();
+   } else {
+      throw Invalid_Argument(msg);
+   }
 }
 
 template <typename RT, typename ExceptionType, typename AT>
@@ -5978,10 +6178,10 @@ template <WordType W>
 inline constexpr auto word8_sub2(W x[8], const W y[8], W carry) -> W {
 #if defined(BOTAN_MP_USE_X86_64_ASM)
    if(std::same_as<W, uint64_t> && !std::is_constant_evaluated()) {
-      asm(ADD_OR_SUBTRACT(DO_8_TIMES(ADDSUB2_OP, "sbbq"))
-          : [carry] "=r"(carry)
-          : [x] "r"(x), [y] "r"(y), "0"(carry)
-          : "cc", "memory");
+      asm volatile(ADD_OR_SUBTRACT(DO_8_TIMES(ADDSUB2_OP, "sbbq"))
+                   : [carry] "=r"(carry)
+                   : [x] "r"(x), [y] "r"(y), "0"(carry)
+                   : "cc", "memory");
       return carry;
    }
 #endif
@@ -6030,10 +6230,10 @@ template <WordType W>
 inline constexpr auto word8_linmul3(W z[8], const W x[8], W y, W carry) -> W {
 #if defined(BOTAN_MP_USE_X86_64_ASM)
    if(std::same_as<W, uint64_t> && !std::is_constant_evaluated()) {
-      asm(DO_8_TIMES(LINMUL_OP, "z")
-          : [carry] "=r"(carry)
-          : [z] "r"(z), [x] "r"(x), [y] "rm"(y), "0"(carry)
-          : "cc", "%rax", "%rdx");
+      asm volatile(DO_8_TIMES(LINMUL_OP, "z")
+                   : [carry] "=r"(carry)
+                   : [z] "r"(z), [x] "r"(x), [y] "rm"(y), "0"(carry)
+                   : "cc", "%rax", "%rdx", "memory");
       return carry;
    }
 #endif
@@ -6056,10 +6256,10 @@ template <WordType W>
 inline constexpr auto word8_madd3(W z[8], const W x[8], W y, W carry) -> W {
 #if defined(BOTAN_MP_USE_X86_64_ASM)
    if(std::same_as<W, uint64_t> && !std::is_constant_evaluated()) {
-      asm(DO_8_TIMES(MULADD_OP, "")
-          : [carry] "=r"(carry)
-          : [z] "r"(z), [x] "r"(x), [y] "rm"(y), "0"(carry)
-          : "cc", "%rax", "%rdx");
+      asm volatile(DO_8_TIMES(MULADD_OP, "")
+                   : [carry] "=r"(carry)
+                   : [z] "r"(z), [x] "r"(x), [y] "rm"(y), "0"(carry)
+                   : "cc", "%rax", "%rdx", "memory");
       return carry;
    }
 #endif
@@ -6537,7 +6737,7 @@ inline constexpr void bigint_monty_maybe_sub(W z[N], W x0, const W x[N], const W
 * Otherwise compute z = y - x
 * No borrow is possible since the result is always >= 0
 *
-* Returns a Mask: |1| if x >= y or |0| if x < y
+* Returns a Mask: |1| if x < y or |0| if x >= y
 * @param z output array of at least N words
 * @param x input array of N words
 * @param y input array of N words
@@ -6572,10 +6772,15 @@ inline constexpr auto bigint_sub_abs(W z[], const W x[], const W y[], size_t N, 
 /*
 * Shift Operations
 */
+
+// Caller must ensure x[x_words..x_size-1] is zeroed.
 template <WordType W>
 inline constexpr void bigint_shl1(W x[], size_t x_size, size_t x_words, size_t shift) {
    const size_t word_shift = shift / WordInfo<W>::bits;
    const size_t bit_shift = shift % WordInfo<W>::bits;
+
+   BOTAN_ASSERT_NOMSG(word_shift <= x_size);
+   BOTAN_ASSERT_NOMSG(x_words <= x_size - word_shift);
 
    unchecked_copy_memory(x + word_shift, x, x_words);
    zeroize_buffer(x, word_shift);
@@ -6616,11 +6821,16 @@ inline constexpr void bigint_shr1(W x[], size_t x_size, size_t shift) {
 }
 
 template <WordType W>
-inline constexpr void bigint_shl2(W y[], const W x[], size_t x_size, size_t shift) {
+inline constexpr void bigint_shl2(W y[], size_t y_size, const W x[], size_t x_size, size_t shift) {
    const size_t word_shift = shift / WordInfo<W>::bits;
    const size_t bit_shift = shift % WordInfo<W>::bits;
 
+   BOTAN_ASSERT_NOMSG(word_shift <= y_size);
+   BOTAN_ASSERT_NOMSG(x_size < y_size - word_shift);
+
    unchecked_copy_memory(y + word_shift, x, x_size);
+   zeroize_buffer(y, word_shift);
+   zeroize_buffer(y + word_shift + x_size, y_size - word_shift - x_size);
 
    const auto carry_mask = CT::Mask<W>::expand(bit_shift);
    const W carry_shift = carry_mask.if_set_return(WordInfo<W>::bits - bit_shift);
@@ -6634,14 +6844,17 @@ inline constexpr void bigint_shl2(W y[], const W x[], size_t x_size, size_t shif
 }
 
 template <WordType W>
-inline constexpr void bigint_shr2(W y[], const W x[], size_t x_size, size_t shift) {
+inline constexpr void bigint_shr2(W y[], size_t y_size, const W x[], size_t x_size, size_t shift) {
    const size_t word_shift = shift / WordInfo<W>::bits;
    const size_t bit_shift = shift % WordInfo<W>::bits;
    const size_t new_size = x_size < word_shift ? 0 : (x_size - word_shift);
 
+   BOTAN_ASSERT_NOMSG(new_size <= y_size);
+
    if(new_size > 0) {
       unchecked_copy_memory(y, x + word_shift, new_size);
    }
+   zeroize_buffer(y + new_size, y_size - new_size);
 
    const auto carry_mask = CT::Mask<W>::expand(bit_shift);
    const W carry_shift = carry_mask.if_set_return(WordInfo<W>::bits - bit_shift);
@@ -6852,7 +7065,7 @@ class divide_precomp final {
                W quotient = 0;
                W remainder = 0;
                // NOLINTNEXTLINE(*-no-assembler)
-               asm("divq %[v]" : "=a"(quotient), "=d"(remainder) : [v] "r"(m_divisor), "a"(n0), "d"(n1));
+               asm("divq %[v]" : "=a"(quotient), "=d"(remainder) : [v] "r"(m_divisor), "a"(n0), "d"(n1) : "cc");
                return quotient;
             }
 #endif
@@ -6980,6 +7193,7 @@ inline constexpr auto monty_inverse(W a) -> W {
 template <size_t S, WordType W, size_t N>
 inline constexpr W shift_left(std::array<W, N>& x) {
    static_assert(N >= 1, "Invalid input size");
+   static_assert(S > 0, "Zero shift not supported");
    static_assert(S < WordInfo<W>::bits, "Shift too large");
 
    const W carry = x[N - 1] >> (WordInfo<W>::bits - S);
@@ -6995,6 +7209,7 @@ inline constexpr W shift_left(std::array<W, N>& x) {
 template <size_t S, WordType W, size_t N>
 inline constexpr W shift_right(std::array<W, N>& x) {
    static_assert(N >= 1, "Invalid input size");
+   static_assert(S > 0, "Zero shift not supported");
    static_assert(S < WordInfo<W>::bits, "Shift too large");
 
    const W carry = x[0] << (WordInfo<W>::bits - S);
@@ -7018,6 +7233,8 @@ constexpr auto hex_to_words(const char (&s)[N]) {
 
    // Round up to the next number of words that will fit the input
    const constexpr size_t S = (C + NPW - 1) / NPW;
+
+   static_assert(S > 0, "Input too small");
 
    auto hex2int = [](char c) -> int8_t {
       if(c >= '0' && c <= '9') {
@@ -7357,7 +7574,7 @@ class OID_Map final {
       // TODO(Botan4) remove this function when oids.h is removed
       void add_oid2str(const OID& oid, std::string_view str);
 
-      std::string oid2str(const OID& oid);
+      std::optional<std::string> oid2str(const OID& oid);
 
       OID str2oid(std::string_view str);
 
@@ -7604,47 +7821,47 @@ BOTAN_TEST_API std::vector<std::string> split_on(std::string_view str, char deli
 std::string string_join(const std::vector<std::string>& strs, char delim);
 
 /**
-* Convert a decimal string to a number
-* @param str the string to convert
+* Convert a decimal string to a number, throwing if invalid
+* @param input the string to convert
 * @return number value of the string
 */
-BOTAN_TEST_API uint32_t to_u32bit(std::string_view str);
+BOTAN_TEST_API uint32_t to_u32bit(std::string_view input);
 
 /**
-* Convert a decimal string to a number
-* @param str the string to convert
-* @return number value of the string
+* Attempt to parse a string as a 16-bit decimal integer
+*
+* @param input the string to convert
+* @param require_canonical if set, reject leading zeros ("007"); "0" is still accepted
+* @return integer value, or nullopt if invalid
 */
-uint16_t to_uint16(std::string_view str);
+std::optional<uint16_t> parse_u16(std::string_view input, bool require_canonical = false);
 
 /**
-* Convert a string representation of an IPv4 address to a number
-* @param ip_str the string representation
-* @return integer IPv4 address
+* Attempt to parse a string as a 32-bit decimal integer
+*
+* @param input the string to convert
+* @param require_canonical if set, reject leading zeros ("007"); "0" is still accepted
+* @return integer value, or nullopt if invalid
 */
-std::optional<uint32_t> BOTAN_TEST_API string_to_ipv4(std::string_view ip_str);
+BOTAN_TEST_API std::optional<uint32_t> parse_u32(std::string_view input, bool require_canonical = false);
 
 /**
-* Convert an IPv4 address to a string
-* @param ip_addr the IPv4 address to convert
-* @return string representation of the IPv4 address
+* Attempt to parse a string as a 64-bit decimal integer
+*
+* @param input the string to convert
+* @param require_canonical if set, reject leading zeros ("007"); "0" is still accepted
+* @return integer value, or nullopt if invalid
 */
-std::string BOTAN_TEST_API ipv4_to_string(uint32_t ip_addr);
+BOTAN_TEST_API std::optional<uint64_t> parse_u64(std::string_view input, bool require_canonical = false);
 
 /**
-* Convert a string representation of an IPv6 address to a 16-byte big-endian
-* array. Accepts the full form (eight colon-separated hex groups), the
-* "::"-compressed form (exactly one run of zero groups elided), and combinations
-* such as "2001:db8::1". Does not currently accept the IPv4-in-IPv6 trailing
-* dotted-quad form (e.g. "::ffff:192.0.2.1") or surrounding brackets.
+* Attempt to parse a string as a size_t-sized decimal integer
+*
+* @param input the string to convert
+* @param require_canonical if set, reject leading zeros ("007"); "0" is still accepted
+* @return integer value, or nullopt if invalid
 */
-std::optional<std::array<uint8_t, 16>> BOTAN_TEST_API string_to_ipv6(std::string_view ip_str);
-
-/**
-* Convert an IPv6 address to normalized string format. Zero compression ("::")
-* is not applied.
-*/
-std::string BOTAN_TEST_API ipv6_to_string(std::span<const uint8_t, 16> ip_addr);
+BOTAN_TEST_API std::optional<size_t> parse_sz(std::string_view input, bool require_canonical = false);
 
 std::map<std::string, std::string> read_cfg(std::istream& is);
 
@@ -7667,19 +7884,6 @@ BOTAN_TEST_API
 std::map<std::string, std::string> read_kv(std::string_view kv);
 
 std::string tolower_string(std::string_view str);
-
-/**
-* Check if the given hostname is a match for the specified wildcard
-*/
-BOTAN_TEST_API
-bool host_wildcard_match(std::string_view wildcard, std::string_view host);
-
-/**
-* If name is a valid DNS name, return it canonicalized
-*
-* Otherwise throws Decoding_Error
-*/
-BOTAN_TEST_API std::string check_and_canonicalize_dns_name(std::string_view name);
 
 }  // namespace Botan
 
@@ -9521,7 +9725,7 @@ class IntMod final {
       * only be used when exp is not secret. In the current code, `exp` is
       * always a compile-time constant.
       *
-      * This function should not leak any information about this, since the
+      * This function should not leak any information about *this, since the
       * value being operated on may be a secret.
       *
       * TODO: this interface should be changed so that the exponent is always a
@@ -11176,15 +11380,10 @@ class PrimeOrderCurveImpl final : public PrimeOrderCurve {
          }
       }
 
-      std::optional<AffinePoint> deserialize_point(std::span<const uint8_t> bytes) const override {
-         // The identity element (see SEC1 section 2.3.4)
-         // TODO(Botan4) remove this - we should reject the identity encoding
-         if(bytes.size() == 1 && bytes[0] == 0x00) {
-            return stash(C::AffinePoint::identity());
-         }
+      AffinePoint point_identity() const override { return stash(C::AffinePoint::identity()); }
 
+      std::optional<AffinePoint> deserialize_point_uncompressed(std::span<const uint8_t> bytes) const override {
          constexpr size_t FieldElementBytes = C::FieldElement::BYTES;
-         constexpr size_t CompressedBytes = C::FieldElement::BYTES + 1;
          constexpr size_t UncompressedBytes = 2 * C::FieldElement::BYTES + 1;
 
          if(bytes.size() == UncompressedBytes && bytes[0] == 0x04) {
@@ -11201,7 +11400,16 @@ class PrimeOrderCurveImpl final : public PrimeOrderCurve {
                   return stash(typename C::AffinePoint(*x, *y));
                }
             }
-         } else if(bytes.size() == CompressedBytes && (bytes[0] == 0x02 || bytes[0] == 0x03)) {
+         }
+
+         return {};
+      }
+
+      std::optional<AffinePoint> deserialize_point_compressed(std::span<const uint8_t> bytes) const override {
+         constexpr size_t FieldElementBytes = C::FieldElement::BYTES;
+         constexpr size_t CompressedBytes = C::FieldElement::BYTES + 1;
+
+         if(bytes.size() == CompressedBytes && (bytes[0] == 0x02 || bytes[0] == 0x03)) {
             const CT::Choice y_is_even = CT::Mask<uint8_t>::is_equal(bytes[0], 0x02).as_choice();
 
             if(auto x = C::FieldElement::deserialize(bytes.subspan(1, FieldElementBytes))) {
@@ -11213,6 +11421,8 @@ class PrimeOrderCurveImpl final : public PrimeOrderCurve {
 
          return {};
       }
+
+      bool supports_hash_to_curve() const override { return C::ValidForSswuHash; }
 
       AffinePoint hash_to_curve_nu(std::function<void(std::span<uint8_t>)> expand_message) const override {
          if constexpr(C::ValidForSswuHash) {
@@ -11724,14 +11934,8 @@ namespace Botan {
 A class encapsulating a SCAN name (similar to JCE conventions)
 http://www.users.zetnet.co.uk/hopwood/crypto/scan/
 */
-class SCAN_Name final {
+class BOTAN_TEST_API SCAN_Name final {
    public:
-      /**
-      * Create a SCAN_Name
-      * @param algo_spec A SCAN-format name
-      */
-      explicit SCAN_Name(const char* algo_spec);
-
       /**
       * Create a SCAN_Name
       * @param algo_spec A SCAN-format name
@@ -11845,6 +12049,9 @@ class SHA_1 final : public HashFunction {
       size_t output_length() const override { return 20; }
 
       size_t hash_block_size() const override { return block_bytes; }
+
+      // Collision attacks with cost ~2^61 are known (Leurent and Peyrin, 2020)
+      size_t security_level() const override { return 61; }
 
       std::unique_ptr<HashFunction> new_object() const override;
 
@@ -12520,11 +12727,11 @@ uint64_t measure_cost(uint64_t trial_msec, F func) {
 }  // namespace Botan
 /* NOLINTBEGIN(*-macro-usage) */
 
-#define BOTAN_FULL_VERSION_STRING "Botan 3.12.0 (release, dated 20260506, revision git:45d6f286c320b2f2efd5373d195ec88c367e3071)"
+#define BOTAN_FULL_VERSION_STRING "Botan 3.13.0 (release, dated 20260813, revision git:2a81eef56c96c237e590c27f9a75e60317c9c700)"
 
-#define BOTAN_SHORT_VERSION_STRING "3.12.0"
+#define BOTAN_SHORT_VERSION_STRING "3.13.0"
 
-#define BOTAN_VC_REVISION "git:45d6f286c320b2f2efd5373d195ec88c367e3071"
+#define BOTAN_VC_REVISION "git:2a81eef56c96c237e590c27f9a75e60317c9c700"
 
 
 /* NOLINTEND(*-macro-usage) */
@@ -12638,6 +12845,10 @@ class X509_Certificate_Cache final {
 
 namespace Botan {
 
+class X509_CRL;
+class X509_Certificate;
+class X509_DN;
+
 inline std::optional<uint32_t> is_sub_element_of(const OID& oid, std::initializer_list<uint32_t> prefix) {
    const auto& c = oid.get_components();
 
@@ -12653,9 +12864,42 @@ inline std::optional<uint32_t> is_sub_element_of(const OID& oid, std::initialize
 }
 
 /*
-* X.500 String Comparison
+* DirectoryName subtree match according to RFC 5280 7.1. The constraint's
+* RDN sequence must be a prefix of the candidate name's RDN sequence.
 */
-bool x500_name_cmp(std::string_view name1, std::string_view name2);
+bool x509_dn_subtree_match(const X509_DN& name, const X509_DN& constraint);
+
+/*
+* Combined result of the two has_matching_distribution_point* questions:
+*   - `any`: at least one DP (explicit or implicit) name-matches per
+*     RFC 5280 6.3.3 (b)(1) and (b)(2)(i).
+*   - `any_with_absent_reasons`: also true if a matching DP omits the reasons
+*     field (or the match is via the implicit DP, which has no reasons by
+*     construction).
+* Sharing a single DP-loop pass between the two predicates keeps their
+* matching rules in sync and avoids re-walking the cert's CDP.
+*/
+struct DistributionPointMatch {
+      bool any;
+      bool any_with_absent_reasons;
+};
+
+DistributionPointMatch distribution_point_match(const X509_CRL& crl, const X509_Certificate& cert);
+
+/*
+* Does the wildcard SAN @p pattern have some expansion that falls
+* inside the excluded DNS subtree @p constraint? Used by
+* NameConstraints to check whether a wildcard SAN could resolve to a
+* name inside an excludedSubtrees entry, regardless of whether a TLS
+* client would actually trust the wildcard for that name.
+*
+* @p pattern must contain a single '*' in the leftmost label
+* (DNSName::from_san_string guarantees this for SAN values).
+* @p constraint is the DNS name-constraint value (bare-host or
+* leading-dot form). Both inputs assumed lowercased.
+*/
+BOTAN_TEST_API
+bool wildcard_intersects_excluded_dns_subtree(std::string_view pattern, std::string_view constraint);
 
 }  // namespace Botan
 /*
@@ -13777,23 +14021,12 @@ bool AlgorithmIdentifier::parameters_are_null() const {
    return (m_parameters.size() == 2 && (m_parameters[0] == 0x05) && (m_parameters[1] == 0x00));
 }
 
-bool operator==(const AlgorithmIdentifier& a1, const AlgorithmIdentifier& a2) {
-   if(a1.oid() != a2.oid()) {
-      return false;
-   }
-
-   /*
-   * Treat NULL and empty as equivalent
-   */
-   if(a1.parameters_are_null_or_empty() && a2.parameters_are_null_or_empty()) {
-      return true;
-   }
-
-   return (a1.parameters() == a2.parameters());
+bool operator==(const AlgorithmIdentifier& x, const AlgorithmIdentifier& y) {
+   return (x.oid() == y.oid() && x.parameters() == y.parameters());
 }
 
-bool operator!=(const AlgorithmIdentifier& a1, const AlgorithmIdentifier& a2) {
-   return !(a1 == a2);
+bool operator!=(const AlgorithmIdentifier& x, const AlgorithmIdentifier& y) {
+   return !(x == y);
 }
 
 /*
@@ -13808,6 +14041,39 @@ void AlgorithmIdentifier::encode_into(DER_Encoder& codec) const {
 */
 void AlgorithmIdentifier::decode_from(BER_Decoder& codec) {
    codec.start_sequence().decode(m_oid).raw_bytes(m_parameters).end_cons();
+
+   /*
+   * The parameters field is OPTIONAL ANY but in practice it is one of
+   * - empty
+   * - NULL
+   * - SEQUENCE
+   * - OBJECT IDENTIFIER (namedCurve)
+   * - OCTET STRING (CBC IV in PBES2)
+   *
+   * So require it be exactly one of these values. In particular this ensures that
+   * there is not any additional trailing data (eg after the SEQUENCE encoding)
+   * that might be otherwise skipped over by a reader.
+   */
+
+   const bool acceptable_parameters = [&]() {
+      if(this->parameters_are_null_or_empty()) {
+         return true;
+      }
+      if(ASN1::is_der_sequence_header(m_parameters)) {
+         return true;
+      }
+      if(ASN1::is_single_der_object(m_parameters, ASN1_Type::ObjectId, ASN1_Class::Universal)) {
+         return true;
+      }
+      if(ASN1::is_single_der_object(m_parameters, ASN1_Type::OctetString, ASN1_Class::Universal)) {
+         return true;
+      }
+      return false;
+   }();
+
+   if(!acceptable_parameters) {
+      throw Decoding_Error("AlgorithmIdentifier parameters were not NULL, a SEQUENCE, an OID, or an OCTET STRING");
+   }
 }
 
 }  // namespace Botan
@@ -13820,6 +14086,7 @@ void AlgorithmIdentifier::decode_from(BER_Decoder& codec) {
 
 
 #include <sstream>
+#include <utility>
 
 namespace Botan {
 
@@ -13828,6 +14095,36 @@ std::vector<uint8_t> ASN1_Object::BER_encode() const {
    DER_Encoder der(output);
    this->encode_into(der);
    return output;
+}
+
+ASN1_BitString::ASN1_BitString(std::vector<uint8_t> bytes, size_t unused_bits) :
+      m_bytes(std::move(bytes)), m_unused_bits(unused_bits) {
+   if(m_unused_bits >= 8) {
+      throw Invalid_Argument("ASN1_BitString: Invalid unused bit count");
+   }
+
+   if(m_bytes.empty() && m_unused_bits != 0) {
+      throw Invalid_Argument("ASN1_BitString: Empty BIT STRING cannot have unused bits");
+   }
+
+   if(m_unused_bits > 0 && (m_bytes.back() & ((1U << m_unused_bits) - 1)) != 0) {
+      throw Invalid_Argument("ASN1_BitString: Unused bits must be zero");
+   }
+}
+
+ASN1_BitString::ASN1_BitString(std::span<const uint8_t> bytes, size_t unused_bits) :
+      ASN1_BitString(std::vector<uint8_t>(bytes.begin(), bytes.end()), unused_bits) {}
+
+size_t ASN1_BitString::bit_length() const {
+   return 8 * m_bytes.size() - m_unused_bits;
+}
+
+bool ASN1_BitString::bit_at(size_t bit) const {
+   if(bit >= bit_length()) {
+      throw Invalid_Argument("ASN1_BitString: Bit index out of range");
+   }
+
+   return (m_bytes[bit / 8] & (0x80 >> (bit % 8))) != 0;
 }
 
 BER_Object::~BER_Object() {
@@ -13985,8 +14282,11 @@ std::vector<uint8_t> put_in_sequence(const std::vector<uint8_t>& contents) {
 }
 
 std::vector<uint8_t> put_in_sequence(const uint8_t bits[], size_t len) {
-   std::vector<uint8_t> output;
-   DER_Encoder(output).start_sequence().raw_bytes(bits, len).end_cons();
+   std::vector<uint8_t> output = der_sequence_header(len);
+   output.reserve(output.size() + len);
+   if(len > 0) {
+      output.insert(output.end(), bits, bits + len);
+   }
    return output;
 }
 
@@ -14038,33 +14338,27 @@ void oid_valid_check(std::span<const uint32_t> oid) {
    BOTAN_ARG_CHECK(oid[1] <= 0xFFFFFFAF, "OID second arc too large");
 }
 
-// returns empty on invalid
-std::vector<uint32_t> parse_oid_str(std::string_view oid) {
-   try {
-      std::string elem;
-      std::vector<uint32_t> oid_elems;
+// returns nullopt on invalid
+std::optional<std::vector<uint32_t>> parse_oid_str(std::string_view oid) {
+   std::vector<uint32_t> oid_elems;
 
-      for(const char c : oid) {
-         if(c == '.') {
-            if(elem.empty()) {
-               return std::vector<uint32_t>();
-            }
-            oid_elems.push_back(to_u32bit(elem));
-            elem.clear();
-         } else {
-            elem += c;
-         }
+   for(;;) {
+      const size_t dot = oid.find('.');
+
+      if(const auto elem = parse_u32(oid.substr(0, dot))) {
+         oid_elems.push_back(*elem);
+      } else {
+         return {};
       }
 
-      if(!elem.empty()) {
-         oid_elems.push_back(to_u32bit(elem));
+      // No more dots implies we just read the last group
+      if(dot == std::string_view::npos) {
+         break;
       }
-
-      return oid_elems;
-   } catch(Invalid_Argument&) {
-      // thrown by to_u32bit
-      return std::vector<uint32_t>();
+      oid = oid.substr(dot + 1);
    }
+
+   return oid_elems;
 }
 
 }  // namespace
@@ -14120,8 +14414,12 @@ OID::OID(std::vector<uint32_t>&& init) : m_id(std::move(init)) {
 */
 OID::OID(std::string_view oid_str) {
    if(!oid_str.empty()) {
-      m_id = parse_oid_str(oid_str);
-      oid_valid_check(m_id);
+      if(auto parsed = parse_oid_str(oid_str)) {
+         m_id = std::move(*parsed);
+         oid_valid_check(m_id);
+      } else {
+         throw Invalid_Argument(fmt("Could not parse '{}' as an OID", oid_str));
+      }
    }
 }
 
@@ -14143,19 +14441,23 @@ std::string OID::to_string() const {
 }
 
 std::string OID::to_formatted_string() const {
-   std::string s = this->human_name_or_empty();
-   if(!s.empty()) {
-      return s;
+   if(auto name = this->registered_name()) {
+      return *name;
+   } else {
+      return this->to_string();
    }
-   return this->to_string();
 }
 
 std::string OID::human_name_or_empty() const {
+   return this->registered_name().value_or("");
+}
+
+std::optional<std::string> OID::registered_name() const {
    return OID_Map::global_registry().oid2str(*this);
 }
 
 bool OID::registered_oid() const {
-   return !human_name_or_empty().empty();
+   return this->registered_name().has_value();
 }
 
 bool OID::matches(std::initializer_list<uint32_t> other) const {
@@ -14322,28 +14624,10 @@ namespace Botan {
 
 namespace {
 
-// Printable here means fits into an ASN.1 "PRINTABLE STRING" type
-bool is_printable_char(char c) {
-   if(c >= 'a' && c <= 'z') {
-      return true;
-   }
-
-   if(c >= 'A' && c <= 'Z') {
-      return true;
-   }
-
-   if(c >= '0' && c <= '9') {
-      return true;
-   }
-
-   if(c == '.' || c == ':' || c == '/' || c == '-') {
-      return true;
-   }
-
-   return false;
-}
-
 bool all_printable_chars(const uint8_t bits[], size_t bits_len) {
+   // Printable here means fits into an ASN.1 "PRINTABLE STRING" type
+   constexpr auto is_printable_char = CharacterValidityTable::alpha_numeric_plus(".:/-");
+
    for(size_t i = 0; i != bits_len; ++i) {
       if(!is_printable_char(bits[i])) {
          return false;
@@ -14384,7 +14668,10 @@ std::string ASN1_Formatter::print(const uint8_t in[], size_t len) const {
 }
 
 void ASN1_Formatter::print_to_stream(std::ostream& output, const uint8_t in[], size_t len) const {
-   const auto decoder_limits = m_require_der ? BER_Decoder::Limits::DER() : BER_Decoder::Limits::BER();
+   // The pretty printer is a best-effort diagnostic tool, so in BER mode it
+   // tolerates standalone EOC markers emitted by some BER producers.
+   const auto decoder_limits =
+      m_require_der ? BER_Decoder::Limits::DER() : BER_Decoder::Limits::BER().with_standalone_eoc_allowed();
    BER_Decoder dec(std::span<const uint8_t>{in, len}, decoder_limits);
    decode(output, dec, 0);
 }
@@ -14399,6 +14686,23 @@ void ASN1_Formatter::decode(std::ostream& output, BER_Decoder& decoder, size_t l
       const ASN1_Class class_tag = obj.get_class();
       const size_t length = obj.length();
 
+      if(intersects(class_tag, ASN1_Class::Constructed)) {
+         if(recurse_deeper) {
+            output << format(type_tag, class_tag, level, length, "");
+            // Move (not copy) the content into the sub-decoder; copying at every
+            // nesting level lets deeply nested input exhaust memory.
+            BER_Decoder cons_info(std::move(obj), decoder.limits());
+            decode(output, cons_info, level + 1);  // recurse
+         } else {
+            std::vector<uint8_t> bits;
+            DER_Encoder(bits).add_object(type_tag, class_tag, obj.bits(), obj.length());
+            output << format(type_tag, class_tag, level, length, format_bin(type_tag, class_tag, bits));
+         }
+
+         obj = decoder.get_next_object();
+         continue;
+      }
+
       /* hack to insert the tag+length back in front of the stuff now
          that we've gotten the type info */
       std::vector<uint8_t> bits;
@@ -14406,22 +14710,13 @@ void ASN1_Formatter::decode(std::ostream& output, BER_Decoder& decoder, size_t l
 
       BER_Decoder data(bits, decoder.limits());
 
-      if(intersects(class_tag, ASN1_Class::Constructed)) {
-         BER_Decoder cons_info(obj, decoder.limits());
-
-         if(recurse_deeper) {
-            output << format(type_tag, class_tag, level, length, "");
-            decode(output, cons_info, level + 1);  // recurse
-         } else {
-            output << format(type_tag, class_tag, level, length, format_bin(type_tag, class_tag, bits));
-         }
-      } else if(intersects(class_tag, ASN1_Class::Application) || intersects(class_tag, ASN1_Class::ContextSpecific)) {
+      if(intersects(class_tag, ASN1_Class::Application) || intersects(class_tag, ASN1_Class::ContextSpecific)) {
          bool success_parsing_cs = false;
 
          if(m_print_context_specific) {
             try {
                if(possibly_a_general_name(bits.data(), bits.size())) {
-                  output << format(type_tag, class_tag, level, level, bytes_to_string(std::span{bits}.subspan(2)));
+                  output << format(type_tag, class_tag, level, length, bytes_to_string(std::span{bits}.subspan(2)));
                   success_parsing_cs = true;
                } else if(recurse_deeper) {
                   std::vector<uint8_t> inner_bits;
@@ -14443,13 +14738,12 @@ void ASN1_Formatter::decode(std::ostream& output, BER_Decoder& decoder, size_t l
          OID oid;
          data.decode(oid);
 
-         const std::string name = oid.human_name_or_empty();
          const std::string oid_str = oid.to_string();
 
-         if(name.empty()) {
-            output << format(type_tag, class_tag, level, length, oid_str);
+         if(const auto name = oid.registered_name()) {
+            output << format(type_tag, class_tag, level, length, fmt("{} [{}]", *name, oid_str));
          } else {
-            output << format(type_tag, class_tag, level, length, fmt("{} [{}]", name, oid_str));
+            output << format(type_tag, class_tag, level, length, oid_str);
          }
       } else if(type_tag == ASN1_Type::Integer || type_tag == ASN1_Type::Enumerated) {
          BigInt number;
@@ -14560,7 +14854,7 @@ std::string ASN1_Pretty_Printer::format(
       const size_t current_pos = static_cast<size_t>(oss.tellp());
       const size_t spaces_to_align = (current_pos >= m_value_column) ? 1 : (m_value_column - current_pos);
 
-      oss << std::string(spaces_to_align, ' ') << value;
+      oss << std::string(spaces_to_align, ' ') << escape_control_chars(value);
    }
 
    oss << "\n";
@@ -14571,6 +14865,13 @@ std::string ASN1_Pretty_Printer::format(
 std::string ASN1_Pretty_Printer::format_bin(ASN1_Type /*type_tag*/,
                                             ASN1_Class /*class_tag*/,
                                             const std::vector<uint8_t>& vec) const {
+   // A value larger than the binary print limit is suppressed by format(), so
+   // skip the (potentially large) string/hex conversion entirely. vec.size() is
+   // a lower bound on the formatted length, so such a value is certainly dropped.
+   if(vec.size() > m_print_binary_limit) {
+      return "";
+   }
+
    if(all_printable_chars(vec.data(), vec.size())) {
       return bytes_to_string(vec);
    } else {
@@ -14731,11 +15032,10 @@ ASN1_String::ASN1_String(std::string_view str) : ASN1_String(str, choose_encodin
 * DER encode an ASN1_String
 */
 void ASN1_String::encode_into(DER_Encoder& encoder) const {
-   if(m_data.empty()) {
-      BOTAN_ASSERT_NOMSG(is_utf8_subset_string_type(tagging()));
+   if(is_utf8_subset_string_type(tagging())) {
       encoder.add_object(tagging(), ASN1_Class::Universal, m_utf8_str);
    } else {
-      // If this string was decoded, reserialize using original encoding
+      // BMP/Universal/Teletex: m_utf8_str is the UTF-8 conversion, m_data is the wire form
       encoder.add_object(tagging(), ASN1_Class::Universal, m_data.data(), m_data.size());
    }
 }
@@ -14756,15 +15056,15 @@ void ASN1_String::decode_from(BER_Decoder& source) {
    m_data.assign(obj.bits(), obj.bits() + obj.length());
 
    if(m_tag == ASN1_Type::BmpString) {
-      m_utf8_str = ucs2_to_utf8(m_data.data(), m_data.size());
+      m_utf8_str = ucs2_to_utf8(m_data);
    } else if(m_tag == ASN1_Type::UniversalString) {
-      m_utf8_str = ucs4_to_utf8(m_data.data(), m_data.size());
+      m_utf8_str = ucs4_to_utf8(m_data);
    } else if(m_tag == ASN1_Type::TeletexString) {
       /*
       TeletexString is nominally ITU T.61 not ISO-8859-1 but it seems
       the majority of implementations actually used that charset here.
       */
-      m_utf8_str = latin1_to_utf8(m_data.data(), m_data.size());
+      m_utf8_str = latin1_to_utf8(m_data);
    } else {
       // All other supported string types are UTF-8 or some subset thereof
       m_utf8_str = ASN1::to_string(obj);
@@ -14787,33 +15087,142 @@ void ASN1_String::decode_from(BER_Decoder& source) {
 
 namespace Botan {
 
-ASN1_Time ASN1_Time::from_seconds_since_epoch(uint64_t time_since_epoch) {
-   return ASN1_Time(std::chrono::system_clock::time_point(std::chrono::seconds(time_since_epoch)));
+namespace {
+
+// Format an integer as exactly `digits` zero-padded decimal digits
+std::string zero_pad(uint32_t value, size_t digits) {
+   std::string s = std::to_string(value);
+   BOTAN_ASSERT_NOMSG(s.size() <= digits);
+   const size_t padding = digits - s.size();
+   if(padding == 0) {
+      return s;
+   } else {
+      return std::string(padding, '0') + s;
+   }
 }
 
-ASN1_Time::ASN1_Time(const std::chrono::system_clock::time_point& time) {
+}  // namespace
+
+ASN1_Time ASN1_Time::from_seconds_since_epoch(uint64_t time_since_epoch) {
+   return ASN1_Time::from_time_point(std::chrono::system_clock::time_point(std::chrono::seconds(time_since_epoch)));
+}
+
+ASN1_Time::ASN1_Time(
+   uint16_t year, uint8_t month, uint8_t day, uint8_t hour, uint8_t minute, uint8_t second, ASN1_Type tag) :
+      m_year(year), m_month(month), m_day(day), m_hour(hour), m_minute(minute), m_second(second), m_tag(tag) {
+   if(tag != ASN1_Type::UtcTime && tag != ASN1_Type::GeneralizedTime) {
+      throw Invalid_Argument("ASN1_Time tag must be UtcTime or GeneralizedTime");
+   }
+
+   /*
+   * RFC 5280 Section 4.1.2.5:
+   *    To indicate that a certificate has no well-defined expiration date,
+   *    the notAfter SHOULD be assigned the GeneralizedTime value of
+   *    99991231235959Z.
+   */
+   const uint16_t min_year = 1950;
+   const uint16_t max_year = (tag == ASN1_Type::UtcTime) ? 2049 : 9999;
+
+   if(m_year < min_year || m_year > max_year) {
+      throw Invalid_Argument(fmt("ASN1_Time year {} is out of range ({} to {})", m_year, min_year, max_year));
+   }
+
+   if(m_month < 1 || m_month > 12) {
+      throw Invalid_Argument(fmt("ASN1_Time month {} is out of range", static_cast<uint32_t>(m_month)));
+   }
+
+   constexpr uint8_t days_in_month[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+   const bool is_leap_year = (m_year % 4 == 0) && (m_year % 100 != 0 || m_year % 400 == 0);
+   const uint8_t max_day = (m_month == 2 && is_leap_year) ? 29 : days_in_month[m_month - 1];
+
+   if(m_day < 1 || m_day > max_day) {
+      throw Invalid_Argument(fmt("ASN1_Time day {} is out of range for month {}",
+                                 static_cast<uint32_t>(m_day),
+                                 static_cast<uint32_t>(m_month)));
+   }
+
+   if(m_hour > 23) {
+      throw Invalid_Argument(fmt("ASN1_Time hour {} is out of range", static_cast<uint32_t>(m_hour)));
+   }
+
+   if(m_minute > 59) {
+      throw Invalid_Argument(fmt("ASN1_Time minute {} is out of range", static_cast<uint32_t>(m_minute)));
+   }
+
+   /*
+   * RFC 5280 is silent on the issue of leap seconds in certificate fields, but both
+   * OpenSSL and Go reject which suggests they are rarely if ever used in practice.
+   */
+   if(m_second > 59) {
+      throw Invalid_Argument(fmt("ASN1_Time second {} is out of range", static_cast<uint32_t>(m_second)));
+   }
+}
+
+//static
+ASN1_Time ASN1_Time::from_time_point(const std::chrono::system_clock::time_point& time) {
    const calendar_point cal(time);
 
-   m_year = cal.year();
-   m_month = cal.month();
-   m_day = cal.day();
-   m_hour = cal.hour();
-   m_minute = cal.minutes();
-   m_second = cal.seconds();
+   const ASN1_Type tag = (cal.year() >= 2050) ? ASN1_Type::GeneralizedTime : ASN1_Type::UtcTime;
 
-   // NOLINTNEXTLINE(*-prefer-member-initializer)
-   m_tag = (m_year >= 2050) ? ASN1_Type::GeneralizedTime : ASN1_Type::UtcTime;
+   return ASN1_Time(static_cast<uint16_t>(cal.year()),
+                    static_cast<uint8_t>(cal.month()),
+                    static_cast<uint8_t>(cal.day()),
+                    static_cast<uint8_t>(cal.hour()),
+                    static_cast<uint8_t>(cal.minutes()),
+                    static_cast<uint8_t>(cal.seconds()),
+                    tag);
 }
 
-ASN1_Time::ASN1_Time(std::string_view t_spec, ASN1_Type tag) {
-   set_to(t_spec, tag);
+//static
+ASN1_Time ASN1_Time::from_string(std::string_view t_spec, ASN1_Type tag) {
+   BOTAN_ARG_CHECK(tag == ASN1_Type::UtcTime || tag == ASN1_Type::GeneralizedTime, "Invalid tag for ASN1_Time");
+
+   if(tag == ASN1_Type::GeneralizedTime) {
+      BOTAN_ARG_CHECK(t_spec.size() == 15, "Invalid GeneralizedTime input string");
+   } else {
+      BOTAN_ARG_CHECK(t_spec.size() == 13, "Invalid UTCTime input string");
+   }
+
+   BOTAN_ARG_CHECK(t_spec.back() == 'Z', "Botan does not support ASN1 times with timezones other than Z");
+
+   const size_t field_len = 2;
+   const size_t year_len = (tag == ASN1_Type::UtcTime) ? 2 : 4;
+
+   const size_t year_start = 0;
+   const size_t month_start = year_start + year_len;
+   const size_t day_start = month_start + field_len;
+   const size_t hour_start = day_start + field_len;
+   const size_t min_start = hour_start + field_len;
+   const size_t sec_start = min_start + field_len;
+
+   uint32_t year = to_u32bit(t_spec.substr(year_start, year_len));
+   const uint32_t month = to_u32bit(t_spec.substr(month_start, field_len));
+   const uint32_t day = to_u32bit(t_spec.substr(day_start, field_len));
+   const uint32_t hour = to_u32bit(t_spec.substr(hour_start, field_len));
+   const uint32_t minute = to_u32bit(t_spec.substr(min_start, field_len));
+   const uint32_t second = to_u32bit(t_spec.substr(sec_start, field_len));
+
+   if(tag == ASN1_Type::UtcTime) {
+      // Interpret the two digit year by the 1950/2050 split (RFC 5280 Section 4.1.2.5.1)
+      year += (year >= 50) ? 1900 : 2000;
+   }
+
+   return ASN1_Time(static_cast<uint16_t>(year),
+                    static_cast<uint8_t>(month),
+                    static_cast<uint8_t>(day),
+                    static_cast<uint8_t>(hour),
+                    static_cast<uint8_t>(minute),
+                    static_cast<uint8_t>(second),
+                    tag);
 }
 
-ASN1_Time::ASN1_Time(std::string_view t_spec) {
+//static
+ASN1_Time ASN1_Time::from_string(std::string_view t_spec) {
    if(t_spec.size() == 13) {
-      set_to(t_spec, ASN1_Type::UtcTime);
+      return ASN1_Time::from_string(t_spec, ASN1_Type::UtcTime);
    } else if(t_spec.size() == 15) {
-      set_to(t_spec, ASN1_Type::GeneralizedTime);
+      return ASN1_Time::from_string(t_spec, ASN1_Type::GeneralizedTime);
    } else {
       throw Invalid_Argument("Time string could not be parsed as GeneralizedTime or UTCTime.");
    }
@@ -14836,7 +15245,9 @@ void ASN1_Time::decode_from(BER_Decoder& source) {
    }
 
    try {
-      set_to(ASN1::to_string(ber_time), ber_time.type());
+      // Assigning only after a successful parse means that a decoding error
+      // cannot leave this object in a partially written state
+      *this = ASN1_Time::from_string(ASN1::to_string(ber_time), ber_time.type());
    } catch(Invalid_Argument& e) {
       throw Decoding_Error(fmt("Invalid ASN1_Time encoding: {}", e.what()));
    }
@@ -14847,32 +15258,30 @@ std::string ASN1_Time::to_string() const {
       throw Invalid_State("ASN1_Time::to_string: No time set");
    }
 
-   uint32_t full_year = m_year;
+   BOTAN_ASSERT_NOMSG(m_year <= 9999);
 
+   std::ostringstream out;
+
+   // UTCTime uses a 2 digit year, GeneralizedTime a 4 digit year
    if(m_tag == ASN1_Type::UtcTime) {
       if(m_year < 1950 || m_year >= 2050) {
          throw Encoding_Error(fmt("ASN_Time: The time {} cannot be encoded as UTCTime", readable_string()));
       }
 
-      full_year = (m_year >= 2000) ? (m_year - 2000) : (m_year - 1900);
+      out << (zero_pad((m_year >= 2000) ? (m_year - 2000) : (m_year - 1900), 2));
+   } else {
+      out << zero_pad(m_year, 4);
    }
 
-   const uint64_t year_factor = 10000000000;
-   const uint64_t mon_factor = 100000000;
-   const uint64_t day_factor = 1000000;
-   const uint64_t hour_factor = 10000;
-   const uint64_t min_factor = 100;
+   // clang-format off
+   out << zero_pad(m_month, 2)
+       << zero_pad(m_day, 2)
+       << zero_pad(m_hour, 2)
+       << zero_pad(m_minute, 2)
+       << zero_pad(m_second, 2) << "Z";
+   // clang-format on
 
-   const uint64_t int_repr = year_factor * full_year + mon_factor * m_month + day_factor * m_day +
-                             hour_factor * m_hour + min_factor * m_minute + m_second;
-
-   const std::string repr = std::to_string(int_repr) + "Z";
-
-   const size_t desired_size = (m_tag == ASN1_Type::UtcTime) ? 13 : 15;
-
-   const std::string zero_padding(desired_size - repr.size(), '0');
-
-   return zero_padding + repr;
+   return out.str();
 }
 
 std::string ASN1_Time::readable_string() const {
@@ -14880,13 +15289,14 @@ std::string ASN1_Time::readable_string() const {
       throw Invalid_State("ASN1_Time::readable_string: No time set");
    }
 
-   // desired format: "%04d/%02d/%02d %02d:%02d:%02d UTC"
-   std::stringstream output;
-   output << std::setfill('0') << std::setw(4) << m_year << "/" << std::setw(2) << m_month << "/" << std::setw(2)
-          << m_day << " " << std::setw(2) << m_hour << ":" << std::setw(2) << m_minute << ":" << std::setw(2)
-          << m_second << " UTC";
+   // desired format: "YYYY/MM/DD HH:MM:SS UTC"
 
-   return output.str();
+   std::ostringstream out;
+
+   out << zero_pad(m_year, 4) << "/" << zero_pad(m_month, 2) << "/" << zero_pad(m_day, 2) << " ";
+   out << zero_pad(m_hour, 2) << ":" << zero_pad(m_minute, 2) << ":" << zero_pad(m_second, 2) << " UTC";
+
+   return out.str();
 }
 
 bool ASN1_Time::time_is_set() const {
@@ -14942,103 +15352,18 @@ int32_t ASN1_Time::cmp(const ASN1_Time& other) const {
    return SAME_TIME;
 }
 
-void ASN1_Time::set_to(std::string_view t_spec, ASN1_Type spec_tag) {
-   BOTAN_ARG_CHECK(spec_tag == ASN1_Type::UtcTime || spec_tag == ASN1_Type::GeneralizedTime,
-                   "Invalid tag for ASN1_Time");
-
-   if(spec_tag == ASN1_Type::GeneralizedTime) {
-      BOTAN_ARG_CHECK(t_spec.size() == 15, "Invalid GeneralizedTime input string");
-   } else if(spec_tag == ASN1_Type::UtcTime) {
-      BOTAN_ARG_CHECK(t_spec.size() == 13, "Invalid UTCTime input string");
-   }
-
-   BOTAN_ARG_CHECK(t_spec.back() == 'Z', "Botan does not support ASN1 times with timezones other than Z");
-
-   const size_t field_len = 2;
-
-   const size_t year_start = 0;
-   const size_t year_len = (spec_tag == ASN1_Type::UtcTime) ? 2 : 4;
-   const size_t month_start = year_start + year_len;
-   const size_t day_start = month_start + field_len;
-   const size_t hour_start = day_start + field_len;
-   const size_t min_start = hour_start + field_len;
-   const size_t sec_start = min_start + field_len;
-
-   m_year = to_u32bit(t_spec.substr(year_start, year_len));
-   m_month = to_u32bit(t_spec.substr(month_start, field_len));
-   m_day = to_u32bit(t_spec.substr(day_start, field_len));
-   m_hour = to_u32bit(t_spec.substr(hour_start, field_len));
-   m_minute = to_u32bit(t_spec.substr(min_start, field_len));
-   m_second = to_u32bit(t_spec.substr(sec_start, field_len));
-   m_tag = spec_tag;
-
-   if(spec_tag == ASN1_Type::UtcTime) {
-      if(m_year >= 50) {
-         m_year += 1900;
-      } else {
-         m_year += 2000;
-      }
-   }
-
-   if(!passes_sanity_check()) {
-      throw Invalid_Argument(fmt("ASN1_Time string '{}' does not seem to be valid", t_spec));
-   }
-}
-
-/*
-* Do a general sanity check on the time
-*/
-bool ASN1_Time::passes_sanity_check() const {
-   // AppVeyor's trust store includes a cert with expiration date in 3016 ...
-   if(m_year < 1950 || m_year > 3100) {
-      return false;
-   }
-   if(m_month == 0 || m_month > 12) {
-      return false;
-   }
-
-   const uint32_t days_in_month[12] = {31, 28 + 1, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
-
-   if(m_day == 0 || m_day > days_in_month[m_month - 1]) {
-      return false;
-   }
-
-   if(m_month == 2 && m_day == 29) {
-      if(m_year % 4 != 0) {
-         return false;  // not a leap year
-      }
-
-      if(m_year % 100 == 0 && m_year % 400 != 0) {
-         return false;
-      }
-   }
-
-   if(m_hour >= 24 || m_minute >= 60 || m_second > 60) {
-      return false;
-   }
-
-   if(m_tag == ASN1_Type::UtcTime) {
-      /*
-      UTCTime limits the value of components such that leap seconds
-      are not covered. See "UNIVERSAL 23" in "Information technology
-      Abstract Syntax Notation One (ASN.1): Specification of basic notation"
-
-      http://www.itu.int/ITU-T/studygroups/com17/languages/
-      */
-      if(m_second > 59) {
-         return false;
-      }
-   }
-
-   return true;
-}
-
 std::chrono::system_clock::time_point ASN1_Time::to_std_timepoint() const {
    return calendar_point(m_year, m_month, m_day, m_hour, m_minute, m_second).to_std_timepoint();
 }
 
 uint64_t ASN1_Time::time_since_epoch() const {
-   return calendar_point(m_year, m_month, m_day, m_hour, m_minute, m_second).seconds_since_epoch();
+   const int64_t tse = calendar_point(m_year, m_month, m_day, m_hour, m_minute, m_second).seconds_since_epoch();
+
+   if(tse >= 0) {
+      return static_cast<uint64_t>(tse);
+   } else {
+      throw Encoding_Error("ASN1_Time::time_since_epoch value is prior to epoch");
+   }
 }
 
 /*
@@ -15102,6 +15427,12 @@ size_t decode_tag(DataSource* ber, ASN1_Type& type_tag, ASN1_Class& class_tag) {
    if((*b & 0x1F) != 0x1F) {
       type_tag = ASN1_Type(*b & 0x1F);
       class_tag = ASN1_Class(*b & 0xE0);
+      // The EOC marker is primitive; a constructed universal tag 0 has no
+      // valid meaning and would otherwise bypass the EOC handling, which
+      // matches on (Eoc, Universal) exactly
+      if(type_tag == ASN1_Type::Eoc && class_tag == ASN1_Class::Constructed) {
+         throw BER_Decoding_Error("EOC tag with constructed encoding");
+      }
       return 1;
    }
 
@@ -15114,7 +15445,8 @@ size_t decode_tag(DataSource* ber, ASN1_Type& type_tag, ASN1_Class& class_tag) {
       if(!b) {
          throw BER_Decoding_Error("Long-form tag truncated");
       }
-      if((tag_buf >> 24) != 0) {
+      // Reject if shifting in another 7 bits would overflow the uint32_t tag
+      if((tag_buf >> 25) != 0) {
          throw BER_Decoding_Error("Long-form tag overflowed 32 bits");
       }
       // This is required even by BER (see X.690 section 8.1.2.4.2 sentence c).
@@ -15262,6 +15594,12 @@ size_t peek_tag(DataSource* src, size_t offset, ASN1_Type& type_tag, ASN1_Class&
    if((b & 0x1F) != 0x1F) {
       type_tag = ASN1_Type(b & 0x1F);
       class_tag = ASN1_Class(b & 0xE0);
+      // The EOC marker is primitive; a constructed universal tag 0 has no
+      // valid meaning and would otherwise bypass the EOC handling, which
+      // matches on (Eoc, Universal) exactly
+      if(type_tag == ASN1_Type::Eoc && class_tag == ASN1_Class::Constructed) {
+         throw BER_Decoding_Error("EOC tag with constructed encoding");
+      }
       return 1;
    }
 
@@ -15273,7 +15611,8 @@ size_t peek_tag(DataSource* src, size_t offset, ASN1_Type& type_tag, ASN1_Class&
       if(src->peek(&b, 1, offset + tag_bytes) == 0) {
          throw BER_Decoding_Error("Long-form tag truncated");
       }
-      if((tag_buf >> 24) != 0) {
+      // Reject if shifting in another 7 bits would overflow the uint32_t tag
+      if((tag_buf >> 25) != 0) {
          throw BER_Decoding_Error("Long-form tag overflowed 32 bits");
       }
       // Required even by BER (X.690 section 8.1.2.4.2 sentence c).
@@ -15311,7 +15650,8 @@ size_t peek_tag(DataSource* src, size_t offset, ASN1_Type& type_tag, ASN1_Class&
 * Returns the decoded length and sets field_size to the number of bytes consumed.
 * For indefinite-length encoding, recursively scans ahead to find the EOC marker.
 */
-size_t peek_length(DataSource* src, size_t offset, size_t& field_size, size_t allow_indef, bool constructed) {
+size_t peek_length(
+   DataSource* src, size_t offset, size_t& field_size, size_t allow_indef, bool constructed, bool der_mode) {
    uint8_t b = 0;
    if(src->peek(&b, 1, offset) == 0) {
       throw BER_Decoding_Error("Length field not found");
@@ -15329,6 +15669,10 @@ size_t peek_length(DataSource* src, size_t offset, size_t& field_size, size_t al
    }
 
    if(num_length_bytes == 0) {
+      // Indefinite length is not allowed in DER
+      if(der_mode) {
+         throw BER_Decoding_Error("Detected indefinite-length encoding in DER structure");
+      }
       // Indefinite length is only valid for constructed types (X.690 8.1.3.2)
       if(!constructed) {
          throw BER_Decoding_Error("Indefinite-length encoding used with non-constructed type");
@@ -15368,7 +15712,8 @@ size_t find_eoc(DataSource* src, size_t base_offset, size_t allow_indef) {
       }
 
       size_t length_size = 0;
-      const size_t item_size = peek_length(src, offset + tag_size, length_size, allow_indef, is_constructed(class_tag));
+      const size_t item_size =
+         peek_length(src, offset + tag_size, length_size, allow_indef, is_constructed(class_tag), false);
 
       if(auto new_offset = checked_add(offset, tag_size, length_size, item_size)) {
          offset = new_offset.value();
@@ -15426,6 +15771,74 @@ class DataSource_BERObject final : public DataSource {
       BER_Object m_obj;
       size_t m_offset = 0;
 };
+
+/*
+* A non-owning DataSource over a span, used to drive tag/length decoding
+* without copying the underlying buffer.
+*/
+class DataSource_Span final : public DataSource {
+   public:
+      size_t read(uint8_t out[], size_t length) override {
+         const size_t got = std::min(m_buf.size() - m_offset, length);
+         copy_mem(out, m_buf.data() + m_offset, got);
+         m_offset += got;
+         return got;
+      }
+
+      size_t peek(uint8_t out[], size_t length, size_t peek_offset) const override {
+         if(peek_offset >= m_buf.size() - m_offset) {
+            return 0;
+         }
+         const size_t got = std::min(m_buf.size() - m_offset - peek_offset, length);
+         copy_mem(out, m_buf.data() + m_offset + peek_offset, got);
+         return got;
+      }
+
+      bool check_available(size_t n) override { return n <= (m_buf.size() - m_offset); }
+
+      bool end_of_data() const override { return m_offset == m_buf.size(); }
+
+      size_t get_bytes_read() const override { return m_offset; }
+
+      explicit DataSource_Span(std::span<const uint8_t> buf) : m_buf(buf) {}
+
+   private:
+      std::span<const uint8_t> m_buf;
+      size_t m_offset = 0;
+};
+
+/*
+* Verify that the elements of a SET appear in sorted order, comparing the full
+* encoding of each element as an octet string. DER requires this canonical
+* ordering. Throws if the elements are not sorted.
+*/
+void verify_set_is_sorted(std::span<const uint8_t> content) {
+   DataSource_Span src(content);
+   size_t offset = 0;
+   std::optional<std::span<const uint8_t>> prev;
+
+   while(offset < content.size()) {
+      ASN1_Type type_tag = ASN1_Type::NoObject;
+      ASN1_Class class_tag = ASN1_Class::NoObject;
+      const size_t tag_size = peek_tag(&src, offset, type_tag, class_tag);
+
+      size_t length_size = 0;
+      const size_t item_size =
+         peek_length(&src, offset + tag_size, length_size, /*allow_indef=*/0, is_constructed(class_tag), true);
+
+      const auto end = checked_add(offset, tag_size, length_size, item_size);
+      if(!end || *end > content.size()) {
+         throw BER_Decoding_Error("SET element exceeds available data");
+      }
+
+      const auto elem = content.subspan(offset, *end - offset);
+      if(prev && std::lexicographical_compare(elem.begin(), elem.end(), prev->begin(), prev->end())) {
+         throw BER_Decoding_Error("Detected unsorted SET in DER structure");
+      }
+      prev = elem;
+      offset = *end;
+   }
+}
 
 }  // namespace
 
@@ -15518,6 +15931,10 @@ BER_Object BER_Decoder::get_next_object() {
          throw BER_Decoding_Error("EOC marker with non-zero length");
       }
 
+      if(const auto max_size = m_limits.max_object_size(); max_size && dl.content_length() > *max_size) {
+         throw BER_Decoding_Error("Encoded object exceeds maximum size");
+      }
+
       if(!m_source->check_available(dl.total_length())) {
          throw BER_Decoding_Error("Value truncated");
       }
@@ -15539,10 +15956,16 @@ BER_Object BER_Decoder::get_next_object() {
          if(m_limits.require_der_encoding()) {
             throw BER_Decoding_Error("Detected EOC marker in DER structure");
          }
-         continue;
-      } else {
-         break;
+         // An EOC marker is only valid as an indefinite-length terminator, which
+         // is consumed above when reading the indefinite-length object. A
+         // standalone EOC is rejected unless the caller opted to tolerate it.
+         if(m_limits.allow_standalone_eoc()) {
+            continue;
+         }
+         throw BER_Decoding_Error("Encountered EOC marker outside of indefinite-length encoding");
       }
+
+      break;
    }
 
    return next;
@@ -15580,6 +16003,12 @@ void BER_Decoder::push_back(BER_Object&& obj) {
 BER_Decoder BER_Decoder::start_cons(ASN1_Type type_tag, ASN1_Class class_tag) {
    BER_Object obj = get_next_object();
    obj.assert_is_a(type_tag, class_tag | ASN1_Class::Constructed);
+
+   // In DER mode the elements of a universal SET must appear in sorted order
+   if(m_limits.require_der_encoding() && type_tag == ASN1_Type::Set && class_tag == ASN1_Class::Universal) {
+      verify_set_is_sorted(std::span<const uint8_t>{obj.bits(), obj.length()});
+   }
+
    BER_Decoder child(std::move(obj), this);
    return child;
 }
@@ -15599,6 +16028,11 @@ BER_Decoder& BER_Decoder::end_cons() {
 
 BER_Decoder::BER_Decoder(BER_Object&& obj, BER_Decoder* parent) :
       m_limits(parent != nullptr ? parent->limits() : BER_Decoder::Limits::BER()), m_parent(parent) {
+   m_data_src = std::make_unique<DataSource_BERObject>(std::move(obj));
+   m_source = m_data_src.get();
+}
+
+BER_Decoder::BER_Decoder(BER_Object&& obj, Limits limits) : m_limits(limits) {
    m_data_src = std::make_unique<DataSource_BERObject>(std::move(obj));
    m_source = m_data_src.get();
 }
@@ -15623,7 +16057,11 @@ BER_Decoder& BER_Decoder::operator=(BER_Decoder&&) noexcept = default;
 /*
 * Request for an object to decode itself
 */
-BER_Decoder& BER_Decoder::decode(ASN1_Object& obj, ASN1_Type /*unused*/, ASN1_Class /*unused*/) {
+BER_Decoder& BER_Decoder::decode(ASN1_Object& obj, ASN1_Type type_tag, ASN1_Class class_tag) {
+   // TODO support this case properly
+   if(type_tag != ASN1_Type::NoObject || class_tag != ASN1_Class::NoObject) {
+      throw Not_Implemented("BER_Decoder::decode(ASN1_Object) does not support implicit tagged decoding");
+   }
    obj.decode_from(*this);
    return (*this);
 }
@@ -15727,11 +16165,13 @@ BER_Decoder& BER_Decoder::decode(BigInt& out, ASN1_Type type_tag, ASN1_Class cla
    const BER_Object obj = get_next_object();
    obj.assert_is_a(type_tag, class_tag);
 
+   // An INTEGER must have at least one content octet (X.690 section 8.3.1)
+   if(obj.length() == 0) {
+      throw BER_Decoding_Error("INTEGER encoding has no content octets");
+   }
+
    // DER requires minimal INTEGER encoding (X.690 section 8.3.2)
    if(m_limits.require_der_encoding()) {
-      if(obj.length() == 0) {
-         throw BER_Decoding_Error("Detected empty INTEGER encoding in DER structure");
-      }
       if(obj.length() > 1) {
          if(obj.bits()[0] == 0x00 && (obj.bits()[1] & 0x80) == 0) {
             throw BER_Decoding_Error("Detected non-minimal INTEGER encoding in DER structure");
@@ -15742,32 +16182,39 @@ BER_Decoder& BER_Decoder::decode(BigInt& out, ASN1_Type type_tag, ASN1_Class cla
       }
    }
 
-   if(obj.length() == 0) {
-      out.clear();
-   } else {
-      const uint8_t first = obj.bits()[0];
-      const bool negative = (first & 0x80) == 0x80;
-
-      if(negative) {
-         secure_vector<uint8_t> vec(obj.bits(), obj.bits() + obj.length());
-         for(size_t i = obj.length(); i > 0; --i) {
-            const bool gt0 = (vec[i - 1] > 0);
-            vec[i - 1] -= 1;
-            if(gt0) {
-               break;
-            }
-         }
-         for(size_t i = 0; i != obj.length(); ++i) {
-            vec[i] = ~vec[i];
-         }
-         out._assign_from_bytes(vec);
-         out.flip_sign();
-      } else {
-         out._assign_from_bytes(obj.data());
-      }
-   }
+   out = ASN1::integer_from_contents(obj.data());
 
    return (*this);
+}
+
+BigInt ASN1::integer_from_contents(std::span<const uint8_t> contents) {
+   if(contents.empty()) {
+      throw BER_Decoding_Error("INTEGER encoding has no content octets");
+   }
+
+   BigInt out;
+
+   const bool negative = (contents[0] & 0x80) == 0x80;
+
+   if(negative) {
+      secure_vector<uint8_t> vec(contents.begin(), contents.end());
+      for(size_t i = vec.size(); i > 0; --i) {
+         const bool gt0 = (vec[i - 1] > 0);
+         vec[i - 1] -= 1;
+         if(gt0) {
+            break;
+         }
+      }
+      for(auto& byte : vec) {
+         byte = ~byte;
+      }
+      out._assign_from_bytes(vec);
+      out.set_sign(BigInt::Negative);
+   } else {
+      out._assign_from_bytes(contents);
+   }
+
+   return out;
 }
 
 namespace {
@@ -15776,19 +16223,119 @@ bool is_constructed(const BER_Object& obj) {
    return is_constructed(obj.class_tag());
 }
 
+/*
+* Bounds the nesting of constructed OCTET STRING/BIT STRING encodings.
+*
+* It's allowed, though probably rarely used, for a BER constructed string
+* to have a segment which is itself a BER constructed string. We handle
+* this recursively, so place an explicit limit on how deep we'll go.
+*/
+constexpr size_t ALLOWED_CONSTRUCTED_STRING_NESTING = 2;
+
+/*
+* Concatenate the segments of a BER constructed OCTET STRING (X.690 sec 8.7.3)
+*
+* In the constructed form the secondary tags are always universal OCTET STRING
+* rather than any possible implicit tag. It's also allowed for any of the
+* segments to themselves be constructed.
+*/
+template <typename Alloc>
+void asn1_concat_constructed_octet_string(std::vector<uint8_t, Alloc>& buffer,
+                                          const BER_Object& obj,
+                                          const BER_Decoder::Limits& limits,
+                                          size_t depth) {
+   if(depth >= ALLOWED_CONSTRUCTED_STRING_NESTING) {
+      throw BER_Decoding_Error("Constructed OCTET STRING is too deeply nested");
+   }
+
+   BER_Decoder segments(obj, limits);
+   while(segments.more_items()) {
+      const BER_Object seg = segments.get_next_object();
+      if(seg.is_a(ASN1_Type::OctetString, ASN1_Class::Universal)) {
+         buffer.insert(buffer.end(), seg.bits(), seg.bits() + seg.length());
+      } else if(seg.is_a(ASN1_Type::OctetString, ASN1_Class::Universal | ASN1_Class::Constructed)) {
+         asn1_concat_constructed_octet_string(buffer, seg, limits, depth + 1);
+      } else {
+         throw BER_Decoding_Error("Constructed OCTET STRING contains an invalid segment");
+      }
+   }
+}
+
+/*
+* Concatenate the segments of a BER constructed BIT STRING (X.690 sec 8.6.4)
+*
+* Returns the unused bit count of the final segment; BER requires that every
+* earlier segment must be a multiple of eight bits.
+*/
+template <typename Alloc>
+uint8_t asn1_concat_constructed_bit_string(std::vector<uint8_t, Alloc>& buffer,
+                                           const BER_Object& obj,
+                                           const BER_Decoder::Limits& limits,
+                                           size_t depth) {
+   if(depth >= ALLOWED_CONSTRUCTED_STRING_NESTING) {
+      throw BER_Decoding_Error("Constructed BIT STRING is too deeply nested");
+   }
+
+   uint8_t unused_bits = 0;
+
+   BER_Decoder segments(obj, limits);
+   while(segments.more_items()) {
+      if(unused_bits != 0) {
+         throw BER_Decoding_Error("Constructed BIT STRING has unused bits before the final segment");
+      }
+
+      const BER_Object seg = segments.get_next_object();
+      if(seg.is_a(ASN1_Type::BitString, ASN1_Class::Universal)) {
+         if(seg.length() == 0) {
+            throw BER_Decoding_Error("Invalid BIT STRING");
+         }
+         unused_bits = seg.bits()[0];
+         if(unused_bits >= 8) {
+            throw BER_Decoding_Error("Bad number of unused bits in BIT STRING");
+         }
+         if(seg.length() == 1 && unused_bits != 0) {
+            throw BER_Decoding_Error("Invalid BIT STRING");
+         }
+         buffer.insert(buffer.end(), seg.bits() + 1, seg.bits() + seg.length());
+      } else if(seg.is_a(ASN1_Type::BitString, ASN1_Class::Universal | ASN1_Class::Constructed)) {
+         unused_bits = asn1_concat_constructed_bit_string(buffer, seg, limits, depth + 1);
+      } else {
+         throw BER_Decoding_Error("Constructed BIT STRING contains an invalid segment");
+      }
+   }
+
+   return unused_bits;
+}
+
 template <typename Alloc>
 void asn1_decode_binary_string(std::vector<uint8_t, Alloc>& buffer,
                                const BER_Object& obj,
                                ASN1_Type real_type,
                                ASN1_Type type_tag,
                                ASN1_Class class_tag,
-                               bool require_der) {
-   obj.assert_is_a(type_tag, class_tag);
+                               const BER_Decoder::Limits& limits) {
+   // DER requires BIT STRING and OCTET STRING to use primitive encoding;
+   // in BER the constructed (fragmented) form is decoded by concatenation
+   if(is_constructed(obj)) {
+      obj.assert_is_a(type_tag, class_tag | ASN1_Class::Constructed);
 
-   // DER requires BIT STRING and OCTET STRING to use primitive encoding
-   if(require_der && is_constructed(obj)) {
-      throw BER_Decoding_Error("Detected constructed string encoding in DER structure");
+      if(limits.require_der_encoding()) {
+         throw BER_Decoding_Error("Detected constructed string encoding in DER structure");
+      }
+
+      // Concatenate into a temporary so a failed decode leaves buffer unmodified
+      std::vector<uint8_t, Alloc> concat;
+      concat.reserve(obj.length());  // upper possible bound on the output size
+      if(real_type == ASN1_Type::OctetString) {
+         asn1_concat_constructed_octet_string(concat, obj, limits, 0);
+      } else {
+         asn1_concat_constructed_bit_string(concat, obj, limits, 0);
+      }
+      buffer = std::move(concat);
+      return;
    }
+
+   obj.assert_is_a(type_tag, class_tag);
 
    if(real_type == ASN1_Type::OctetString) {
       buffer.assign(obj.bits(), obj.bits() + obj.length());
@@ -15809,7 +16356,7 @@ void asn1_decode_binary_string(std::vector<uint8_t, Alloc>& buffer,
       }
 
       // DER requires unused bits in BIT STRING to be zero (X.690 section 11.2.2)
-      if(require_der && unused_bits > 0) {
+      if(limits.require_der_encoding() && unused_bits > 0) {
          const uint8_t last_byte = obj.bits()[obj.length() - 1];
          if((last_byte & ((1 << unused_bits) - 1)) != 0) {
             throw BER_Decoding_Error("Detected non-zero padding bits in BIT STRING in DER structure");
@@ -15822,6 +16369,34 @@ void asn1_decode_binary_string(std::vector<uint8_t, Alloc>& buffer,
          copy_mem(buffer.data(), obj.bits() + 1, obj.length() - 1);
       }
    }
+}
+
+uint8_t asn1_bitstring_unused_bits(const BER_Object& obj, ASN1_Type type_tag, ASN1_Class class_tag, bool require_der) {
+   obj.assert_is_a(type_tag, class_tag);
+   BOTAN_ASSERT_NOMSG(!is_constructed(obj));
+
+   if(obj.length() == 0) {
+      throw BER_Decoding_Error("Invalid BIT STRING");
+   }
+
+   const uint8_t unused_bits = obj.bits()[0];
+
+   if(unused_bits >= 8) {
+      throw BER_Decoding_Error("Invalid number of unused bits in BIT STRING");
+   }
+
+   if(obj.length() == 1 && unused_bits != 0) {
+      throw BER_Decoding_Error("Invalid BIT STRING");
+   }
+
+   if(require_der && unused_bits > 0) {
+      const uint8_t last_byte = obj.bits()[obj.length() - 1];
+      if((last_byte & ((1 << unused_bits) - 1)) != 0) {
+         throw BER_Decoding_Error("Detected non-zero padding bits in BIT STRING in DER structure");
+      }
+   }
+
+   return unused_bits;
 }
 
 }  // namespace
@@ -15837,8 +16412,7 @@ BER_Decoder& BER_Decoder::decode(secure_vector<uint8_t>& buffer,
       throw BER_Bad_Tag("Bad tag for {BIT,OCTET} STRING", static_cast<uint32_t>(real_type));
    }
 
-   asn1_decode_binary_string(
-      buffer, get_next_object(), real_type, type_tag, class_tag, m_limits.require_der_encoding());
+   asn1_decode_binary_string(buffer, get_next_object(), real_type, type_tag, class_tag, m_limits);
    return (*this);
 }
 
@@ -15850,10 +16424,101 @@ BER_Decoder& BER_Decoder::decode(std::vector<uint8_t>& buffer,
       throw BER_Bad_Tag("Bad tag for {BIT,OCTET} STRING", static_cast<uint32_t>(real_type));
    }
 
-   asn1_decode_binary_string(
-      buffer, get_next_object(), real_type, type_tag, class_tag, m_limits.require_der_encoding());
+   asn1_decode_binary_string(buffer, get_next_object(), real_type, type_tag, class_tag, m_limits);
    return (*this);
 }
+
+BER_Decoder& BER_Decoder::decode_bitstring(ASN1_BitString& out, ASN1_Type type_tag, ASN1_Class class_tag) {
+   const BER_Object obj = get_next_object();
+
+   std::vector<uint8_t> bits;
+   uint8_t unused_bits = 0;
+
+   if(is_constructed(obj.class_tag())) {
+      obj.assert_is_a(type_tag, class_tag | ASN1_Class::Constructed);
+      if(m_limits.require_der_encoding()) {
+         throw BER_Decoding_Error("Detected constructed string encoding in DER structure");
+      }
+      bits.reserve(obj.length());  // upper possible bound on the output size
+      unused_bits = asn1_concat_constructed_bit_string(bits, obj, m_limits, 0);
+   } else {
+      unused_bits = asn1_bitstring_unused_bits(obj, type_tag, class_tag, m_limits.require_der_encoding());
+      bits.assign(obj.bits() + 1, obj.bits() + obj.length());
+   }
+
+   if(unused_bits > 0 && !bits.empty()) {
+      bits.back() &= static_cast<uint8_t>(0xFF << unused_bits);
+   }
+
+   out = ASN1_BitString(std::move(bits), unused_bits);
+   return (*this);
+}
+
+BER_Decoder& BER_Decoder::decode_named_bitstring(uint64_t& out,
+                                                 size_t width,
+                                                 ASN1_Type type_tag,
+                                                 ASN1_Class class_tag) {
+   if(width > 64) {
+      throw Invalid_Argument("BER_Decoder: Named BIT STRING width is too large");
+   }
+
+   ASN1_BitString bits;
+   decode_bitstring(bits, type_tag, class_tag);
+
+   if(bits.bit_length() > width) {
+      throw BER_Decoding_Error("Named BIT STRING exceeds declared width");
+   }
+
+   if(m_limits.require_der_encoding() && bits.bit_length() > 0 && !bits.bit_at(bits.bit_length() - 1)) {
+      throw BER_Decoding_Error("Named BIT STRING is not minimally encoded");
+   }
+
+   uint64_t decoded = 0;
+   for(size_t bit = 0; bit != bits.bit_length(); ++bit) {
+      if(bits.bit_at(bit)) {
+         decoded |= uint64_t(1) << (width - 1 - bit);
+      }
+   }
+
+   out = decoded;
+   return (*this);
+}
+
+namespace ASN1 {
+
+bool is_single_der_object(std::span<const uint8_t> bytes, ASN1_Type expected_type, ASN1_Class expected_class) {
+   if(bytes.empty()) {
+      return false;
+   }
+
+   try {
+      DataSource_Span src(bytes);
+
+      ASN1_Type type_tag = ASN1_Type::NoObject;
+      ASN1_Class class_tag = ASN1_Class::NoObject;
+      const size_t tag_bytes = decode_tag(&src, type_tag, class_tag);
+
+      if(type_tag != expected_type || class_tag != expected_class) {
+         return false;
+      }
+
+      const auto dl = decode_length(&src, /*allow_indef=*/0, /*der_mode=*/true, is_constructed(expected_class));
+
+      const size_t header_bytes = tag_bytes + dl.field_length();
+      if(header_bytes > bytes.size()) {
+         return false;
+      }
+      return dl.content_length() == bytes.size() - header_bytes;
+   } catch(Decoding_Error&) {
+      return false;
+   }
+}
+
+bool is_der_sequence_header(std::span<const uint8_t> bytes) {
+   return is_single_der_object(bytes, ASN1_Type::Sequence, ASN1_Class::Universal | ASN1_Class::Constructed);
+}
+
+}  // namespace ASN1
 
 }  // namespace Botan
 /*
@@ -15915,12 +16580,32 @@ void encode_length(std::vector<uint8_t>& encoded_length, size_t length) {
 
 }  // namespace
 
+namespace ASN1 {
+
+std::vector<uint8_t> der_sequence_header(size_t contents_len) {
+   std::vector<uint8_t> header;
+   header.reserve(2 + sizeof(contents_len));
+   encode_tag(header, ASN1_Type::Sequence, ASN1_Class::Constructed);
+   encode_length(header, contents_len);
+   return header;
+}
+
+}  // namespace ASN1
+
 DER_Encoder::DER_Encoder(secure_vector<uint8_t>& vec) {
-   m_append_output = [&vec](const uint8_t b[], size_t l) { vec.insert(vec.end(), b, b + l); };
+   m_append_output = [&vec](const uint8_t b[], size_t l) {
+      if(l > 0) {
+         vec.insert(vec.end(), b, b + l);
+      }
+   };
 }
 
 DER_Encoder::DER_Encoder(std::vector<uint8_t>& vec) {
-   m_append_output = [&vec](const uint8_t b[], size_t l) { vec.insert(vec.end(), b, b + l); };
+   m_append_output = [&vec](const uint8_t b[], size_t l) {
+      if(l > 0) {
+         vec.insert(vec.end(), b, b + l);
+      }
+   };
 }
 
 /*
@@ -15929,7 +16614,7 @@ DER_Encoder::DER_Encoder(std::vector<uint8_t>& vec) {
 void DER_Encoder::DER_Sequence::push_contents(DER_Encoder& der) {
    const auto real_class_tag = m_class_tag | ASN1_Class::Constructed;
 
-   if(m_type_tag == ASN1_Type::Set && m_class_tag == ASN1_Class::Universal) {
+   if(m_sort_contents) {
       std::sort(m_set_contents.begin(), m_set_contents.end());
       for(const auto& set_elem : m_set_contents) {
          m_contents += set_elem;
@@ -15945,15 +16630,19 @@ void DER_Encoder::DER_Sequence::push_contents(DER_Encoder& der) {
 * Add an encoded value to the SEQUENCE/SET
 */
 void DER_Encoder::DER_Sequence::add_bytes(const uint8_t data[], size_t length) {
-   if(m_type_tag == ASN1_Type::Set && m_class_tag == ASN1_Class::Universal) {
-      m_set_contents.push_back(secure_vector<uint8_t>(data, data + length));
+   if(m_sort_contents) {
+      if(length > 0) {
+         m_set_contents.emplace_back(data, data + length);
+      } else {
+         m_set_contents.emplace_back();
+      }
    } else {
       m_contents += std::make_pair(data, length);
    }
 }
 
 void DER_Encoder::DER_Sequence::add_bytes(const uint8_t hdr[], size_t hdr_len, const uint8_t val[], size_t val_len) {
-   if(m_type_tag == ASN1_Type::Set && m_class_tag == ASN1_Class::Universal) {
+   if(m_sort_contents) {
       secure_vector<uint8_t> m;
       m.reserve(hdr_len + val_len);
       m += std::make_pair(hdr, hdr_len);
@@ -15975,8 +16664,10 @@ uint32_t DER_Encoder::DER_Sequence::tag_of() const {
 /*
 * DER_Sequence Constructor
 */
-DER_Encoder::DER_Sequence::DER_Sequence(ASN1_Type type_tag, ASN1_Class class_tag) :
-      m_type_tag(type_tag), m_class_tag(class_tag) {}
+DER_Encoder::DER_Sequence::DER_Sequence(ASN1_Type type_tag, ASN1_Class class_tag, bool sort_contents) :
+      m_type_tag(type_tag),
+      m_class_tag(class_tag),
+      m_sort_contents(sort_contents || (type_tag == ASN1_Type::Set && class_tag == ASN1_Class::Universal)) {}
 
 /*
 * Return the encoded contents
@@ -16013,7 +16704,15 @@ std::vector<uint8_t> DER_Encoder::get_contents_unlocked() {
 * Start a new ASN.1 SEQUENCE/SET/EXPLICIT
 */
 DER_Encoder& DER_Encoder::start_cons(ASN1_Type type_tag, ASN1_Class class_tag) {
-   m_subsequences.push_back(DER_Sequence(type_tag, class_tag));
+   return start_cons(type_tag, class_tag, false);
+}
+
+DER_Encoder& DER_Encoder::start_set(ASN1_Type type_tag, ASN1_Class class_tag) {
+   return start_cons(type_tag, class_tag, true);
+}
+
+DER_Encoder& DER_Encoder::start_cons(ASN1_Type type_tag, ASN1_Class class_tag, bool sort_contents) {
+   m_subsequences.push_back(DER_Sequence(type_tag, class_tag, sort_contents));
    return (*this);
 }
 
@@ -16059,6 +16758,39 @@ DER_Encoder& DER_Encoder::raw_bytes(const uint8_t bytes[], size_t length) {
    }
 
    return (*this);
+}
+
+DER_Encoder& DER_Encoder::add_object_tlv(ASN1_Type type_tag, ASN1_Class class_tag, std::vector<uint8_t> tlv) {
+   // `tlv` was just produced by us via DER_Encoder, so it's a single
+   // well-formed TLV. Skip over the tag and length bytes (without
+   // reinterpreting them) to find the body offset.
+   BOTAN_ASSERT_NOMSG(!tlv.empty());
+   class_tag =
+      static_cast<ASN1_Class>(static_cast<uint32_t>(class_tag) & ~static_cast<uint32_t>(ASN1_Class::Constructed));
+   if((tlv[0] & static_cast<uint8_t>(ASN1_Class::Constructed)) != 0) {
+      class_tag = class_tag | ASN1_Class::Constructed;
+   }
+
+   size_t off = 1;
+   // Multi-byte tag form (X.690 8.1.2.4): low 5 bits set to 0x1F, then
+   // continuation bytes whose MSB is 1 except the last.
+   if((tlv[0] & 0x1F) == 0x1F) {
+      while(off < tlv.size() && (tlv[off] & 0x80) != 0) {
+         ++off;
+      }
+      BOTAN_ASSERT_NOMSG(off < tlv.size());
+      ++off;
+   }
+   // Length: short form is one byte; long form (MSB set) names the
+   // number of length-of-length bytes that follow.
+   BOTAN_ASSERT_NOMSG(off < tlv.size());
+   const uint8_t len_byte = tlv[off++];
+   if((len_byte & 0x80) != 0) {
+      off += (len_byte & 0x7F);
+   }
+   BOTAN_ASSERT_NOMSG(off <= tlv.size());
+
+   return add_object(type_tag, class_tag, std::span<const uint8_t>(tlv).subspan(off));
 }
 
 /*
@@ -16113,8 +16845,8 @@ DER_Encoder& DER_Encoder::encode(const BigInt& n) {
 /*
 * Encode this object
 */
-DER_Encoder& DER_Encoder::encode(const uint8_t bytes[], size_t length, ASN1_Type real_type) {
-   return encode(bytes, length, real_type, real_type, ASN1_Class::Universal);
+DER_Encoder& DER_Encoder::encode(std::span<const uint8_t> bytes, ASN1_Type real_type) {
+   return encode(bytes, real_type, real_type, ASN1_Class::Universal);
 }
 
 /*
@@ -16135,9 +16867,9 @@ DER_Encoder& DER_Encoder::encode(size_t n, ASN1_Type type_tag, ASN1_Class class_
 /*
 * DER encode an INTEGER
 */
-DER_Encoder& DER_Encoder::encode(const BigInt& n, ASN1_Type type_tag, ASN1_Class class_tag) {
+std::vector<uint8_t> ASN1::integer_contents(const BigInt& n) {
    if(n == 0) {
-      return add_object(type_tag, class_tag, 0);
+      return {0x00};
    }
 
    // Serialize magnitude with one extra leading byte
@@ -16161,28 +16893,89 @@ DER_Encoder& DER_Encoder::encode(const BigInt& n, ASN1_Type type_tag, ASN1_Class
    BOTAN_ASSERT_NOMSG(contents.size() >= 2);
    const bool leading_byte_redundant =
       (contents[0] == 0x00 && (contents[1] & 0x80) == 0) || (contents[0] == 0xFF && (contents[1] & 0x80) != 0);
-   auto encoding = std::span{contents}.subspan(leading_byte_redundant ? 1 : 0);
 
-   return add_object(type_tag, class_tag, encoding);
+   if(leading_byte_redundant) {
+      contents.erase(contents.begin());
+   }
+   return contents;
+}
+
+DER_Encoder& DER_Encoder::encode(const BigInt& n, ASN1_Type type_tag, ASN1_Class class_tag) {
+   return add_object(type_tag, class_tag, ASN1::integer_contents(n));
 }
 
 /*
 * DER encode an OCTET STRING or BIT STRING
 */
-DER_Encoder& DER_Encoder::encode(
-   const uint8_t bytes[], size_t length, ASN1_Type real_type, ASN1_Type type_tag, ASN1_Class class_tag) {
+DER_Encoder& DER_Encoder::encode(std::span<const uint8_t> bytes,
+                                 ASN1_Type real_type,
+                                 ASN1_Type type_tag,
+                                 ASN1_Class class_tag) {
    if(real_type != ASN1_Type::OctetString && real_type != ASN1_Type::BitString) {
       throw Invalid_Argument("DER_Encoder: Invalid tag for byte/bit string");
    }
 
    if(real_type == ASN1_Type::BitString) {
-      secure_vector<uint8_t> encoded;
-      encoded.push_back(0);
-      encoded += std::make_pair(bytes, length);
-      return add_object(type_tag, class_tag, encoded);
+      return encode_bitstring(bytes, 0, type_tag, class_tag);
    } else {
-      return add_object(type_tag, class_tag, bytes, length);
+      return add_object(type_tag, class_tag, bytes);
    }
+}
+
+DER_Encoder& DER_Encoder::encode_bitstring(std::span<const uint8_t> bits,
+                                           size_t unused_bits,
+                                           ASN1_Type type_tag,
+                                           ASN1_Class class_tag) {
+   if(unused_bits >= 8) {
+      throw Invalid_Argument("DER_Encoder: Invalid unused bit count for BIT STRING");
+   }
+
+   if(bits.empty() && unused_bits != 0) {
+      throw Invalid_Argument("DER_Encoder: Empty BIT STRING cannot have unused bits");
+   }
+
+   if(unused_bits > 0 && (bits.back() & ((1U << unused_bits) - 1)) != 0) {
+      throw Invalid_Argument("DER_Encoder: BIT STRING unused bits must be zero");
+   }
+
+   secure_vector<uint8_t> encoded;
+   encoded.reserve(1 + bits.size());
+   encoded.push_back(static_cast<uint8_t>(unused_bits));
+   encoded.insert(encoded.end(), bits.begin(), bits.end());
+   return add_object(type_tag, class_tag, encoded);
+}
+
+DER_Encoder& DER_Encoder::encode_bitstring(const ASN1_BitString& bits, ASN1_Type type_tag, ASN1_Class class_tag) {
+   return encode_bitstring(bits.bytes(), bits.unused_bits(), type_tag, class_tag);
+}
+
+DER_Encoder& DER_Encoder::encode_named_bitstring(uint64_t bits,
+                                                 size_t width,
+                                                 ASN1_Type type_tag,
+                                                 ASN1_Class class_tag) {
+   if(width > 64) {
+      throw Invalid_Argument("DER_Encoder: Named BIT STRING width is too large");
+   }
+
+   if(width < 64 && (bits >> width) != 0) {
+      throw Invalid_Argument("DER_Encoder: Named BIT STRING has bits outside range");
+   }
+
+   if(bits == 0) {
+      return encode_bitstring({}, 0, type_tag, class_tag);
+   }
+
+   const size_t bit_length = width - ctz(bits);
+   const size_t byte_length = (bit_length + 7) / 8;
+   std::vector<uint8_t> encoded(byte_length);
+
+   for(size_t bit = 0; bit != bit_length; ++bit) {
+      if((bits & (uint64_t(1) << (width - 1 - bit))) != 0) {
+         encoded[bit / 8] |= static_cast<uint8_t>(0x80 >> (bit % 8));
+      }
+   }
+
+   return encode_bitstring(encoded, byte_length * 8 - bit_length, type_tag, class_tag);
 }
 
 DER_Encoder& DER_Encoder::encode(const ASN1_Object& obj) {
@@ -16225,6 +17018,10 @@ OID_Map& OID_Map::global_registry() {
 }
 
 void OID_Map::add_oid(const OID& oid, std::string_view str) {
+   if(str.empty()) {
+      throw Invalid_Argument("Cannot register an empty name for an OID");
+   }
+
    if(auto name = lookup_static_oid(oid)) {
       if(*name != str) {
          throw Invalid_State("Cannot register two different names to a single OID");
@@ -16272,7 +17069,7 @@ void OID_Map::add_oid2str(const OID& oid, std::string_view str) {
    }
 }
 
-std::string OID_Map::oid2str(const OID& oid) {
+std::optional<std::string> OID_Map::oid2str(const OID& oid) {
    if(auto name = lookup_static_oid(oid)) {
       return std::string(*name);
    }
@@ -16284,7 +17081,7 @@ std::string OID_Map::oid2str(const OID& oid) {
       return i->second;
    }
 
-   return "";
+   return {};
 }
 
 OID OID_Map::str2oid(std::string_view str) {
@@ -16393,12 +17190,16 @@ void PSS_Params::decode_from(BER_Decoder& from) {
       .decode_optional(m_trailer_field, ASN1_Type(3), ASN1_Class::ExplicitContextSpecific, default_trailer)
       .end_cons();
 
-   BER_Decoder(m_mgf.parameters(), from.limits()).decode(m_mgf_hash);
+   BER_Decoder(m_mgf.parameters(), from.limits()).decode(m_mgf_hash).verify_end();
+
+   if(!m_hash.parameters_are_null_or_empty() || !m_mgf_hash.parameters_are_null_or_empty()) {
+      throw Decoding_Error("Unexpected parameters for PSS hash algorithm identifier");
+   }
 }
 
 }  // namespace Botan
 /*
-* This file was automatically generated by ./src/scripts/dev_tools/gen_oids.py on 2026-04-24
+* This file was automatically generated by ./src/scripts/dev_tools/gen_oids.py on 2026-07-17
 * All manual changes will be lost. Edit the script instead.
 *
 * Botan is released under the Simplified BSD License (see license.txt)
@@ -16565,6 +17366,8 @@ std::optional<std::string_view> OID_Map::lookup_static_oid(const OID& oid) {
          return if_match(oid, {1, 3, 101, 113}, "Ed448");
       case 0x27565:
          return if_match(oid, {1, 3, 6, 1, 5, 5, 7, 48, 1, 1}, "PKIX.OCSP.BasicResponse");
+      case 0x27566:
+         return if_match(oid, {1, 3, 6, 1, 5, 5, 7, 48, 1, 2}, "PKIX.OCSP.Nonce");
       case 0x27569:
          return if_match(oid, {1, 3, 6, 1, 5, 5, 7, 48, 1, 5}, "PKIX.OCSP.NoCheck");
       case 0x29F7C:
@@ -16791,6 +17594,8 @@ std::optional<std::string_view> OID_Map::lookup_static_oid(const OID& oid) {
          return if_match(oid, {2, 5, 29, 36}, "X509v3.PolicyConstraints");
       case 0x7F40A:
          return if_match(oid, {2, 5, 29, 37}, "X509v3.ExtendedKeyUsage");
+      case 0x7F41D:
+         return if_match(oid, {2, 5, 29, 56}, "X509v3.NoRevocationAvailable");
       case 0x80B84:
          return if_match(oid, {1, 3, 6, 1, 4, 1, 25258, 3, 2, 1}, "AES-128/OCB");
       case 0x80B85:
@@ -16981,6 +17786,8 @@ std::optional<std::string_view> OID_Map::lookup_static_oid(const OID& oid) {
          return if_match(oid, {1, 3, 6, 1, 5, 5, 7, 3, 9}, "PKIX.OCSPSigning");
       case 0x94CEA:
          return if_match(oid, {1, 3, 6, 1, 5, 5, 7, 8, 5}, "PKIX.XMPPAddr");
+      case 0x94CEE:
+         return if_match(oid, {1, 3, 6, 1, 5, 5, 7, 8, 9}, "PKIX.SmtpUTF8Mailbox");
       case 0x954DB:
          return if_match(oid, {1, 3, 6, 1, 4, 1, 311, 20, 2, 2}, "Microsoft SmartcardLogon");
       case 0x954DC:
@@ -17251,6 +18058,8 @@ std::optional<OID> OID_Map::lookup_static_oid_name(std::string_view req) {
          return if_match(req, "PKCS7.Data", {1, 2, 840, 113549, 1, 7, 1});
       case 0x281B8:
          return if_match(req, "SphincsPlus-haraka-128s-r3.1", {1, 3, 6, 1, 4, 1, 25258, 1, 12, 3, 1});
+      case 0x282FE:
+         return if_match(req, "PKIX.OCSP.Nonce", {1, 3, 6, 1, 5, 5, 7, 48, 1, 2});
       case 0x29999:
          return if_match(req, "DSA/SHA-3(256)", {2, 16, 840, 1, 101, 3, 4, 3, 6});
       case 0x2A83D:
@@ -17287,6 +18096,8 @@ std::optional<OID> OID_Map::lookup_static_oid_name(std::string_view req) {
          return if_match(req, "secp384r1", {1, 3, 132, 0, 34});
       case 0x32899:
          return if_match(req, "TripleDES/CBC", {1, 2, 840, 113549, 3, 7});
+      case 0x33C9C:
+         return if_match(req, "PKIX.SmtpUTF8Mailbox", {1, 3, 6, 1, 5, 5, 7, 8, 9});
       case 0x33D04:
          return if_match(req, "PKCS12.SecretBag", {1, 2, 840, 113549, 1, 12, 10, 1, 5});
       case 0x3615D:
@@ -17627,6 +18438,8 @@ std::optional<OID> OID_Map::lookup_static_oid_name(std::string_view req) {
          return if_match(req, "Camellia-256/OCB", {1, 3, 6, 1, 4, 1, 25258, 3, 2, 8});
       case 0x8B935:
          return if_match(req, "ClassicMcEliece_6688128", {1, 3, 6, 1, 4, 1, 22554, 5, 1, 5});
+      case 0x8BB11:
+         return if_match(req, "X509v3.NoRevocationAvailable", {2, 5, 29, 56});
       case 0x8CE3D:
          return if_match(req, "PKCS9.ChallengePassword", {1, 2, 840, 113549, 1, 9, 7});
       case 0x8D45C:
@@ -17954,7 +18767,9 @@ size_t AutoSeeded_RNG::reseed_from_sources(Entropy_Sources& srcs, size_t poll_bi
 }
 
 void AutoSeeded_RNG::fill_bytes_with_input(std::span<uint8_t> out, std::span<const uint8_t> in) {
-   if(in.empty()) {
+   if(out.empty() && in.empty()) {
+      return;
+   } else if(in.empty()) {
       m_rng->randomize_with_ts_input(out);
    } else {
       m_rng->randomize_with_input(out, in);
@@ -18013,8 +18828,10 @@ void Buffered_Computation::update_le(uint64_t val) {
 }
 
 void Buffered_Computation::final(std::span<uint8_t> out) {
-   BOTAN_ARG_CHECK(out.size() >= output_length(), "provided output buffer has insufficient capacity");
-   final_result(out);
+   BOTAN_ARG_CHECK(out.size() >= output_length(), "Output buffer has insufficient capacity");
+   // Pass exactly output_length() bytes so that an oversized buffer has the
+   // result written to its leading bytes with the remainder left untouched.
+   final_result(out.first(output_length()));
 }
 
 }  // namespace Botan
@@ -18171,7 +18988,7 @@ namespace {
 
 class Base64 final {
    public:
-      static std::string name() noexcept { return "base64"; }
+      static std::string name() { return "base64"; }
 
       static constexpr size_t encoding_bytes_in() noexcept { return m_encoding_bytes_in; }
 
@@ -18186,11 +19003,13 @@ class Base64 final {
       static constexpr size_t remaining_bits_before_padding() noexcept { return m_remaining_bits_before_padding; }
 
       static constexpr size_t encode_max_output(size_t input_length) {
-         return (round_up(input_length, m_encoding_bytes_in) / m_encoding_bytes_in) * m_encoding_bytes_out;
+         const size_t encoding_blocks = round_up(input_length, m_encoding_bytes_in) / m_encoding_bytes_in;
+         return mul_or_throw(encoding_blocks, m_encoding_bytes_out, "Input too large to base64 encode");
       }
 
       static constexpr size_t decode_max_output(size_t input_length) {
-         return (round_up(input_length, m_encoding_bytes_out) * m_encoding_bytes_in) / m_encoding_bytes_out;
+         // Divide before multiply to avoid overflow; round_up makes the division exact.
+         return (round_up(input_length, m_encoding_bytes_out) / m_encoding_bytes_out) * m_encoding_bytes_in;
       }
 
       static void encode(char out[4], const uint8_t in[3]) noexcept;
@@ -18628,6 +19447,22 @@ std::istream& operator>>(std::istream& stream, BigInt& n) {
 
 namespace Botan {
 
+BigInt& BigInt::operator+=(const BigInt& y) {
+   if(&y == this) {
+      return *this <<= 1;
+   }
+   return add(y._data(), y.sig_words(), y.sign());
+}
+
+BigInt& BigInt::operator-=(const BigInt& y) {
+   if(&y == this) {
+      this->clear();
+      this->set_sign(Positive);
+      return *this;
+   }
+   return sub(y._data(), y.sig_words(), y.sign());
+}
+
 BigInt& BigInt::add(const word y[], size_t y_words, Sign y_sign) {
    const size_t x_sw = sig_words();
 
@@ -18866,6 +19701,10 @@ word BigInt::operator%=(word mod) {
 * Left Shift Operator
 */
 BigInt& BigInt::operator<<=(size_t shift) {
+   if(shift >= 65536) {
+      throw Invalid_Argument("BigInt left shift count too large");
+   }
+
    const size_t sw = sig_words();
    const size_t new_size = sw + (shift + WordInfo<word>::bits - 1) / WordInfo<word>::bits;
 
@@ -19072,15 +19911,19 @@ word operator%(const BigInt& n, word mod) {
 * Left Shift Operator
 */
 BigInt operator<<(const BigInt& x, size_t shift) {
+   if(shift >= 65536) {
+      throw Invalid_Argument("BigInt left shift count too large");
+   }
+
    if(x.is_zero()) {
       return BigInt::zero();
    }
 
    const size_t x_sw = x.sig_words();
 
-   const size_t new_size = x_sw + (shift + WordInfo<word>::bits - 1) / WordInfo<word>::bits;
+   const size_t new_size = x_sw + shift / WordInfo<word>::bits + 1;
    BigInt y = BigInt::with_capacity(new_size);
-   bigint_shl2(y.mutable_data(), x._data(), x_sw, shift);
+   bigint_shl2(y.mutable_data(), new_size, x._data(), x_sw, shift);
    y.set_sign(x.sign());
    return y;
 }
@@ -19096,8 +19939,9 @@ BigInt operator>>(const BigInt& x, size_t shift) {
       return BigInt::zero();
    }
 
-   BigInt y = BigInt::with_capacity(x_sw - shift_words);
-   bigint_shr2(y.mutable_data(), x._data(), x_sw, shift);
+   const size_t new_size = x_sw - shift_words;
+   BigInt y = BigInt::with_capacity(new_size);
+   bigint_shr2(y.mutable_data(), new_size, x._data(), x_sw, shift);
 
    if(x.signum() < 0 && y.is_zero()) {
       y.set_sign(BigInt::Positive);
@@ -19218,7 +20062,7 @@ BigInt BigInt::from_s32(int32_t n) {
    if(n >= 0) {
       return BigInt::from_u64(static_cast<uint64_t>(n));
    } else {
-      return -BigInt::from_u64(static_cast<uint64_t>(-n));
+      return -BigInt::from_u64(static_cast<uint64_t>(-static_cast<int64_t>(n)));
    }
 }
 
@@ -19627,7 +20471,9 @@ void BigInt::ct_cond_add(bool predicate, const BigInt& value) {
    }
    const size_t v_words = value.sig_words();
 
-   this->grow_to(1 + v_words);
+   // The carry can propagate through every existing word of *this, so the
+   // output needs one slot above whichever input is wider.
+   this->grow_to(std::max(this->size(), v_words) + 1);
 
    const auto mask = CT::Mask<word>::expand(static_cast<word>(predicate)).value();
 
@@ -19662,7 +20508,7 @@ void BigInt::ct_shift_left(size_t shift) {
    // shift results only when they are within the shift range.
    for(size_t i = 0; i < iterations; ++i) {
       // Shift left by 1 bit, dropping overflow
-      bigint_shl2(ws.data(), _data(), n, 1);
+      bigint_shl2(ws.data(), n + 1, _data(), n, 1);
       ws[n] = 0;
 
       // Conditionally assign the bit-shift result
@@ -19672,7 +20518,7 @@ void BigInt::ct_shift_left(size_t shift) {
       }
 
       // Shift left by 1 word, dropping the most significant word
-      bigint_shl2(ws.data(), _data(), n - 1 /* ignore msw */, WordInfo<word>::bits);
+      bigint_shl2(ws.data(), n + 1, _data(), n - 1 /* ignore msw */, WordInfo<word>::bits);
       ws[0] = 0;
 
       // Conditionally assign the word-shift result
@@ -19754,7 +20600,11 @@ void sign_fixup(const BigInt& x, const BigInt& y, BigInt& q, BigInt& r) {
    q.cond_flip_sign(x.sign() != y.sign());
 
    if(x.signum() < 0 && r.signum() != 0) {
-      q -= 1;
+      if(y.signum() > 0) {
+         q -= 1;
+      } else {
+         q += 1;
+      }
       r = y.abs() - r;
    }
 }
@@ -19790,21 +20640,23 @@ void ct_divide(const BigInt& x, const BigInt& y, BigInt& q_out, BigInt& r_out) {
 
    const size_t x_bits = x.bits();
 
+   const size_t r_words = y_words + 1;
+
    BigInt q = BigInt::with_capacity(x_words);
-   BigInt r = BigInt::with_capacity(y_words);
-   BigInt t = BigInt::with_capacity(y_words);  // a temporary
+   BigInt r = BigInt::with_capacity(r_words);
+   BigInt t = BigInt::with_capacity(r_words);  // a temporary
 
    for(size_t i = 0; i != x_bits; ++i) {
       const size_t b = x_bits - 1 - i;
       const bool x_b = x.get_bit(b);
 
-      r <<= 1;
+      bigint_shl1(r.mutable_data(), r_words, r_words, 1);
       r.conditionally_set_bit(0, x_b);
 
-      const bool r_gte_y = bigint_sub3(t.mutable_data(), r._data(), r.size(), y._data(), y_words) == 0;
+      const bool r_gte_y = bigint_sub3(t.mutable_data(), r._data(), r_words, y._data(), y_words) == 0;
 
       q.conditionally_set_bit(b, r_gte_y);
-      r.ct_cond_swap(r_gte_y, t);
+      bigint_cnd_swap(static_cast<word>(r_gte_y), r.mutable_data(), t.mutable_data(), r_words);
    }
 
    sign_fixup(x, y, q, r);
@@ -19927,22 +20779,23 @@ BigInt ct_modulo(const BigInt& x, const BigInt& y) {
    }
 
    const size_t y_words = y.sig_words();
+   const size_t r_words = y_words + 1;
 
    const size_t x_bits = x.bits();
 
-   BigInt r = BigInt::with_capacity(y_words);
-   BigInt t = BigInt::with_capacity(y_words);
+   BigInt r = BigInt::with_capacity(r_words);
+   BigInt t = BigInt::with_capacity(r_words);
 
    for(size_t i = 0; i != x_bits; ++i) {
       const size_t b = x_bits - 1 - i;
       const bool x_b = x.get_bit(b);
 
-      r <<= 1;
+      bigint_shl1(r.mutable_data(), r_words, r_words, 1);
       r.conditionally_set_bit(0, x_b);
 
-      const bool r_gte_y = bigint_sub3(t.mutable_data(), r._data(), r.size(), y._data(), y_words) == 0;
+      const bool r_gte_y = bigint_sub3(t.mutable_data(), r._data(), r_words, y._data(), y_words) == 0;
 
-      r.ct_cond_swap(r_gte_y, t);
+      bigint_cnd_swap(static_cast<word>(r_gte_y), r.mutable_data(), t.mutable_data(), r_words);
    }
 
    if(x.signum() < 0) {
@@ -20155,7 +21008,6 @@ void vartime_divide(const BigInt& x, const BigInt& y_arg, BigInt& q_out, BigInt&
 */
 
 
-#include <utility>
 
 #if defined(BOTAN_HAS_AES)
 #endif
@@ -20523,12 +21375,15 @@ void CBC_Encryption::finish_msg(secure_vector<uint8_t>& buffer, size_t offset) {
 
    const size_t BS = block_size();
 
-   const size_t output_bytes = offset + padding().output_length(buffer.size() - offset, BS);
+   const size_t output_bytes =
+      add_or_throw(offset, padding().output_length(buffer.size() - offset, BS), "CBC input too large");
    const size_t bytes_in_final_block = (buffer.size() - offset) % BS;
    buffer.resize(output_bytes);
    padding().add_padding(std::span(buffer).subspan(offset), bytes_in_final_block, BS);
 
-   BOTAN_ASSERT_EQUAL(buffer.size() % BS, offset % BS, "Padded to block boundary");
+   // With NoPadding a non-block-multiple input reaches here un-padded; reject it
+   // as an argument error rather than tripping the assertion.
+   BOTAN_ARG_CHECK(buffer.size() % BS == offset % BS, "CBC input is not full blocks (NoPadding)");
 
    update(buffer, offset);
 }
@@ -20637,6 +21492,7 @@ void CBC_Decryption::finish_msg(secure_vector<uint8_t>& buffer, size_t offset) {
    const size_t pad_bytes = BS - padding().unpad(std::span{buffer}.last(BS));
    buffer.resize(buffer.size() - pad_bytes);  // remove padding
    if(pad_bytes == 0 && padding().name() != "NoPadding") {
+      clear_mem(std::span{buffer}.subspan(offset));
       throw Decoding_Error("Invalid CBC padding");
    }
 }
@@ -20715,26 +21571,44 @@ Certificate_Store_In_SQL::Certificate_Store_In_SQL(std::shared_ptr<SQL_Database>
                                                    std::string_view passwd,
                                                    RandomNumberGenerator& rng,
                                                    std::string_view table_prefix) :
-      m_rng(rng), m_database(std::move(db)), m_prefix(table_prefix), m_password(passwd) {
-   m_database->create_table("CREATE TABLE IF NOT EXISTS " + m_prefix +
-                            "certificates (                \
-                                 fingerprint       BLOB PRIMARY KEY,   \
-                                 subject_dn        BLOB,               \
-                                 key_id            BLOB,               \
-                                 priv_fingerprint  BLOB,               \
-                                 certificate       BLOB UNIQUE NOT NULL\
-                             )");
-   m_database->create_table("CREATE TABLE IF NOT EXISTS " + m_prefix +
-                            "keys (\
-                                 fingerprint BLOB PRIMARY KEY,                \
-                                 key         BLOB UNIQUE NOT NULL             \
-                             )");
-   m_database->create_table("CREATE TABLE IF NOT EXISTS " + m_prefix +
-                            "revoked (\
-                                 fingerprint BLOB PRIMARY KEY,                   \
-                                 reason      BLOB NOT NULL,                      \
-                                 time        BLOB NOT NULL                       \
-                            )");
+      m_rng(rng),
+      m_database(std::move(db)),
+      m_db_cert_table(fmt("{}certificates", table_prefix)),
+      m_db_keys_table(fmt("{}keys", table_prefix)),
+      m_db_crls_table(fmt("{}revoked", table_prefix)),
+      m_password(passwd) {
+   using DB = SQL_Database;
+   const auto blob = DB::Column_Type::Blob;
+   const auto integer = DB::Column_Type::Integer;
+
+   BOTAN_ARG_CHECK(m_database->is_valid_table_name(m_db_cert_table), "Invalid table name");
+   BOTAN_ARG_CHECK(m_database->is_valid_table_name(m_db_keys_table), "Invalid table name");
+   BOTAN_ARG_CHECK(m_database->is_valid_table_name(m_db_crls_table), "Invalid table name");
+
+   m_database->create_table(DB::Table_Schema(m_db_cert_table,
+                                             {
+                                                DB::Column("fingerprint", blob).primary_key(),
+                                                DB::Column("subject_dn", blob),
+                                                DB::Column("key_id", blob),
+                                                DB::Column("priv_fingerprint", blob),
+                                                DB::Column("certificate", blob).not_null(),
+                                             })
+                               .if_not_exists());
+
+   m_database->create_table(DB::Table_Schema(m_db_keys_table,
+                                             {
+                                                DB::Column("fingerprint", blob).primary_key(),
+                                                DB::Column("key", blob).not_null(),
+                                             })
+                               .if_not_exists());
+
+   m_database->create_table(DB::Table_Schema(m_db_crls_table,
+                                             {
+                                                DB::Column("fingerprint", blob).primary_key(),
+                                                DB::Column("reason", integer).not_null(),
+                                                DB::Column("time", integer),
+                                             })
+                               .if_not_exists());
 }
 
 // Certificate handling
@@ -20745,20 +21619,17 @@ std::optional<X509_Certificate> Certificate_Store_In_SQL::find_cert(const X509_D
    const std::vector<uint8_t> dn_encoding = subject_dn.BER_encode();
 
    if(key_id.empty()) {
-      stmt = m_database->new_statement("SELECT certificate FROM " + m_prefix +
-                                       "certificates WHERE subject_dn == ?1 LIMIT 1");
+      stmt = m_database->select("certificate", m_db_cert_table, "subject_dn = ?1", 1);
       stmt->bind(1, dn_encoding);
    } else {
-      stmt = m_database->new_statement("SELECT certificate FROM " + m_prefix +
-                                       "certificates WHERE\
-                                        subject_dn == ?1 AND (key_id IS NULL OR key_id == ?2) LIMIT 1");
+      stmt =
+         m_database->select("certificate", m_db_cert_table, "subject_dn = ?1 AND (key_id IS NULL OR key_id = ?2)", 1);
       stmt->bind(1, dn_encoding);
       stmt->bind(2, key_id);
    }
 
    while(stmt->step()) {
-      auto blob = stmt->get_blob(0);
-      return X509_Certificate(blob.first, blob.second);
+      return X509_Certificate(stmt->get_blob(0));
    }
 
    return std::optional<X509_Certificate>();
@@ -20773,19 +21644,16 @@ std::vector<X509_Certificate> Certificate_Store_In_SQL::find_all_certs(const X50
    const std::vector<uint8_t> dn_encoding = subject_dn.BER_encode();
 
    if(key_id.empty()) {
-      stmt = m_database->new_statement("SELECT certificate FROM " + m_prefix + "certificates WHERE subject_dn == ?1");
+      stmt = m_database->select("certificate", m_db_cert_table, "subject_dn = ?1");
       stmt->bind(1, dn_encoding);
    } else {
-      stmt = m_database->new_statement("SELECT certificate FROM " + m_prefix +
-                                       "certificates WHERE\
-                                        subject_dn == ?1 AND (key_id IS NULL OR key_id == ?2)");
+      stmt = m_database->select("certificate", m_db_cert_table, "subject_dn = ?1 AND (key_id IS NULL OR key_id = ?2)");
       stmt->bind(1, dn_encoding);
       stmt->bind(2, key_id);
    }
 
    while(stmt->step()) {
-      auto blob = stmt->get_blob(0);
-      certs.push_back(X509_Certificate(blob.first, blob.second));
+      certs.push_back(X509_Certificate(stmt->get_blob(0)));
    }
 
    return certs;
@@ -20820,11 +21688,10 @@ std::optional<X509_CRL> Certificate_Store_In_SQL::find_crl_for(const X509_Certif
 
 std::vector<X509_DN> Certificate_Store_In_SQL::all_subjects() const {
    std::vector<X509_DN> ret;
-   auto stmt = m_database->new_statement("SELECT subject_dn FROM " + m_prefix + "certificates");
+   auto stmt = m_database->select("subject_dn", m_db_cert_table);
 
    while(stmt->step()) {
-      auto blob = stmt->get_blob(0);
-      BER_Decoder dec(std::span<const uint8_t>{blob.first, blob.second}, BER_Decoder::Limits::DER());
+      BER_Decoder dec(stmt->get_blob(0), BER_Decoder::Limits::DER());
       X509_DN dn;
 
       dn.decode_from(dec);
@@ -20839,14 +21706,8 @@ bool Certificate_Store_In_SQL::insert_cert(const X509_Certificate& cert) {
    const std::vector<uint8_t> dn_encoding = cert.subject_dn().BER_encode();
    const std::vector<uint8_t> cert_encoding = cert.BER_encode();
 
-   auto stmt = m_database->new_statement("INSERT OR REPLACE INTO " + m_prefix +
-                                         "certificates (\
-                                         fingerprint,          \
-                                         subject_dn,           \
-                                         key_id,               \
-                                         priv_fingerprint,     \
-                                         certificate           \
-                                     ) VALUES ( ?1, ?2, ?3, ?4, ?5 )");
+   auto stmt =
+      m_database->upsert(m_db_cert_table, {"fingerprint", "subject_dn", "key_id", "priv_fingerprint", "certificate"});
 
    stmt->bind(1, cert.fingerprint("SHA-256"));
    stmt->bind(2, dn_encoding);
@@ -20859,7 +21720,7 @@ bool Certificate_Store_In_SQL::insert_cert(const X509_Certificate& cert) {
 }
 
 bool Certificate_Store_In_SQL::contains(const X509_Certificate& cert) const {
-   auto stmt = m_database->new_statement("SELECT 1 FROM " + m_prefix + "certificates WHERE fingerprint == ?1");
+   auto stmt = m_database->select("1", m_db_cert_table, "fingerprint = ?1");
    stmt->bind(1, cert.fingerprint("SHA-256"));
    return stmt->step();
 }
@@ -20869,7 +21730,7 @@ bool Certificate_Store_In_SQL::remove_cert(const X509_Certificate& cert) {
       return false;
    }
 
-   auto stmt = m_database->new_statement("DELETE FROM " + m_prefix + "certificates WHERE fingerprint == ?1");
+   auto stmt = m_database->new_statement(fmt("DELETE FROM {} WHERE fingerprint = ?1", m_db_cert_table));
 
    stmt->bind(1, cert.fingerprint("SHA-256"));
    stmt->spin();
@@ -20879,19 +21740,19 @@ bool Certificate_Store_In_SQL::remove_cert(const X509_Certificate& cert) {
 
 // Private key handling
 std::shared_ptr<const Private_Key> Certificate_Store_In_SQL::find_key(const X509_Certificate& cert) const {
-   auto stmt = m_database->new_statement("SELECT key FROM " + m_prefix +
-                                         "keys "
-                                         "JOIN " +
-                                         m_prefix + "certificates ON " + m_prefix + "keys.fingerprint == " + m_prefix +
-                                         "certificates.priv_fingerprint "
-                                         "WHERE " +
-                                         m_prefix + "certificates.fingerprint == ?1");
+   auto stmt =
+      m_database->new_statement(fmt("SELECT key FROM {} JOIN {} ON {}.fingerprint = {}.priv_fingerprint "
+                                    "WHERE {}.fingerprint = ?1",
+                                    m_db_keys_table,
+                                    m_db_cert_table,
+                                    m_db_keys_table,
+                                    m_db_cert_table,
+                                    m_db_cert_table));
    stmt->bind(1, cert.fingerprint("SHA-256"));
 
    std::shared_ptr<const Private_Key> key;
    while(stmt->step()) {
-      auto blob = stmt->get_blob(0);
-      DataSource_Memory src(blob.first, blob.second);
+      DataSource_Memory src(stmt->get_blob(0));
       key = PKCS8::load_key(src, m_password);
    }
 
@@ -20900,15 +21761,13 @@ std::shared_ptr<const Private_Key> Certificate_Store_In_SQL::find_key(const X509
 
 std::vector<X509_Certificate> Certificate_Store_In_SQL::find_certs_for_key(const Private_Key& key) const {
    auto fprint = key.fingerprint_private("SHA-256");
-   auto stmt =
-      m_database->new_statement("SELECT certificate FROM " + m_prefix + "certificates WHERE priv_fingerprint == ?1");
+   auto stmt = m_database->select("certificate", m_db_cert_table, "priv_fingerprint = ?1");
 
    stmt->bind(1, fprint);
 
    std::vector<X509_Certificate> certs;
    while(stmt->step()) {
-      auto blob = stmt->get_blob(0);
-      certs.push_back(X509_Certificate(blob.first, blob.second));
+      certs.push_back(X509_Certificate(stmt->get_blob(0)));
    }
 
    return certs;
@@ -20924,15 +21783,14 @@ bool Certificate_Store_In_SQL::insert_key(const X509_Certificate& cert, const Pr
    auto pkcs8 = PKCS8::BER_encode(key, m_rng, m_password);
    auto fprint = key.fingerprint_private("SHA-256");
 
-   auto stmt1 =
-      m_database->new_statement("INSERT OR REPLACE INTO " + m_prefix + "keys ( fingerprint, key ) VALUES ( ?1, ?2 )");
+   auto stmt1 = m_database->upsert(m_db_keys_table, {"fingerprint", "key"});
 
    stmt1->bind(1, fprint);
    stmt1->bind(2, pkcs8.data(), pkcs8.size());
    stmt1->spin();
 
-   auto stmt2 = m_database->new_statement("UPDATE " + m_prefix +
-                                          "certificates SET priv_fingerprint = ?1 WHERE fingerprint == ?2");
+   auto stmt2 =
+      m_database->new_statement(fmt("UPDATE {} SET priv_fingerprint = ?1 WHERE fingerprint = ?2", m_db_cert_table));
 
    stmt2->bind(1, fprint);
    stmt2->bind(2, cert.fingerprint("SHA-256"));
@@ -20943,7 +21801,7 @@ bool Certificate_Store_In_SQL::insert_key(const X509_Certificate& cert, const Pr
 
 void Certificate_Store_In_SQL::remove_key(const Private_Key& key) {
    auto fprint = key.fingerprint_private("SHA-256");
-   auto stmt = m_database->new_statement("DELETE FROM " + m_prefix + "keys WHERE fingerprint == ?1");
+   auto stmt = m_database->new_statement(fmt("DELETE FROM {} WHERE fingerprint = ?1", m_db_keys_table));
 
    stmt->bind(1, fprint);
    stmt->spin();
@@ -20954,16 +21812,15 @@ void Certificate_Store_In_SQL::revoke_cert(const X509_Certificate& cert, CRL_Cod
    // TODO(Botan4) require that time be valid
    insert_cert(cert);
 
-   auto stmt1 = m_database->new_statement("INSERT OR REPLACE INTO " + m_prefix +
-                                          "revoked ( fingerprint, reason, time ) VALUES ( ?1, ?2, ?3 )");
+   auto stmt1 = m_database->upsert(m_db_crls_table, {"fingerprint", "reason", "time"});
 
    stmt1->bind(1, cert.fingerprint("SHA-256"));
    stmt1->bind(2, static_cast<uint32_t>(code));
 
    if(time.time_is_set()) {
-      stmt1->bind(3, time.BER_encode());
+      stmt1->bind(3, time.to_std_timepoint());
    } else {
-      stmt1->bind(3, static_cast<size_t>(-1));
+      stmt1->bind_null(3);
    }
 
    stmt1->spin();
@@ -20973,34 +21830,34 @@ void Certificate_Store_In_SQL::revoke_cert(const X509_Certificate& cert, CRL_Cod
 void Certificate_Store_In_SQL::revoke_cert(const X509_Certificate& cert, CRL_Code code) {
    insert_cert(cert);
 
-   auto stmt1 = m_database->new_statement("INSERT OR REPLACE INTO " + m_prefix +
-                                          "revoked ( fingerprint, reason, time ) VALUES ( ?1, ?2, ?3 )");
+   auto stmt1 = m_database->upsert(m_db_crls_table, {"fingerprint", "reason", "time"});
 
    stmt1->bind(1, cert.fingerprint("SHA-256"));
    stmt1->bind(2, static_cast<uint32_t>(code));
-   stmt1->bind(3, static_cast<size_t>(-1));
+   stmt1->bind_null(3);
 
    stmt1->spin();
 }
 
 void Certificate_Store_In_SQL::affirm_cert(const X509_Certificate& cert) {
-   auto stmt = m_database->new_statement("DELETE FROM " + m_prefix + "revoked WHERE fingerprint == ?1");
+   auto stmt = m_database->new_statement(fmt("DELETE FROM {} WHERE fingerprint = ?1", m_db_crls_table));
 
    stmt->bind(1, cert.fingerprint("SHA-256"));
    stmt->spin();
 }
 
 std::vector<X509_CRL> Certificate_Store_In_SQL::generate_crls() const {
-   auto stmt = m_database->new_statement("SELECT certificate,reason,time FROM " + m_prefix +
-                                         "revoked "
-                                         "JOIN " +
-                                         m_prefix + "certificates ON " + m_prefix +
-                                         "certificates.fingerprint == " + m_prefix + "revoked.fingerprint");
+   auto stmt =
+      m_database->new_statement(fmt("SELECT certificate,reason,time FROM {} JOIN {} ON {}.fingerprint = "
+                                    "{}.fingerprint",
+                                    m_db_crls_table,
+                                    m_db_cert_table,
+                                    m_db_cert_table,
+                                    m_db_crls_table));
 
    std::map<X509_DN, std::vector<CRL_Entry>> crls;
    while(stmt->step()) {
-      auto blob = stmt->get_blob(0);
-      auto cert = X509_Certificate(std::vector<uint8_t>(blob.first, blob.first + blob.second));
+      auto cert = X509_Certificate(stmt->get_blob(0));
       auto code = static_cast<CRL_Code>(stmt->get_size_t(1));
       auto ent = CRL_Entry(cert, code);
 
@@ -21041,6 +21898,359 @@ Certificate_Store_In_SQLite::Certificate_Store_In_SQLite(std::string_view db_pat
                                                          RandomNumberGenerator& rng,
                                                          std::string_view table_prefix) :
       Certificate_Store_In_SQL(std::make_shared<Sqlite3_Database>(db_path), passwd, rng, table_prefix) {}
+}  // namespace Botan
+/*
+* (C) 2026 Jack Lloyd
+*
+* Botan is released under the Simplified BSD License (see license.txt)
+*/
+
+
+
+namespace Botan {
+
+namespace {
+
+/*
+* Validate @p name as an RFC 1035 / 1123 DNS name and return its
+* lowercased canonical form. Throws Decoding_Error if @p name is not
+* a valid DNS name. A "*" label is accepted so SAN wildcard entries
+* round-trip through this validator unchanged.
+*/
+std::optional<std::string> check_and_canonicalize_dns_name(std::string_view name) {
+   /*
+   * RFC 1035 limits names to "255 octets or less", but that is in the wire
+   * encoding, which includes a length octet per label plus the root label.
+   * In presentation form (without a trailing dot) the limit is 253.
+   */
+   if(name.size() > 253) {
+      return {};
+   }
+
+   // DNS names are not empty
+   if(name.empty()) {
+      return {};
+   }
+
+   // DNS names do not start with or end with a dot
+   if(name.starts_with(".") || name.ends_with(".")) {
+      return {};
+   }
+
+   /*
+   * Table mapping uppercase to lowercase and only including values valid for
+   * DNS names: A-Z, a-z, 0-9, '-', '.', plus '*' for wildcarding (RFC 1035)
+   */
+   // clang-format off
+   constexpr uint8_t DNS_CHAR_MAPPING[128] = {
+      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
+      '\0', '\0', '\0', '\0',  '*', '\0', '\0',  '-',  '.', '\0',  '0',  '1',  '2',  '3',  '4',  '5',  '6',  '7',  '8',
+       '9', '\0', '\0', '\0', '\0', '\0', '\0', '\0',  'a',  'b',  'c',  'd',  'e',  'f',  'g',  'h',  'i',  'j',  'k',
+       'l',  'm',  'n',  'o',  'p',  'q',  'r',  's',  't',  'u',  'v',  'w',  'x',  'y',  'z', '\0', '\0', '\0', '\0',
+       '\0', '\0',  'a',  'b',  'c',  'd',  'e',  'f',  'g',  'h',  'i',  'j',  'k',  'l',  'm',  'n',  'o',  'p',  'q',
+       'r',  's',  't',  'u',  'v',  'w',  'x',  'y',  'z', '\0', '\0', '\0', '\0', '\0',
+   };
+   // clang-format on
+
+   std::string canon;
+   canon.reserve(name.size());
+
+   // RFC 1035: DNS labels must not exceed 63 characters
+   size_t current_label_length = 0;
+
+   // Tracks if the name consists only of digits and dots
+   bool all_numeric = true;
+
+   for(size_t i = 0; i != name.size(); ++i) {
+      const char c = name[i];
+
+      if(c == '.') {
+         // Sequential dot (.) characters are not allowed
+         if(i > 0 && name[i - 1] == '.') {
+            return {};
+         }
+
+         // Empty labels are not allowed
+         if(current_label_length == 0) {
+            return {};
+         }
+         current_label_length = 0;  // Reset for next label
+      } else {
+         current_label_length++;
+
+         // Labels cannot exceed maximum DNS label length
+         if(current_label_length > 63) {
+            return {};
+         }
+      }
+
+      const uint8_t cu = static_cast<uint8_t>(c);
+      // DNS names are not allowed to include any high-bit set characters
+      if(cu >= 128) {
+         return {};
+      }
+      const uint8_t mapped = DNS_CHAR_MAPPING[cu];
+      // DNS names are from a restricted character set
+      if(mapped == 0) {
+         return {};
+      }
+
+      if(mapped != '.' && (mapped < '0' || mapped > '9')) {
+         all_numeric = false;
+      }
+
+      if(mapped == '-') {
+         // DNS labels are not allowed to include a leading or trailing hyphen
+         if(i == 0 || (i > 0 && name[i - 1] == '.')) {
+            return {};  // leading hyphen
+         }
+
+         if(i == name.size() - 1 || (i < name.size() - 1 && name[i + 1] == '.')) {
+            return {};  // trailing hyphen
+         }
+      }
+      canon.push_back(static_cast<char>(mapped));
+   }
+
+   // This should never be hit, due to earlier validation steps
+   if(current_label_length == 0) {
+      return {};
+   }
+
+   // An entirely numeric name ("1.2.3.4") is either a misplaced IP address
+   // or an attempt at confusing some other system; reject outright
+   if(all_numeric) {
+      return {};
+   }
+
+   return canon;
+}
+
+}  // namespace
+
+//static
+std::optional<DNSName> DNSName::from_string(std::string_view name) {
+   if(auto canon = check_and_canonicalize_dns_name(name)) {
+      // TODO(C++23) std::string::contains
+      if(canon->find('*') != std::string::npos) {
+         return {};
+      }
+      return DNSName(std::move(*canon));
+   } else {
+      return {};
+   }
+}
+
+//static
+std::optional<DNSName> DNSName::from_san_string(std::string_view name) {
+   if(auto canon = check_and_canonicalize_dns_name(name)) {
+      /*
+      Validate the wildcard shape: at most one "*", and if present it must be in
+      the leftmost label (no "." before it). This matches the RFC 6125 6.4.3
+      form that host_wildcard_match accepts and rejects eg "*.*.example.com" or
+      "foo.*.example.com"
+      */
+      const auto first_star = canon->find('*');
+      if(first_star != std::string::npos) {
+         if(canon->find('*', first_star + 1) != std::string::npos) {
+            return std::nullopt;
+         }
+         const auto first_dot = canon->find('.');
+         if(first_dot != std::string::npos && first_dot < first_star) {
+            return std::nullopt;
+         }
+         /*
+         RFC 6125 6.4.3: "the client SHOULD NOT attempt to match a presented
+         identifier where the wildcard character is embedded within an
+         A-label or U-label"
+         */
+         if(canon->starts_with("xn--")) {
+            return std::nullopt;
+         }
+         // A wildcard match requires at least three labels, so shorter
+         // patterns ("*", "*.com") could never match any host
+         if(std::count(canon->begin(), canon->end(), '.') < 2) {
+            return std::nullopt;
+         }
+      }
+      return DNSName(std::move(*canon));
+   } else {
+      return {};
+   }
+}
+
+bool DNSName::matches_wildcard(std::string_view wildcard) const {
+   return host_wildcard_match(wildcard, m_name);
+}
+
+//static
+bool DNSName::host_wildcard_match(std::string_view issued, std::string_view host) {
+   if(host.empty() || issued.empty()) {
+      return false;
+   }
+
+   // Maximum valid DNS name
+   if(host.size() > 253) {
+      return false;
+   }
+
+   /*
+   The wildcard if existing absorbs (host.size() - issued.size() + 1) chars,
+   which must be non-negative. So issued cannot possibly exceed host.size() + 1.
+   */
+   if(issued.size() > host.size() + 1) {
+      return false;
+   }
+
+   /*
+   If there are embedded nulls in your issued name
+   Well I feel bad for you son
+   */
+   if(issued.find('\0') != std::string_view::npos || host.find('\0') != std::string_view::npos) {
+      return false;
+   }
+
+   // '*' is not a valid character in DNS names so should not appear on the host side
+   if(host.find('*') != std::string_view::npos) {
+      return false;
+   }
+
+   // Similarly a DNS name can't end in .
+   if(host.back() == '.') {
+      return false;
+   }
+
+   // Nor can it start with one
+   if(host.front() == '.') {
+      return false;
+   }
+
+   // And a host can't have an empty name component, so reject that
+   if(host.find("..") != std::string_view::npos) {
+      return false;
+   }
+
+   // ASCII-only case-insensitive char equality, avoids locale overhead from tolower
+   auto dns_char_eq = [](char a, char b) -> bool {
+      if(a == b) {
+         return true;
+      }
+      const auto la = static_cast<unsigned char>(a | 0x20);
+      const auto lb = static_cast<unsigned char>(b | 0x20);
+      return la == lb && la >= 'a' && la <= 'z';
+   };
+
+   auto dns_char_eq_range = [&](std::string_view a, std::string_view b) -> bool {
+      if(a.size() != b.size()) {
+         return false;
+      }
+      for(size_t i = 0; i != a.size(); ++i) {
+         if(!dns_char_eq(a[i], b[i])) {
+            return false;
+         }
+      }
+      return true;
+   };
+
+   // Exact match: accept
+   if(dns_char_eq_range(issued, host)) {
+      return true;
+   }
+
+   // First detect offset of wildcard '*' if included
+   const size_t first_star = issued.find('*');
+   const bool has_wildcard = (first_star != std::string_view::npos);
+
+   // At most one wildcard is allowed
+   if(has_wildcard && issued.find('*', first_star + 1) != std::string_view::npos) {
+      return false;
+   }
+
+   // If no * at all then not a wildcard, and so not a match
+   if(!has_wildcard) {
+      return false;
+   }
+
+   /*
+   RFC 6125 6.4.3: "the client SHOULD NOT attempt to match a presented
+   identifier where the wildcard character is embedded within an
+   A-label or U-label"
+
+   The host side check rejects a partial wildcard absorbing part of an
+   A-label of the host, which would otherwise allow the same confusion.
+   */
+   const auto is_idna_prefixed = [&](std::string_view label) {
+      return label.size() >= 4 && dns_char_eq_range(label.substr(0, 4), "xn--");
+   };
+   const auto issued_label = issued.substr(0, issued.find('.'));
+   if(is_idna_prefixed(issued_label)) {
+      return false;
+   }
+   if(issued_label != "*" && is_idna_prefixed(host.substr(0, host.find('.')))) {
+      return false;
+   }
+
+   /*
+   Now walk through the issued string, making sure every character
+   matches. When we come to the (singular) '*', jump forward in the
+   hostname by the corresponding amount. We know exactly how much
+   space the wildcard takes because it must be exactly `len(host) -
+   len(issued) + 1 chars`.
+
+   We also verify that the '*' comes in the leftmost component, and
+   doesn't skip over any '.' in the hostname.
+   */
+   size_t dots_seen = 0;
+   size_t host_idx = 0;
+
+   for(size_t i = 0; i != issued.size(); ++i) {
+      if(issued[i] == '.') {
+         dots_seen += 1;
+      }
+
+      if(issued[i] == '*') {
+         // Fail: wildcard can only come in leftmost component
+         if(dots_seen > 0) {
+            return false;
+         }
+
+         /*
+         Since there is only one * we know the tail of the issued and
+         hostname must be an exact match. In this case advance host_idx
+         to match.
+         */
+         const size_t advance = (host.size() - issued.size() + 1);
+
+         if(host_idx + advance > host.size()) {  // shouldn't happen
+            return false;
+         }
+
+         // Can't be any intervening .s that we would have skipped
+         for(size_t k = host_idx; k != host_idx + advance; ++k) {
+            if(host[k] == '.') {
+               return false;
+            }
+         }
+
+         host_idx += advance;
+      } else {
+         if(!dns_char_eq(issued[i], host[host_idx])) {
+            return false;
+         }
+
+         host_idx += 1;
+      }
+   }
+
+   // Wildcard issued name must have at least 3 components
+   if(dots_seen < 2) {
+      return false;
+   }
+
+   return true;
+}
+
 }  // namespace Botan
 /*
 * Dynamically Loaded Object
@@ -21163,8 +22373,9 @@ EC_AffinePoint& EC_AffinePoint::operator=(EC_AffinePoint&& other) noexcept {
 }
 
 EC_AffinePoint::EC_AffinePoint(const EC_Group& group, std::span<const uint8_t> bytes) {
-   m_point = group._data()->point_deserialize(bytes);
-   if(!m_point) {
+   if(auto pt = EC_AffinePoint::deserialize(group, bytes)) {
+      m_point = std::move(pt->m_point);
+   } else {
       throw Decoding_Error("Failed to deserialize elliptic curve point");
    }
 }
@@ -21206,8 +22417,7 @@ bool EC_AffinePoint::operator==(const EC_AffinePoint& other) const {
 }
 
 EC_AffinePoint EC_AffinePoint::identity(const EC_Group& group) {
-   const uint8_t id_encoding[1] = {0};
-   return EC_AffinePoint(group, id_encoding);
+   return EC_AffinePoint(group._data()->point_identity());
 }
 
 EC_AffinePoint EC_AffinePoint::generator(const EC_Group& group) {
@@ -21233,7 +22443,7 @@ std::optional<EC_AffinePoint> EC_AffinePoint::from_bigint_xy(const EC_Group& gro
    x.serialize_to(std::span{sec1}.subspan(1, fe_bytes));
    y.serialize_to(std::span{sec1}.last(fe_bytes));
 
-   return EC_AffinePoint::deserialize(group, sec1);
+   return EC_AffinePoint::deserialize_uncompressed(group, sec1);
 }
 
 size_t EC_AffinePoint::field_element_bytes() const {
@@ -21277,7 +22487,56 @@ EC_AffinePoint EC_AffinePoint::hash_to_curve_nu(const EC_Group& group,
 EC_AffinePoint::~EC_AffinePoint() = default;
 
 std::optional<EC_AffinePoint> EC_AffinePoint::deserialize(const EC_Group& group, std::span<const uint8_t> bytes) {
-   if(auto pt = group._data()->point_deserialize(bytes)) {
+   if(bytes.empty()) {
+      return {};
+   }
+
+   switch(bytes[0]) {
+      case 0x00:
+         // The identity element (see SEC1 section 2.3.4)
+         // TODO(Botan4) remove this - we should reject the identity encoding
+         if(bytes.size() == 1) {
+            return EC_AffinePoint::identity(group);
+         } else {
+            return {};
+         }
+      case 0x02:
+      case 0x03:
+         return EC_AffinePoint::deserialize_compressed(group, bytes);
+      case 0x04:
+         return EC_AffinePoint::deserialize_uncompressed(group, bytes);
+      case 0x06:
+      case 0x07: {
+         // The deprecated "hybrid" point format
+         // TODO(Botan4) remove this
+         const bool hdr_y_is_even = bytes[0] == 0x06;
+         const bool y_is_even = (bytes.back() & 0x01) == 0;
+
+         if(hdr_y_is_even == y_is_even) {
+            std::vector<uint8_t> sec1(bytes.begin(), bytes.end());
+            sec1[0] = 0x04;
+            return EC_AffinePoint::deserialize_uncompressed(group, sec1);
+         } else {
+            return {};
+         }
+      }
+      default:
+         return {};
+   }
+}
+
+std::optional<EC_AffinePoint> EC_AffinePoint::deserialize_compressed(const EC_Group& group,
+                                                                     std::span<const uint8_t> bytes) {
+   if(auto pt = group._data()->point_deserialize_compressed(bytes)) {
+      return EC_AffinePoint(std::move(pt));
+   } else {
+      return {};
+   }
+}
+
+std::optional<EC_AffinePoint> EC_AffinePoint::deserialize_uncompressed(const EC_Group& group,
+                                                                       std::span<const uint8_t> bytes) {
+   if(auto pt = group._data()->point_deserialize_uncompressed(bytes)) {
       return EC_AffinePoint(std::move(pt));
    } else {
       return {};
@@ -21424,6 +22683,16 @@ class EC_Group_Data_Map final {
          std::shared_ptr<EC_Group_Data> data = EC_Group::EC_group_info(oid);
 
          if(data) {
+            // The requested OID may be an alias for a curve whose canonical OID differs
+            // TODO(Botan4) remove this once we require exactly one canonical OID per curve
+            if(data->oid() != oid) {
+               for(const auto& i : m_registered_curves) {
+                  if(i->oid() == data->oid()) {
+                     return i;
+                  }
+               }
+            }
+
             m_registered_curves.push_back(data);
             return data;
          }
@@ -21624,7 +22893,7 @@ std::pair<std::shared_ptr<EC_Group_Data>, bool> EC_Group::DER_decode_EC_group(st
 
    if(next_obj_type == ASN1_Type::ObjectId) {
       OID oid;
-      dec.decode(oid);
+      dec.decode(oid).verify_end();
 
       auto data = ec_group_data().lookup(oid);
       if(!data) {
@@ -21881,6 +23150,27 @@ EC_Group::EC_Group(const BigInt& p,
                    const BigInt& order,
                    const BigInt& cofactor,
                    const OID& oid) {
+   BOTAN_ARG_CHECK(a >= 0 && a < p, "EC_Group a is invalid");
+   BOTAN_ARG_CHECK(b > 0 && b < p, "EC_Group b is invalid");
+   BOTAN_ARG_CHECK(base_x >= 0 && base_x < p, "EC_Group base_x is invalid");
+   BOTAN_ARG_CHECK(base_y >= 0 && base_y < p, "EC_Group base_y is invalid");
+
+   auto mod_p = Barrett_Reduction::for_public_modulus(p);
+   BOTAN_ARG_CHECK(is_bailie_psw_probable_prime(p, mod_p), "EC_Group p is not prime");
+
+   auto mod_order = Barrett_Reduction::for_public_modulus(order);
+   BOTAN_ARG_CHECK(is_bailie_psw_probable_prime(order, mod_order), "EC_Group order is not prime");
+
+   // Check that 4*a^3 + 27*b^2 != 0
+   const auto discriminant = mod_p.reduce(mod_p.multiply(BigInt::from_s32(4), mod_p.cube(a)) +
+                                          mod_p.multiply(BigInt::from_s32(27), mod_p.square(b)));
+   BOTAN_ARG_CHECK(discriminant != 0, "EC_Group discriminant is invalid");
+
+   // Check that the generator (base_x,base_y) is on the curve; y^2 = x^3 + a*x + b
+   auto y2 = mod_p.square(base_y);
+   auto x3_ax_b = mod_p.reduce(mod_p.cube(base_x) + mod_p.multiply(a, base_x) + b);
+   BOTAN_ARG_CHECK(y2 == x3_ax_b, "EC_Group generator is not on the curve");
+
    if(oid.has_value()) {
       m_data = ec_group_data().lookup_or_create(
          p, a, b, base_x, base_y, order, cofactor, oid, EC_Group_Source::ExternalSource);
@@ -22076,6 +23366,10 @@ EC_Group_Engine EC_Group::engine() const {
    return data().engine();
 }
 
+bool EC_Group::hash_to_curve_supported(std::string_view hash_fn) const {
+   return data().hash_to_curve_supported(hash_fn);
+}
+
 std::vector<uint8_t> EC_Group::DER_encode() const {
    const auto& der_named_curve = data().der_named_curve();
    // TODO(Botan4) this can be removed because an OID will always be defined
@@ -22190,18 +23484,34 @@ bool EC_Group::verify_group(RandomNumberGenerator& rng, bool strong) const {
       return false;
    }
 
+   // Check that the generator (g_x, g_y) is on the curve: y^2 == x^3 + a*x + b
+   const BigInt& g_x = get_g_x();
+   const BigInt& g_y = get_g_y();
+   const BigInt y2 = mod_p.square(g_y);
+   const BigInt x3_ax_b = mod_p.reduce(mod_p.cube(g_x) + mod_p.multiply(a, g_x) + b);
+   if(y2 != x3_ax_b) {
+      return false;
+   }
+
+   // Check that the generator has the claimed order: [order]G == identity,
+   auto g_pt = EC_AffinePoint::from_bigint_xy(*this, get_g_x(), get_g_y());
+   if(!g_pt) {
+      return false;
+   }
+   const auto neg_one = EC_Scalar::one(*this).negate();
+   const auto n_minus_one_g = EC_AffinePoint::g_mul(neg_one, rng);
+   if(n_minus_one_g != g_pt->negate()) {
+      return false;
+   }
+
 #if defined(BOTAN_HAS_LEGACY_EC_POINT)
-   const EC_Point& base_point = get_base_point();
-   //check if the base point is on the curve
-   if(!base_point.on_the_curve()) {
-      return false;
-   }
-   if((base_point * get_cofactor()).is_zero()) {
-      return false;
-   }
-   //check if order of the base point is correct
-   if(!(base_point * order).is_zero()) {
-      return false;
+   // Reject if [cofactor]G is the identity. pcurves does not support cofactor != 1
+   // so this can only matter when the legacy backend is in use.
+   if(has_cofactor()) {
+      const EC_Point& base_point = get_base_point();
+      if((base_point * get_cofactor()).is_zero()) {
+         return false;
+      }
    }
 #endif
 
@@ -22294,15 +23604,22 @@ EC_Group_Data::EC_Group_Data(const BigInt& p,
       m_has_cofactor(m_cofactor != 1),
       m_order_is_less_than_p(m_order < p),
       m_source(source) {
+   // Verify the generator (x, y) satisfies y^2 = x^3 + a*x + b (mod p)
+   auto mod_p = Barrett_Reduction::for_public_modulus(p);
+   const BigInt y2 = mod_p.square(g_y);
+   const BigInt x3_ax_b = mod_p.reduce(mod_p.cube(g_x) + mod_p.multiply(a, g_x) + b);
+   if(y2 != x3_ax_b) {
+      throw Invalid_Argument("EC_Group generator is not on the curve");
+   }
+
    // TODO(Botan4) we can assume/assert the OID is set
    if(!m_oid.empty()) {
       DER_Encoder der(m_der_named_curve);
       der.encode(m_oid);
 
-      const std::string name = m_oid.human_name_or_empty();
-      if(!name.empty()) {
+      if(const auto name = m_oid.registered_name()) {
          // returns nullptr if unknown or not supported
-         m_pcurve = PCurve::PrimeOrderCurve::for_named_curve(name);
+         m_pcurve = PCurve::PrimeOrderCurve::for_named_curve(*name);
       }
       if(m_pcurve) {
          m_engine = EC_Group_Engine::Optimized;
@@ -22609,43 +23926,71 @@ std::unique_ptr<EC_Scalar_Data> EC_Group_Data::scalar_deserialize(std::span<cons
    }
 }
 
-std::unique_ptr<EC_AffinePoint_Data> EC_Group_Data::point_deserialize(std::span<const uint8_t> bytes) const {
-   // The deprecated "hybrid" point format
-   // TODO(Botan4) remove this
-   if(bytes.size() >= 1 + 2 * 4 && (bytes[0] == 0x06 || bytes[0] == 0x07)) {
-      const bool hdr_y_is_even = bytes[0] == 0x06;
-      const bool y_is_even = (bytes.back() & 0x01) == 0;
-
-      if(hdr_y_is_even == y_is_even) {
-         std::vector<uint8_t> sec1(bytes.begin(), bytes.end());
-         sec1[0] = 0x04;
-         return this->point_deserialize(sec1);
-      }
+std::unique_ptr<EC_AffinePoint_Data> EC_Group_Data::point_deserialize_uncompressed(
+   std::span<const uint8_t> bytes) const {
+   if(bytes.size() != 1 + 2 * p_bytes() || bytes[0] != 0x04) {
+      return {};
    }
 
-   try {
-      if(m_pcurve) {
-         if(auto pt = m_pcurve->deserialize_point(bytes)) {
-            return std::make_unique<EC_AffinePoint_Data_PC>(shared_from_this(), std::move(*pt));
-         } else {
-            return {};
-         }
+   if(m_pcurve) {
+      if(auto pt = m_pcurve->deserialize_point_uncompressed(bytes)) {
+         return std::make_unique<EC_AffinePoint_Data_PC>(shared_from_this(), std::move(*pt));
       } else {
+         return {};
+      }
+   } else {
 #if defined(BOTAN_HAS_LEGACY_EC_POINT)
+      try {
          auto pt = Botan::OS2ECP(bytes, m_curve);
          return std::make_unique<EC_AffinePoint_Data_BN>(shared_from_this(), std::move(pt));
-#else
-         throw Not_Implemented("Legacy EC interfaces disabled in this build configuration");
-#endif
+      } catch(...) {
+         return {};
       }
-   } catch(...) {
-      return {};
+#else
+      throw Not_Implemented("Legacy EC interfaces disabled in this build configuration");
+#endif
    }
 }
 
-namespace {
+std::unique_ptr<EC_AffinePoint_Data> EC_Group_Data::point_deserialize_compressed(std::span<const uint8_t> bytes) const {
+   if(bytes.size() != 1 + p_bytes() || (bytes[0] != 0x02 && bytes[0] != 0x03)) {
+      return {};
+   }
+
+   if(m_pcurve) {
+      if(auto pt = m_pcurve->deserialize_point_compressed(bytes)) {
+         return std::make_unique<EC_AffinePoint_Data_PC>(shared_from_this(), std::move(*pt));
+      } else {
+         return {};
+      }
+   } else {
+#if defined(BOTAN_HAS_LEGACY_EC_POINT)
+      try {
+         auto pt = Botan::OS2ECP(bytes, m_curve);
+         return std::make_unique<EC_AffinePoint_Data_BN>(shared_from_this(), std::move(pt));
+      } catch(...) {
+         return {};
+      }
+#else
+      throw Not_Implemented("Legacy EC interfaces disabled in this build configuration");
+#endif
+   }
+}
+
+std::unique_ptr<EC_AffinePoint_Data> EC_Group_Data::point_identity() const {
+   if(m_pcurve) {
+      return std::make_unique<EC_AffinePoint_Data_PC>(shared_from_this(), m_pcurve->point_identity());
+   } else {
+#if defined(BOTAN_HAS_LEGACY_EC_POINT)
+      return std::make_unique<EC_AffinePoint_Data_BN>(shared_from_this(), EC_Point(m_curve));
+#else
+      throw Not_Implemented("Legacy EC interfaces disabled in this build configuration");
+#endif
+   }
+}
 
 std::function<void(std::span<uint8_t>)> h2c_expand_message(std::string_view hash_fn,
+                                                           size_t order_bits,
                                                            std::span<const uint8_t> input,
                                                            std::span<const uint8_t> domain_sep) {
    /*
@@ -22656,23 +24001,68 @@ std::function<void(std::span<uint8_t>)> h2c_expand_message(std::string_view hash
       throw Not_Implemented("Hash to curve currently does not support expand_message_xof");
    }
 
-   return [=](std::span<uint8_t> uniform_bytes) {
 #if defined(BOTAN_HAS_XMD)
-      expand_message_xmd(hash_fn, uniform_bytes, input, domain_sep);
-#else
-      BOTAN_UNUSED(hash_fn, uniform_bytes, input, domain_sep);
-      throw Not_Implemented("Hash to curve is not implemented due to XMD being disabled");
-#endif
+   // Here we capture the HashFunction by shared_ptr because it will be owned by
+   // the returned std::function
+   const std::shared_ptr<HashFunction> hash = HashFunction::create_or_throw(hash_fn);
+
+   /*
+   * RFC 9380 Section 5.3.1: "The number of bits output by H MUST be b >= 2 * k,
+   * where k is the target security level in bits", as this "ensures k-bit
+   * collision resistance". Checking the hash's collision resistance estimate
+   * covers this, and also rejects hashes with known collision attacks. The
+   * target level is capped at 256 since the RFC 9380 suites for P-521 use k = 256.
+   */
+   const size_t k = std::min<size_t>((order_bits + 1) / 2, 256);
+
+   if(hash->security_level() < k) {
+      throw Invalid_Argument(fmt("Hash {} is too weak for use with a {} bit group", hash->name(), order_bits));
+   }
+
+   return [hash, input, domain_sep](std::span<uint8_t> uniform_bytes) {
+      expand_message_xmd(*hash, uniform_bytes, input, domain_sep);
    };
+#else
+   BOTAN_UNUSED(order_bits, input, domain_sep);
+   throw Not_Implemented("Hash to curve is not implemented due to XMD being disabled");
+#endif
 }
 
-}  // namespace
+bool EC_Group_Data::hash_to_curve_supported(std::string_view hash_fn) const {
+#if defined(BOTAN_HAS_XMD)
+   if(!m_pcurve || !m_pcurve->supports_hash_to_curve()) {
+      return false;
+   }
+
+   // Consistent with h2c_expand_message; XOF based expansion is not implemented
+   if(hash_fn.starts_with("SHAKE")) {
+      return false;
+   }
+
+   auto hash = HashFunction::create(hash_fn);
+   if(hash == nullptr) {
+      return false;
+   }
+
+   // The same hash strength requirement enforced by h2c_expand_message
+   const size_t k = std::min<size_t>((order_bits() + 1) / 2, 256);
+   if(hash->security_level() < k) {
+      return false;
+   }
+
+   // The same requirements enforced by expand_message_xmd
+   return hash->hash_block_size() > 0 && hash->output_length() <= hash->hash_block_size();
+#else
+   BOTAN_UNUSED(hash_fn);
+   return false;
+#endif
+}
 
 std::unique_ptr<EC_AffinePoint_Data> EC_Group_Data::point_hash_to_curve_ro(std::string_view hash_fn,
                                                                            std::span<const uint8_t> input,
                                                                            std::span<const uint8_t> domain_sep) const {
-   if(m_pcurve) {
-      auto pt = m_pcurve->hash_to_curve_ro(h2c_expand_message(hash_fn, input, domain_sep));
+   if(m_pcurve && m_pcurve->supports_hash_to_curve()) {
+      auto pt = m_pcurve->hash_to_curve_ro(h2c_expand_message(hash_fn, order_bits(), input, domain_sep));
       return std::make_unique<EC_AffinePoint_Data_PC>(shared_from_this(), m_pcurve->point_to_affine(pt));
    } else {
       throw Not_Implemented("Hash to curve is not implemented for this curve");
@@ -22682,8 +24072,8 @@ std::unique_ptr<EC_AffinePoint_Data> EC_Group_Data::point_hash_to_curve_ro(std::
 std::unique_ptr<EC_AffinePoint_Data> EC_Group_Data::point_hash_to_curve_nu(std::string_view hash_fn,
                                                                            std::span<const uint8_t> input,
                                                                            std::span<const uint8_t> domain_sep) const {
-   if(m_pcurve) {
-      auto pt = m_pcurve->hash_to_curve_nu(h2c_expand_message(hash_fn, input, domain_sep));
+   if(m_pcurve && m_pcurve->supports_hash_to_curve()) {
+      auto pt = m_pcurve->hash_to_curve_nu(h2c_expand_message(hash_fn, order_bits(), input, domain_sep));
       return std::make_unique<EC_AffinePoint_Data_PC>(shared_from_this(), std::move(pt));
    } else {
       throw Not_Implemented("Hash to curve is not implemented for this curve");
@@ -22843,6 +24233,7 @@ bool EC_Scalar_Data_PC::is_eq(const EC_Scalar_Data& other) const {
 }
 
 void EC_Scalar_Data_PC::assign(const EC_Scalar_Data& other) {
+   BOTAN_STATE_CHECK(other.group() == this->group());
    m_v = checked_ref(other).value();
 }
 
@@ -23587,9 +24978,6 @@ const std::set<std::string>& EC_Group::known_named_groups() {
 
 
 
-#if defined(BOTAN_HAS_XMD)
-#endif
-
 namespace Botan {
 
 EC_Scalar EC_Scalar::_from_inner(std::unique_ptr<EC_Scalar_Data> inner) {
@@ -23606,14 +24994,20 @@ EC_Scalar::EC_Scalar(EC_Scalar&& other) noexcept : m_scalar(std::move(other.m_sc
 
 EC_Scalar& EC_Scalar::operator=(const EC_Scalar& other) {
    if(this != &other) {
-      this->assign(other);
+      if(m_scalar == nullptr || m_scalar->group() != other.inner().group()) {
+         m_scalar = other.inner().clone();
+      } else {
+         this->assign(other);
+      }
    }
    return (*this);
 }
 
 EC_Scalar& EC_Scalar::operator=(EC_Scalar&& other) noexcept {
-   BOTAN_ARG_CHECK(_inner().group() == other._inner().group(), "Curve mismatch");
-   std::swap(m_scalar, other.m_scalar);
+   if(this != &other) {
+      // Even a cross-curve swap is accepted here
+      std::swap(m_scalar, other.m_scalar);
+   }
    return (*this);
 }
 
@@ -23657,6 +25051,7 @@ BigInt EC_Scalar::to_bigint() const {
    return BigInt::from_bytes(bytes);
 }
 
+//static
 EC_Scalar EC_Scalar::gk_x_mod_order(const EC_Scalar& scalar, RandomNumberGenerator& rng) {
    const auto& group = scalar._inner().group();
    return EC_Scalar(group->gk_x_mod_order(scalar.inner(), rng));
@@ -23728,19 +25123,28 @@ void EC_Scalar::square_self() {
 }
 
 EC_Scalar EC_Scalar::add(const EC_Scalar& x) const {
+   BOTAN_ARG_CHECK(inner().group() == x.inner().group(), "Curve mismatch");
    return EC_Scalar(inner().add(x.inner()));
 }
 
 EC_Scalar EC_Scalar::sub(const EC_Scalar& x) const {
+   BOTAN_ARG_CHECK(inner().group() == x.inner().group(), "Curve mismatch");
    return EC_Scalar(inner().sub(x.inner()));
 }
 
 EC_Scalar EC_Scalar::mul(const EC_Scalar& x) const {
+   BOTAN_ARG_CHECK(inner().group() == x.inner().group(), "Curve mismatch");
    return EC_Scalar(inner().mul(x.inner()));
 }
 
 void EC_Scalar::assign(const EC_Scalar& x) {
-   m_scalar->assign(x.inner());
+   if(this != &x) {
+      if(m_scalar == nullptr || m_scalar->group() != x.inner().group()) {
+         m_scalar = x.inner().clone();
+      } else {
+         m_scalar->assign(x.inner());
+      }
+   }
 }
 
 void EC_Scalar::zeroize() {
@@ -23748,6 +25152,10 @@ void EC_Scalar::zeroize() {
 }
 
 bool EC_Scalar::is_eq(const EC_Scalar& x) const {
+   if(inner().group() != x.inner().group()) {
+      return false;
+   }
+
    return inner().is_eq(x.inner());
 }
 
@@ -23756,25 +25164,18 @@ EC_Scalar EC_Scalar::hash(const EC_Group& group,
                           std::string_view hash_fn,
                           std::span<const uint8_t> input,
                           std::span<const uint8_t> domain_sep) {
-#if defined(BOTAN_HAS_XMD)
-
    /*
-   * This could be extended to support expand_message_xof or a MHF like Argon2
+   RFC 9380 Section 5.2
+      L = ceil((ceil(log2(p)) + k) / 8), where k is the security
+      parameter of the suite (e.g., k = 128)
    */
-   if(hash_fn.starts_with("SHAKE")) {
-      throw Not_Implemented("Hash to scalar currently does not support expand_message_xof");
-   }
-
    const size_t scalar_bits = group.get_order_bits();
-   const size_t security_level = (scalar_bits + 1) / 2;
+   const size_t security_level = std::min<size_t>((scalar_bits + 1) / 2, 256);
    secure_vector<uint8_t> uniform_bytes((scalar_bits + security_level + 7) / 8);
-   expand_message_xmd(hash_fn, uniform_bytes, input, domain_sep);
+
+   h2c_expand_message(hash_fn, scalar_bits, input, domain_sep)(uniform_bytes);
 
    return EC_Scalar::from_bytes_mod_order(group, uniform_bytes);
-#else
-   BOTAN_UNUSED(group, hash_fn, input, domain_sep);
-   throw Not_Implemented("EC_Scalar::hash not available due to missing XMD");
-#endif
 }
 
 }  // namespace Botan
@@ -23787,6 +25188,31 @@ EC_Scalar EC_Scalar::hash(const EC_Group& group,
 
 
 namespace Botan {
+
+namespace {
+
+EC_AffinePoint decode_ec_public_key_point(const EC_Group& group, std::span<const uint8_t> bytes) {
+   /*
+   * RFC 5480 section 2.2:
+   *    The first octet of the OCTET STRING indicates whether the key is
+   *    compressed or uncompressed.  The uncompressed form is indicated
+   *    by 0x04 and the compressed form is indicated by either 0x02 or
+   *    0x03 (see 2.3.3 in [SEC1]).  The public key MUST be rejected if
+   *    any other value is included in the first octet.
+   */
+   if(auto pt_uncompressed = EC_AffinePoint::deserialize_uncompressed(group, bytes)) {
+      return std::move(pt_uncompressed).value();
+   } else if(auto pt_compressed = EC_AffinePoint::deserialize_compressed(group, bytes)) {
+      return std::move(pt_compressed).value();
+   } else {
+      throw Decoding_Error("Failed to deserialize elliptic curve point");
+   }
+}
+
+}  // namespace
+
+EC_PublicKey_Data::EC_PublicKey_Data(const EC_Group& group, std::span<const uint8_t> bytes) :
+      EC_PublicKey_Data(group, decode_ec_public_key_point(group, bytes)) {}
 
 EC_PublicKey_Data::EC_PublicKey_Data(EC_Group group, EC_AffinePoint pt) :
       m_group(std::move(group)), m_point(std::move(pt)) {
@@ -23876,6 +25302,7 @@ void EC_PrivateKey_Data::serialize_to(std::span<uint8_t> output) const {
 
 
 
+
 #if defined(BOTAN_HAS_LEGACY_EC_POINT)
 #endif
 
@@ -23900,6 +25327,16 @@ EC_Group_Encoding default_encoding_for(const EC_Group& group) {
 }
 
 }  // namespace
+
+const AlgorithmIdentifier& EC_PublicKey::assert_algorithm_identifier(const AlgorithmIdentifier& alg_id,
+                                                                     std::string_view alg_name) {
+   if(alg_id.oid() != OID::from_string(alg_name)) {
+      throw Decoding_Error(
+         fmt("Unexpected AlgorithmIdentifier OID {} in association with {} key", alg_id.oid(), alg_name));
+   }
+
+   return alg_id;  // NOLINT(*-return-const-ref-from-parameter)
+}
 
 #if defined(BOTAN_HAS_LEGACY_EC_POINT)
 EC_PublicKey::EC_PublicKey(const EC_Group& group, const EC_Point& pub_point) {
@@ -24025,7 +25462,7 @@ secure_vector<uint8_t> EC_PrivateKey::private_key_bits() const {
       .encode(static_cast<size_t>(1))
       .encode(raw_private_key_bits(), ASN1_Type::OctetString)
       .start_explicit_context_specific(1)
-      .encode(m_public_key->public_key().serialize_uncompressed(), ASN1_Type::BitString)
+      .encode_octet_aligned_bitstring(m_public_key->public_key().serialize_uncompressed())
       .end_cons()
       .end_cons()
       .get_contents();
@@ -24035,8 +25472,6 @@ EC_PrivateKey::EC_PrivateKey(const AlgorithmIdentifier& alg_id,
                              std::span<const uint8_t> key_bits,
                              bool with_modular_inverse) :
       m_with_modular_inverse(with_modular_inverse) {
-   const EC_Group group(alg_id.parameters());
-
    OID key_parameters;
    secure_vector<uint8_t> private_key_bits;
    secure_vector<uint8_t> public_key_bits;
@@ -24046,16 +25481,35 @@ EC_PrivateKey::EC_PrivateKey(const AlgorithmIdentifier& alg_id,
       .decode_and_check<size_t>(1, "Unknown version code for ECC key")
       .decode(private_key_bits, ASN1_Type::OctetString)
       .decode_optional(key_parameters, ASN1_Type(0), ASN1_Class::ExplicitContextSpecific)
-      .decode_optional_string(public_key_bits, ASN1_Type::BitString, 1, ASN1_Class::ExplicitContextSpecific)
+      .decode_optional_octet_aligned_bitstring(public_key_bits, 1, ASN1_Class::ExplicitContextSpecific)
       .end_cons()
       .verify_end();
 
-   m_private_key = std::make_shared<EC_PrivateKey_Data>(group, private_key_bits);
+   std::unique_ptr<EC_Group> group;
+
+   if(!alg_id.parameters_are_empty()) {
+      group = std::make_unique<EC_Group>(alg_id.parameters());
+   }
+   if(!key_parameters.empty()) {
+      if(group) {
+         if(EC_Group(key_parameters) != *group) {
+            throw Invalid_Argument(
+               "Domain parameters supplied AlgorithmIdentifier does not match the ECC private key's domain parameters in EC_PrivateKey construction");
+         }
+      } else {
+         group = std::make_unique<EC_Group>(key_parameters);
+      }
+   }
+   if(!group) {
+      throw Invalid_Argument("Domain parameters are not supplied in EC_PrivateKey construction");
+   }
+
+   m_private_key = std::make_shared<EC_PrivateKey_Data>(*group, private_key_bits);
 
    if(public_key_bits.empty()) {
       m_public_key = m_private_key->public_key(with_modular_inverse);
    } else {
-      m_public_key = std::make_shared<EC_PublicKey_Data>(group, public_key_bits);
+      m_public_key = std::make_shared<EC_PublicKey_Data>(*group, public_key_bits);
    }
 
    m_domain_encoding = default_encoding_for(domain());
@@ -24158,7 +25612,7 @@ EC_AffinePoint recover_ecdsa_public_key(
       X[0] = 0x02 | y_odd;
       x.serialize_to(std::span{X}.subspan(1));
 
-      if(auto R = EC_AffinePoint::deserialize(group, X)) {
+      if(auto R = EC_AffinePoint::deserialize_compressed(group, X)) {
          // Compute r_inv * (-eG + s*R)
          const auto ne = EC_Scalar::from_bytes_with_trunc(group, msg).negate();
          const auto ss = EC_Scalar::from_bigint(group, s);
@@ -24322,6 +25776,18 @@ class ECDSA_Verification_Operation final : public PK_Ops::Verification_with_Hash
             PK_Ops::Verification_with_Hash(padding), m_group(ecdsa.domain()), m_gy_mul(ecdsa._public_ec_point()) {}
 
       ECDSA_Verification_Operation(const ECDSA_PublicKey& ecdsa, const AlgorithmIdentifier& alg_id) :
+            /*
+            * RFC 5758 Section 3.2 is clear that for ECDSA signatures the parameters field is empty
+            *
+            *    When the [ecdsa-with-SHA*] algorithm identifier appears in the algorithm
+            *    field as an AlgorithmIdentifier, the encoding MUST omit the parameters
+            *    field. That is, the AlgorithmIdentifier SHALL be a SEQUENCE of one
+            *    component, the OID [ecdsa-with-SHA*].
+            *
+            * However ECDSA is old enough and widely implemented enough that many non-conformant
+            * implementations which emit X509 signatures using an explicit NULL parameter do exist,
+            * so accept it here.
+            */
             PK_Ops::Verification_with_Hash(alg_id, "ECDSA", true),
             m_group(ecdsa.domain()),
             m_gy_mul(ecdsa._public_ec_point()) {}
@@ -24378,6 +25844,121 @@ std::unique_ptr<PK_Ops::Signature> ECDSA_PrivateKey::create_signature_op(RandomN
    }
 
    throw Provider_Not_Found(algo_name(), provider);
+}
+
+}  // namespace Botan
+/*
+* (C) 2026 Jack Lloyd
+*
+* Botan is released under the Simplified BSD License (see license.txt)
+*/
+
+
+
+namespace Botan {
+
+namespace {
+
+std::optional<std::pair<std::string, DNSName>> parse_email_address(std::string_view addr) {
+   /*
+   * RFC 5322 atext: ALPHA / DIGIT plus "!#$%&'*+-/=?^_`{|}~" (plus ".")
+   *
+   * Anything outside this set in the local part requires quoting,
+   * which we deliberately don't accept.
+   */
+   constexpr auto is_atext_or_dot = CharacterValidityTable::alpha_numeric_plus(".!#$%&'*+-/=?^_`{|}~");
+
+   if(addr.empty() || !is_valid_utf8(addr)) {
+      return {};
+   }
+
+   const auto at = addr.find('@');
+
+   // Must be one (and only one) @ sign
+   if(at == std::string_view::npos || addr.find('@', at + 1) != std::string_view::npos) {
+      return {};
+   }
+
+   // Split at the @ sign and verify both halves are non-empty
+   const std::string_view local = addr.substr(0, at);
+   const std::string_view domain = addr.substr(at + 1);
+
+   if(local.empty() || domain.empty()) {
+      return {};
+   }
+
+   // RFC 3696 section 3:
+   //
+   //  period (".") may also appear [in an email address local-part],
+   //  but may not be used to start or end the local part, nor may two
+   //  or more consecutive periods appear.
+
+   // TODO(C++23): use std::string::contains
+   if(local.starts_with('.') || local.ends_with('.') || local.find("..") != std::string_view::npos) {
+      return {};
+   }
+
+   // RFC 5322 dot-atom. This intentionally omits support for quoting
+   for(const char c : local) {
+      // Here we accept high bit for UTF-8 for SmtpUtf8Mailbox
+      if(!is_atext_or_dot(c) && static_cast<uint8_t>(c) < 0x80) {
+         return {};
+      }
+   }
+
+   auto parsed_domain = DNSName::from_string(domain);
+   if(!parsed_domain.has_value()) {
+      return {};
+   }
+
+   return std::make_pair(std::string(local), parsed_domain.value());
+}
+
+}  // namespace
+
+std::string EmailAddress::to_string() const {
+   return fmt("{}@{}", m_local_part, m_domain.to_string());
+}
+
+//static
+std::optional<EmailAddress> EmailAddress::from_string(std::string_view addr) {
+   auto parsed = parse_email_address(addr);
+
+   if(parsed) {
+      // Verify the local-part is all ASCII
+      for(const char c : parsed->first) {
+         if(static_cast<uint8_t>(c) >= 0x80) {
+            return {};
+         }
+      }
+      return EmailAddress(std::move(parsed->first), std::move(parsed->second));
+   } else {
+      return {};
+   }
+}
+
+std::string SmtpUtf8Mailbox::to_string() const {
+   return fmt("{}@{}", m_local_part, m_domain.to_string());
+}
+
+//static
+std::optional<SmtpUtf8Mailbox> SmtpUtf8Mailbox::from_string(std::string_view addr) {
+   auto parsed = parse_email_address(addr);
+
+   if(parsed) {
+      /*
+      * RFC 9598 Section 3
+      *   SmtpUTF8Mailbox subjectAltName MUST NOT be used unless the Local-part
+      *   of the email address contains non-ASCII characters.  When the Local-
+      *   part is ASCII, rfc822Name subjectAltName MUST be used instead of
+      *   SmtpUTF8Mailbox.
+      *
+      * We do not currently enforce this on the decoding side.
+      */
+      return SmtpUtf8Mailbox(std::move(parsed->first), std::move(parsed->second));
+   }
+
+   return {};
 }
 
 }  // namespace Botan
@@ -24771,7 +26352,8 @@ void hex_encode(char output[], const uint8_t input[], size_t input_length, bool 
 }
 
 std::string hex_encode(const uint8_t input[], size_t input_length, bool uppercase) {
-   std::string output(2 * input_length, 0);
+   const size_t output_length = mul_or_throw<size_t>(2, input_length, "Input too large to hex encode");
+   std::string output(output_length, 0);
 
    if(input_length > 0) {
       hex_encode(&output.front(), input, input_length, uppercase);
@@ -24786,11 +26368,13 @@ uint8_t hex_char_to_bin(char input) {
    // Starts of valid value ranges (v_lo) and their lengths (v_range)
    constexpr uint64_t v_lo = make_uint64(0, '0', 'a', 'A', ' ', '\n', '\t', '\r');
    constexpr uint64_t v_range = make_uint64(0, 10, 6, 6, 1, 1, 1, 1);
+   constexpr uint64_t expand8 = 0x0101010101010101;
+   constexpr uint64_t top64 = 0x8000000000000000;
 
    const uint8_t x = static_cast<uint8_t>(input);
-   const uint64_t x8 = x * 0x0101010101010101;
+   const uint64_t x8 = x * expand8;
 
-   const uint64_t v_mask = swar_in_range<uint64_t>(x8, v_lo, v_range) ^ 0x8000000000000000;
+   const uint64_t v_mask = swar_in_range<uint64_t>(x8, v_lo, v_range) ^ top64;
 
    // This is the offset added to x to get the value we need
    const uint64_t val_v = 0xd0a9c960767773 ^ static_cast<uint64_t>(0xFF - x) << 56;
@@ -24803,6 +26387,9 @@ uint8_t hex_char_to_bin(char input) {
 size_t hex_decode(uint8_t output[], const char input[], size_t input_length, size_t& input_consumed, bool ignore_ws) {
    uint8_t* out_ptr = output;
    bool top_nibble = true;
+   uint8_t next = 0;
+
+   input_consumed = 0;
 
    clear_mem(output, input_length / 2);
 
@@ -24818,30 +26405,28 @@ size_t hex_decode(uint8_t output[], const char input[], size_t input_length, siz
       }
 
       if(top_nibble) {
-         *out_ptr |= bin << 4;
+         next = bin << 4;
       } else {
-         *out_ptr |= bin;
+         next |= bin;
+         *out_ptr = next;
       }
 
       top_nibble = !top_nibble;
       if(top_nibble) {
          ++out_ptr;
+         input_consumed = i + 1;
       }
    }
 
-   input_consumed = input_length;
-   const size_t written = (out_ptr - output);
-
    /*
-   * We only got half of a uint8_t at the end; zap the half-written
-   * output and mark it as unread
+   * Consume trailing whitespace following the last full byte; a leftover
+   * unpaired nibble (if any) stops the scan and is left unconsumed.
    */
-   if(!top_nibble) {
-      *out_ptr = 0;
-      input_consumed -= 1;
+   while(input_consumed < input_length && hex_char_to_bin(input[input_consumed]) == 0x80) {
+      ++input_consumed;
    }
 
-   return written;
+   return (out_ptr - output);
 }
 
 size_t hex_decode(uint8_t output[], const char input[], size_t input_length, bool ignore_ws) {
@@ -24860,6 +26445,9 @@ size_t hex_decode(uint8_t output[], std::string_view input, bool ignore_ws) {
 }
 
 size_t hex_decode(std::span<uint8_t> output, std::string_view input, bool ignore_ws) {
+   if(output.size() < input.length() / 2) {
+      throw Invalid_Argument("hex_decode: output buffer too small");
+   }
    return hex_decode(output.data(), input.data(), input.length(), ignore_ws);
 }
 
@@ -24919,6 +26507,16 @@ void HMAC::final_result(std::span<uint8_t> mac) {
    m_hash->update(m_okey);
    m_hash->update(mac.first(m_hash_output_length));
    m_hash->final(mac);
+   m_hash->update(m_ikey);
+}
+
+void HMAC::start_msg(std::span<const uint8_t> nonce) {
+   if(!nonce.empty()) {
+      throw Invalid_IV_Length(name(), nonce.size());
+   }
+   assert_key_material_set();
+
+   m_hash->clear();
    m_hash->update(m_ikey);
 }
 
@@ -25028,6 +26626,7 @@ HMAC::HMAC(std::unique_ptr<HashFunction> hash) :
       m_hash(std::move(hash)),
       m_hash_output_length(m_hash->output_length()),
       m_hash_block_size(m_hash->hash_block_size()) {
+   BOTAN_ARG_CHECK(m_hash_output_length >= 8, "HMAC is not compatible with this hash function");
    BOTAN_ARG_CHECK(m_hash_block_size >= m_hash_output_length, "HMAC is not compatible with this hash function");
 }
 
@@ -25222,6 +26821,79 @@ size_t HMAC_DRBG::security_level() const {
 
 namespace Botan {
 
+namespace {
+
+/*
+* Convert a decimal-dotted string to binary IP
+*/
+std::optional<uint32_t> string_to_ipv4(std::string_view str) {
+   // At least 3 dots + 4 1-digit integers
+   // At most 3 dots + 4 3-digit integers
+   if(str.size() < 3 + 4 * 1 || str.size() > 3 + 4 * 3) {
+      return {};
+   }
+
+   // the final result
+   uint32_t ip = 0;
+   // the number of '.' seen so far
+   size_t dots = 0;
+   // accumulates one quad (range 0-255)
+   uint32_t accum = 0;
+   // # of digits pushed to accum since last dot
+   size_t cur_digits = 0;
+
+   for(const char c : str) {
+      if(c == '.') {
+         // . without preceding digit is invalid
+         if(cur_digits == 0) {
+            return {};
+         }
+         dots += 1;
+         // too many dots
+         if(dots > 3) {
+            return {};
+         }
+
+         cur_digits = 0;
+         ip = (ip << 8) | accum;
+         accum = 0;
+      } else if(c >= '0' && c <= '9') {
+         const auto d = static_cast<uint8_t>(c - '0');
+
+         // prohibit leading zero in quad (used for octal)
+         if(cur_digits > 0 && accum == 0) {
+            return {};
+         }
+         accum = (accum * 10) + d;
+
+         if(accum > 255) {
+            return {};
+         }
+
+         cur_digits++;
+         BOTAN_ASSERT_NOMSG(cur_digits <= 3);
+      } else {
+         return {};
+      }
+   }
+
+   // no trailing digits?
+   if(cur_digits == 0) {
+      return {};
+   }
+
+   // insufficient # of dots
+   if(dots != 3) {
+      return {};
+   }
+
+   ip = (ip << 8) | accum;
+
+   return ip;
+}
+
+}  // namespace
+
 //static
 std::optional<IPv4Address> IPv4Address::from_string(std::string_view str) {
    if(auto ipv4 = string_to_ipv4(str)) {
@@ -25247,7 +26919,19 @@ std::array<uint8_t, 4> IPv4Address::to_bytes() const {
 }
 
 std::string IPv4Address::to_string() const {
-   return ipv4_to_string(m_ip);
+   const auto addr = this->to_bytes();
+
+   std::string str;
+   str.reserve(15);  // maximum possible size
+
+   for(size_t i = 0; i != 4; ++i) {
+      if(i > 0) {
+         str += ".";
+      }
+      str += std::to_string(addr[i]);
+   }
+
+   return str;
 }
 
 std::optional<size_t> IPv4Address::prefix_length() const {
@@ -25298,22 +26982,24 @@ std::optional<IPv4Subnet> IPv4Subnet::from_string(std::string_view str) {
       return std::nullopt;
    }
 
+   // Parse the prefix length as a canonical decimal integer in [0, 32]
    const auto plen_str = str.substr(slash + 1);
-   if(plen_str.empty() || plen_str.size() > 2) {
-      return std::nullopt;
-   }
-   size_t plen = 0;
-   for(const char c : plen_str) {
-      if(c < '0' || c > '9') {
-         return std::nullopt;
-      }
-      plen = plen * 10 + static_cast<size_t>(c - '0');
-   }
-   if(plen > 32) {
+
+   const auto plen = parse_sz(plen_str, /*require_canonical=*/true);
+
+   if(!plen.has_value() || plen.value() > 32) {
       return std::nullopt;
    }
 
-   return IPv4Subnet(*addr, plen);
+   const IPv4Subnet subnet(*addr, plen.value());
+
+   // Require the input to already be canonical: from_string and to_string
+   // are exact inverses, so a set host bit is rejected rather than masked away
+   if(subnet.to_string() != str) {
+      return std::nullopt;
+   }
+
+   return subnet;
 }
 
 bool IPv4Subnet::contains(const IPv4Address& ip) const {
@@ -25328,12 +27014,12 @@ std::vector<uint8_t> IPv4Subnet::serialize() const {
    std::vector<uint8_t> out;
    if(is_host()) {
       out.resize(4);
-      store_be(m_address.value(), out.data());
+      store_be(m_address.address(), out.data());
       return out;
    }
    out.resize(8);
-   store_be(m_address.value(), out.data());
-   store_be(IPv4Address::netmask(m_prefix_length).value(), out.data() + 4);
+   store_be(m_address.address(), out.data());
+   store_be(IPv4Address::netmask(m_prefix_length).address(), out.data() + 4);
    return out;
 }
 
@@ -25356,11 +27042,147 @@ IPv6Address::IPv6Address(std::span<const uint8_t, 16> ip) : m_ip{} {
 
 //static
 std::optional<IPv6Address> IPv6Address::from_string(std::string_view str) {
-   if(auto ipv6 = string_to_ipv6(str)) {
-      return IPv6Address(*ipv6);
-   } else {
+   if(str.empty()) {
       return {};
    }
+
+   // Parsed hex groups, split by whether they appeared before or after a "::".
+   // If no "::" appears, only `pre` is populated and must reach exactly 8 groups.
+   std::array<uint16_t, 8> pre{};
+   std::array<uint16_t, 8> post{};
+   size_t pre_count = 0;
+   size_t post_count = 0;
+   bool seen_double_colon = false;
+
+   auto hex_value = [](char c) -> std::optional<uint8_t> {
+      if(c >= '0' && c <= '9') {
+         return c - '0';
+      } else if(c >= 'a' && c <= 'f') {
+         return 10 + (c - 'a');
+      } else if(c >= 'A' && c <= 'F') {
+         return 10 + (c - 'A');
+      } else {
+         return {};
+      }
+   };
+
+   size_t idx = 0;
+   bool expect_group = true;  // set after any separator, cleared after a group
+
+   while(idx < str.size()) {
+      if(str[idx] == ':') {
+         if(idx + 1 < str.size() && str[idx + 1] == ':') {
+            if(seen_double_colon) {
+               return {};  // at most one "::"
+            }
+            seen_double_colon = true;
+            idx += 2;
+            expect_group = (idx < str.size());
+            continue;
+         }
+         // single ':' separator between groups, only valid after a group
+         if(expect_group) {
+            return {};
+         }
+         expect_group = true;
+         idx += 1;
+         continue;
+      }
+
+      // Parse a hex group of 1..4 digits
+      const size_t group_start = idx;
+      uint32_t group = 0;
+      size_t hex_chars = 0;
+      while(idx < str.size() && hex_chars < 4) {
+         const auto digit = hex_value(str[idx]);
+         if(digit.has_value() == false) {
+            break;
+         }
+         group = (group << 4) | static_cast<uint32_t>(digit.value());
+         idx += 1;
+         hex_chars += 1;
+      }
+      if(hex_chars == 0) {
+         return {};
+      }
+      // If a 5th hex digit follows, the group is oversized.
+      if(hex_chars == 4 && idx < str.size() && hex_value(str[idx]).has_value()) {
+         return {};
+      }
+
+      /*
+      RFC 4291 2.2 allows the final 32 bits in dotted decimal, eg
+      "::ffff:1.2.3.4". The dotted quad must consume the remainder of the
+      input, and accounts for two 16-bit groups.
+      */
+      if(idx < str.size() && str[idx] == '.') {
+         const auto ipv4 = IPv4Address::from_string(str.substr(group_start));
+         if(!ipv4.has_value()) {
+            return {};
+         }
+         const uint32_t v4 = ipv4->address();
+         const std::array<uint16_t, 2> v4_groups{static_cast<uint16_t>(v4 >> 16), static_cast<uint16_t>(v4 & 0xFFFF)};
+         for(const auto g : v4_groups) {
+            if(seen_double_colon) {
+               if(post_count >= 8) {
+                  return {};
+               }
+               post[post_count++] = g;
+            } else {
+               if(pre_count >= 8) {
+                  return {};
+               }
+               pre[pre_count++] = g;
+            }
+         }
+         idx = str.size();
+         expect_group = false;
+         continue;
+      }
+
+      if(seen_double_colon) {
+         if(post_count >= 8) {
+            return {};
+         }
+         post[post_count++] = static_cast<uint16_t>(group);
+      } else {
+         if(pre_count >= 8) {
+            return {};
+         }
+         pre[pre_count++] = static_cast<uint16_t>(group);
+      }
+      expect_group = false;
+   }
+
+   // Trailing single ':' is invalid
+   if(expect_group) {
+      return {};
+   }
+
+   const size_t total_groups = pre_count + post_count;
+   if(seen_double_colon) {
+      // "::" has to cover at least one zero group
+      if(total_groups > 7) {
+         return {};
+      }
+   } else {
+      if(total_groups != 8) {
+         return {};
+      }
+   }
+
+   std::array<uint8_t, 16> out{};
+   for(size_t i = 0; i != pre_count; ++i) {
+      out[2 * i] = get_byte<0>(pre[i]);
+      out[2 * i + 1] = get_byte<1>(pre[i]);
+   }
+   const size_t gap = 8 - total_groups;
+   for(size_t i = 0; i != post_count; ++i) {
+      const size_t target = pre_count + gap + i;
+      out[2 * target] = get_byte<0>(post[i]);
+      out[2 * target + 1] = get_byte<1>(post[i]);
+   }
+   return IPv6Address(out);
 }
 
 //static
@@ -25383,7 +27205,73 @@ IPv6Address IPv6Address::netmask(size_t bits) {
 }
 
 std::string IPv6Address::to_string() const {
-   return ipv6_to_string(m_ip);
+   static const char* hex = "0123456789abcdef";
+
+   std::array<uint16_t, 8> groups{};
+   for(size_t i = 0; i != 8; ++i) {
+      groups[i] = make_uint16(m_ip[2 * i], m_ip[2 * i + 1]);
+   }
+
+   /*
+   Find the run of zero groups to elide with "::", per RFC 5952 4.2:
+   "The use of the symbol '::' MUST be used to its maximum capability",
+   "The symbol '::' MUST NOT be used to shorten just one 16-bit 0 field",
+   and on ties "the first sequence of zero bits MUST be shortened".
+   */
+   size_t best_start = 0;
+   size_t best_len = 0;
+   size_t run_len = 0;
+   for(size_t i = 0; i != 8; ++i) {
+      if(groups[i] == 0) {
+         run_len += 1;
+         if(run_len > best_len) {
+            best_len = run_len;
+            best_start = i + 1 - run_len;
+         }
+      } else {
+         run_len = 0;
+      }
+   }
+
+   std::string out;
+   out.reserve(39);
+
+   auto append_group = [&](uint16_t group) {
+      bool started = false;
+      // Write each nibble omitting leading 0s
+      for(int s = 12; s >= 0; s -= 4) {
+         const auto nibble = (group >> s) & 0xF;
+         if(nibble != 0 || started || s == 0) {
+            out.push_back(hex[nibble]);
+            started = true;
+         }
+      }
+   };
+
+   if(best_len < 2) {
+      // No run of two or more zero groups; write the full form
+      for(size_t i = 0; i != 8; ++i) {
+         if(i > 0) {
+            out.push_back(':');
+         }
+         append_group(groups[i]);
+      }
+   } else {
+      for(size_t i = 0; i != best_start; ++i) {
+         if(i > 0) {
+            out.push_back(':');
+         }
+         append_group(groups[i]);
+      }
+      out += "::";
+      for(size_t i = best_start + best_len; i != 8; ++i) {
+         if(i > best_start + best_len) {
+            out.push_back(':');
+         }
+         append_group(groups[i]);
+      }
+   }
+   return out;
 }
 
 IPv6Address IPv6Address::operator&(const IPv6Address& other) const {
@@ -25455,23 +27343,25 @@ std::optional<IPv6Subnet> IPv6Subnet::from_string(std::string_view str) {
       return std::nullopt;
    }
 
-   // Parse the prefix length as a decimal integer in [0, 128].
+   // Parse the prefix length as a canonical decimal integer in [0, 128]
    const auto plen_str = str.substr(slash + 1);
-   if(plen_str.empty() || plen_str.size() > 3) {
-      return std::nullopt;
-   }
-   size_t plen = 0;
-   for(const char c : plen_str) {
-      if(c < '0' || c > '9') {
-         return std::nullopt;
-      }
-      plen = plen * 10 + static_cast<size_t>(c - '0');
-   }
-   if(plen > 128) {
+
+   const auto plen = parse_sz(plen_str, /*require_canonical=*/true);
+
+   if(!plen.has_value() || plen.value() > 128) {
       return std::nullopt;
    }
 
-   return IPv6Subnet(*addr, plen);
+   const IPv6Subnet subnet(*addr, plen.value());
+
+   // Require the input to already be canonical: from_string and to_string are
+   // exact inverses, so a non-canonical address (including the IPv4-mapped
+   // dotted form) or a set host bit is rejected rather than masked away
+   if(subnet.to_string() != str) {
+      return std::nullopt;
+   }
+
+   return subnet;
 }
 
 bool IPv6Subnet::contains(const IPv6Address& ip) const {
@@ -25645,31 +27535,35 @@ std::unique_ptr<KDF> KDF::create(std::string_view algo_spec, std::string_view pr
 
 #if defined(BOTAN_HAS_SP800_56A)
    if(req.algo_name() == "SP800-56A" && req.arg_count() == 1) {
-      if(auto hash = HashFunction::create(req.arg(0))) {
-         return std::make_unique<SP800_56C_One_Step_Hash>(std::move(hash));
-      }
-      if(req.arg(0) == "KMAC-128") {
-         return std::make_unique<SP800_56C_One_Step_KMAC128>();
-      }
-      if(req.arg(0) == "KMAC-256") {
-         return std::make_unique<SP800_56C_One_Step_KMAC256>();
-      }
-      if(auto mac = MessageAuthenticationCode::create(req.arg(0))) {
-         return std::make_unique<SP800_56C_One_Step_HMAC>(std::move(mac));
+      if(provider.empty() || provider == "base") {
+         if(auto hash = HashFunction::create(req.arg(0))) {
+            return std::make_unique<SP800_56C_One_Step_Hash>(std::move(hash));
+         }
+         if(req.arg(0) == "KMAC-128") {
+            return std::make_unique<SP800_56C_One_Step_KMAC128>();
+         }
+         if(req.arg(0) == "KMAC-256") {
+            return std::make_unique<SP800_56C_One_Step_KMAC256>();
+         }
+         if(auto mac = MessageAuthenticationCode::create(req.arg(0))) {
+            return std::make_unique<SP800_56C_One_Step_HMAC>(std::move(mac));
+         }
       }
    }
 #endif
 
 #if defined(BOTAN_HAS_SP800_56C)
    if(req.algo_name() == "SP800-56C" && req.arg_count() == 1) {
-      std::unique_ptr<KDF> exp(kdf_create_mac_or_hash<SP800_108_Feedback>(req.arg(0), 32, 32));
-      if(exp) {
-         if(auto mac = MessageAuthenticationCode::create(req.arg(0))) {
-            return std::make_unique<SP800_56C_Two_Step>(std::move(mac), std::move(exp));
-         }
+      if(provider.empty() || provider == "base") {
+         std::unique_ptr<KDF> exp(kdf_create_mac_or_hash<SP800_108_Feedback>(req.arg(0), 32, 32));
+         if(exp) {
+            if(auto mac = MessageAuthenticationCode::create(fmt("HMAC({})", req.arg(0)))) {
+               return std::make_unique<SP800_56C_Two_Step>(std::move(mac), std::move(exp));
+            }
 
-         if(auto mac = MessageAuthenticationCode::create(fmt("HMAC({})", req.arg(0)))) {
-            return std::make_unique<SP800_56C_Two_Step>(std::move(mac), std::move(exp));
+            if(auto mac = MessageAuthenticationCode::create(req.arg(0))) {
+               return std::make_unique<SP800_56C_Two_Step>(std::move(mac), std::move(exp));
+            }
          }
       }
    }
@@ -25818,7 +27712,9 @@ std::unique_ptr<MessageAuthenticationCode> MessageAuthenticationCode::create(std
 
 #if defined(BOTAN_HAS_BLAKE2BMAC)
    if(req.algo_name() == "Blake2b" || req.algo_name() == "BLAKE2b") {
-      return std::make_unique<BLAKE2bMAC>(req.arg_as_integer(0, 512));
+      if(provider.empty() || provider == "base") {
+         return std::make_unique<BLAKE2bMAC>(req.arg_as_integer(0, 512));
+      }
    }
 #endif
 
@@ -25917,13 +27813,6 @@ std::unique_ptr<MessageAuthenticationCode> MessageAuthenticationCode::create_or_
    throw Lookup_Error("MAC", algo, provider);
 }
 
-void MessageAuthenticationCode::start_msg(std::span<const uint8_t> nonce) {
-   BOTAN_UNUSED(nonce);
-   if(!nonce.empty()) {
-      throw Invalid_IV_Length(name(), nonce.size());
-   }
-}
-
 /*
 * Default (deterministic) MAC verification operation
 */
@@ -25950,6 +27839,12 @@ bool MessageAuthenticationCode::verify_mac_result(std::span<const uint8_t> mac) 
 
 
 namespace Botan {
+
+size_t BlockCipherModePaddingMethod::output_length(size_t input_length, size_t block_size) const {
+   // Round input_length down to a multiple of block_size then add a full block
+   const size_t full_blocks = input_length - (input_length % block_size);
+   return add_or_throw(full_blocks, block_size, "Input too large to pad");
+}
 
 /**
 * Get a block cipher padding method by name
@@ -26241,6 +28136,9 @@ std::unique_ptr<Cipher_Mode> Cipher_Mode::create(std::string_view algo,
 
    if(algo.find('/') != std::string::npos) {
       const std::vector<std::string> algo_parts = split_on(algo, '/');
+      if(algo_parts.size() < 2) {
+         return std::unique_ptr<Cipher_Mode>();
+      }
       const std::string_view cipher_name = algo_parts[0];
       const std::vector<std::string> mode_info = parse_algorithm_name(algo_parts[1]);
 
@@ -31730,6 +33628,7 @@ std::vector<uint8_t> generate_dsa_primes(RandomNumberGenerator& rng, BigInt& p, 
 */
 
 
+#include <numeric>
 
 namespace Botan {
 
@@ -31818,61 +33717,21 @@ bool no_small_multiples(const BigInt& v, const Prime_Sieve& sieve) {
 
 #endif
 
-}  // namespace
-
-/*
-* Generate a random prime
-*/
-BigInt random_prime(
-   RandomNumberGenerator& rng, size_t bits, const BigInt& coprime, size_t equiv, size_t modulo, size_t prob) {
-   if(bits <= 1) {
-      throw Invalid_Argument("random_prime: Can't make a prime of " + std::to_string(bits) + " bits");
-   }
-   if(coprime.signum() < 0 || (coprime.signum() != 0 && coprime.is_even()) || coprime.bits() >= bits) {
-      throw Invalid_Argument("random_prime: invalid coprime");
-   }
-   // TODO(Botan4) reduce this to ~1000
-   if(modulo == 0 || modulo >= 100000) {
-      throw Invalid_Argument("random_prime: Invalid modulo value");
-   }
-
-   equiv %= modulo;
-
-   if(equiv == 0) {
-      throw Invalid_Argument("random_prime Invalid value for equiv/modulo");
-   }
-
-   // Handle small values:
-
-   if(bits <= 16) {
-      if(equiv != 1 || modulo != 2 || coprime != 0) {
-         throw Not_Implemented("random_prime equiv/modulo/coprime options not usable for small primes");
-      }
-
-      if(bits == 2) {
-         return BigInt::from_word(((rng.next_byte() % 2) == 0 ? 2 : 3));
-      } else if(bits == 3) {
-         return BigInt::from_word(((rng.next_byte() % 2) == 0 ? 5 : 7));
-      } else if(bits == 4) {
-         return BigInt::from_word(((rng.next_byte() % 2) == 0 ? 11 : 13));
-      } else {
-         for(;;) {
-            // This is slightly biased, but for small primes it does not seem to matter
-            uint8_t b[4] = {0};
-            rng.randomize(b, 4);
-            const size_t idx = load_le<uint32_t>(b, 0) % PRIME_TABLE_SIZE;
-            const uint16_t small_prime = PRIMES[idx];
-
-            if(high_bit(small_prime) == bits) {
-               return BigInt::from_word(small_prime);
-            }
-         }
-      }
-   }
-
+BigInt random_prime_with_sieve(RandomNumberGenerator& rng,
+                               size_t bits,
+                               const BigInt& coprime,
+                               size_t equiv,
+                               size_t modulo,
+                               size_t prob,
+                               bool sieve_check_2p1) {
    const size_t MAX_ATTEMPTS = 32 * 1024;
 
    const size_t mr_trials = miller_rabin_test_iterations(bits, prob, true);
+
+   // Variable time gcd here is fine since these are generation parameters, not secrets
+   if(std::gcd(equiv, modulo) != 1) {
+      throw Invalid_Argument("random_prime equiv and modulo must be relatively prime");
+   }
 
    while(true) {
       BigInt p(rng, bits);
@@ -31885,7 +33744,7 @@ BigInt random_prime(
       // Force p to be equal to equiv mod modulo
       p += (modulo - (p % modulo)) + equiv;
 
-      Prime_Sieve sieve(p, bits, modulo, true);
+      Prime_Sieve sieve(p, bits, modulo, sieve_check_2p1);
 
       for(size_t attempt = 0; attempt <= MAX_ATTEMPTS; ++attempt) {
          p += modulo;
@@ -31937,6 +33796,65 @@ BigInt random_prime(
          return p;
       }
    }
+}
+
+}  // namespace
+
+/*
+* Generate a random prime
+*/
+BigInt random_prime(
+   RandomNumberGenerator& rng, size_t bits, const BigInt& coprime, size_t equiv, size_t modulo, size_t prob) {
+   if(bits <= 1) {
+      throw Invalid_Argument("random_prime: Can't make a prime of " + std::to_string(bits) + " bits");
+   }
+   if(coprime.signum() < 0 || (coprime.signum() != 0 && coprime.is_even()) || coprime.bits() >= bits) {
+      throw Invalid_Argument("random_prime: invalid coprime");
+   }
+   // TODO(Botan4) reduce this to ~1000
+   if(modulo == 0 || modulo >= 100000) {
+      throw Invalid_Argument("random_prime: Invalid modulo value");
+   }
+
+   // TODO(Botan4) reject equiv > modulo instead of reducing here
+   equiv %= modulo;
+
+   if(equiv == 0) {
+      throw Invalid_Argument("random_prime Invalid value for equiv/modulo");
+   }
+
+   // Handle small values:
+
+   if(bits <= 16) {
+      if(equiv != 1 || modulo != 2 || coprime != 0) {
+         throw Not_Implemented("random_prime equiv/modulo/coprime options not usable for small primes");
+      }
+
+      if(bits == 2) {
+         return BigInt::from_word(((rng.next_byte() % 2) == 0 ? 2 : 3));
+      } else if(bits == 3) {
+         return BigInt::from_word(((rng.next_byte() % 2) == 0 ? 5 : 7));
+      } else if(bits == 4) {
+         return BigInt::from_word(((rng.next_byte() % 2) == 0 ? 11 : 13));
+      } else {
+         for(;;) {
+            // This is slightly biased, but for small primes it does not seem to matter
+            uint8_t b[4] = {0};
+            rng.randomize(b, 4);
+            const size_t idx = load_le<uint32_t>(b, 0) % PRIME_TABLE_SIZE;
+            const uint16_t small_prime = PRIMES[idx];
+
+            if(high_bit(small_prime) == bits) {
+               return BigInt::from_word(small_prime);
+            }
+         }
+      }
+   }
+
+   // The check_2p1 sieve filter is only appropriate when generating q for a
+   // safe prime; for arbitrary equiv/modulo it can pre-reject every candidate
+   // (eg equiv=1, modulo=3 makes the residue mod 3 always equal (3-1)/2).
+   return random_prime_with_sieve(rng, bits, coprime, equiv, modulo, prob, false);
 }
 
 BigInt generate_rsa_prime(RandomNumberGenerator& keygen_rng,
@@ -32039,7 +33957,7 @@ BigInt random_safe_prime(RandomNumberGenerator& rng, size_t bits) {
       Generate q == 2 (mod 3), since otherwise [in the case of q == 1 (mod 3)],
       2*q+1 == 3 (mod 3) and so certainly not prime.
       */
-      q = random_prime(rng, bits - 1, BigInt::zero(), 2, 3, error_bound);
+      q = random_prime_with_sieve(rng, bits - 1, BigInt::zero(), 2, 3, error_bound, true);
       p = (q << 1) + 1;
 
       if(is_prime(p, rng, error_bound, true)) {
@@ -32443,6 +34361,7 @@ BigInt inverse_mod(const BigInt& n, const BigInt& mod) {
 */
 
 
+#include <functional>
 
 namespace Botan {
 
@@ -32451,6 +34370,20 @@ namespace {
 // If the modulus is at most this many words, then use the stack instead
 // of a heap variable for some temporary values
 constexpr size_t MontgomeryUseStackLimit = 32;
+
+/*
+* The typed std::less<T*> specialization gives a strict total order on pointers
+* of the same type even when they belong to different allocations (while direct
+* < and > on raw pointers are only specified within a single array object).
+* The transparent std::less<> forwards to <, so it is unsuitable here.
+*/
+bool ranges_overlap(const word* a, size_t na, const word* b, size_t nb) {
+   if(na == 0 || nb == 0) {
+      return false;
+   }
+   const std::less<const word*> lt;  // NOLINT(modernize-use-transparent-functors)
+   return lt(a, b + nb) && lt(b, a + na);
+}
 
 }  // namespace
 
@@ -32512,6 +34445,8 @@ BigInt Montgomery_Params::mul(const BigInt& x, const BigInt& y, secure_vector<wo
 }
 
 void Montgomery_Params::mul(BigInt& z, const BigInt& x, const BigInt& y, secure_vector<word>& ws) const {
+   BOTAN_ARG_CHECK(&z != &x && &z != &y, "Montgomery_Params::mul output must not alias inputs");
+
    const size_t p_size = this->p_words();
 
    if(ws.size() < 2 * p_size) {
@@ -32540,6 +34475,10 @@ void Montgomery_Params::mul(BigInt& z, const BigInt& x, const BigInt& y, secure_
 }
 
 void Montgomery_Params::mul(BigInt& z, const BigInt& x, std::span<const word> y, secure_vector<word>& ws) const {
+   BOTAN_ARG_CHECK(&z != &x, "Montgomery_Params::mul output must not alias x");
+   BOTAN_ARG_CHECK(!ranges_overlap(z._data(), z.size(), y.data(), y.size()),
+                   "Montgomery_Params::mul output must not overlap y");
+
    const size_t p_size = this->p_words();
 
    if(ws.size() < 2 * p_size) {
@@ -32609,10 +34548,14 @@ BigInt Montgomery_Params::sqr(std::span<const word> x, secure_vector<word>& ws) 
 }
 
 void Montgomery_Params::sqr(BigInt& z, const BigInt& x, secure_vector<word>& ws) const {
+   BOTAN_ARG_CHECK(&z != &x, "Montgomery_Params::sqr output must not alias input");
    this->sqr(z, std::span{x._data(), x.size()}, ws);
 }
 
 void Montgomery_Params::sqr(BigInt& z, std::span<const word> x, secure_vector<word>& ws) const {
+   BOTAN_ARG_CHECK(!ranges_overlap(z._data(), z.size(), x.data(), x.size()),
+                   "Montgomery_Params::sqr output must not overlap input");
+
    const size_t p_size = this->p_words();
 
    if(ws.size() < 2 * p_size) {
@@ -32627,6 +34570,8 @@ void Montgomery_Params::sqr(BigInt& z, std::span<const word> x, secure_vector<wo
 
    bigint_monty_redc_inplace(z.mutable_data(), this->p()._data(), p_size, this->p_dash(), ws.data(), ws.size());
 }
+
+Montgomery_Int::Montgomery_Int(const Montgomery_Params& params) : m_params(params), m_v(m_params.p_words()) {}
 
 Montgomery_Int::Montgomery_Int(const Montgomery_Params& params, secure_vector<word> words) :
       m_params(params), m_v(std::move(words)) {
@@ -32645,7 +34590,7 @@ Montgomery_Int Montgomery_Int::from_wide_int(const Montgomery_Params& params, co
 
 Montgomery_Int::Montgomery_Int(const Montgomery_Params& params, const BigInt& v, bool redc_needed) :
       m_params(params), m_v(m_params.p_words()) {
-   BOTAN_ASSERT_NOMSG(v < m_params.p());
+   BOTAN_ARG_CHECK(v.signum() >= 0 && v < m_params.p(), "Input out of range");
 
    const size_t p_size = m_params.p_words();
 
@@ -32895,6 +34840,7 @@ void const_time_lookup(secure_vector<word>& output, const std::vector<Montgomery
 }  // namespace
 
 Montgomery_Int Montgomery_Exponentiation_State::exponentiation(const BigInt& scalar, size_t max_k_bits) const {
+   BOTAN_ARG_CHECK(scalar.signum() >= 0, "Invalid scalar for Montgomery exponentiation");
    BOTAN_DEBUG_ASSERT(scalar.bits() <= max_k_bits);
    // TODO add a const-time implementation of above assert and use it in release builds
 
@@ -32954,7 +34900,7 @@ std::shared_ptr<const Montgomery_Exponentiation_State> monty_precompute(const Mo
                                                                         const BigInt& g,
                                                                         size_t window_bits,
                                                                         bool const_time) {
-   BOTAN_ARG_CHECK(g < params.p(), "Montgomery base too big");
+   BOTAN_ARG_CHECK(g.signum() >= 0 && g < params.p(), "Montgomery exponentiation base integer out of range");
    const Montgomery_Int monty_g(params, g);
    return monty_precompute(monty_g, window_bits, const_time);
 }
@@ -33296,11 +35242,11 @@ BigInt gcd(const BigInt& a, const BigInt& b) {
       factors_of_two += (u_is_even & v_is_even).if_set_return(1);
 
       // remove one factor of 2, if u is even
-      bigint_shr2(tmp.mutable_data(), u._data(), sz, 1);
+      bigint_shr2(tmp.mutable_data(), sz, u._data(), sz, 1);
       u.ct_cond_assign(u_is_even.as_bool(), tmp);
 
       // remove one factor of 2, if v is even
-      bigint_shr2(tmp.mutable_data(), v._data(), sz, 1);
+      bigint_shr2(tmp.mutable_data(), sz, v._data(), sz, 1);
       v.ct_cond_assign(v_is_even.as_bool(), tmp);
    }
 
@@ -33621,6 +35567,11 @@ bool is_miller_rabin_probable_prime(const BigInt& n,
 }
 
 size_t miller_rabin_test_iterations(size_t n_bits, size_t prob, bool random) {
+   // Cap prob at 512 bits as _way_ more than enough; a random fault causing
+   // false accept is much more likely to occur than an actual 2^-512 event is.
+
+   prob = std::min<size_t>(512, prob);
+
    const size_t base = (prob + 2) / 2;  // worst case 4^-t error rate
 
    /*
@@ -34584,10 +36535,8 @@ bool OS::read_env_variable(std::string& value_out, std::string_view name_view) {
 size_t OS::read_env_variable_sz(std::string_view name, size_t def) {
    std::string value;
    if(read_env_variable(value, name) && !value.empty()) {
-      try {
-         const size_t val = std::stoul(value, nullptr);
-         return val;
-      } catch(std::exception&) { /* ignore it */
+      if(const auto sz = parse_sz(value)) {
+         return *sz;
       }
    }
 
@@ -34976,176 +36925,314 @@ namespace Botan {
 
 namespace {
 
+class Pbes2KdfParameters {
+   public:
+      virtual ~Pbes2KdfParameters() = default;
+      Pbes2KdfParameters(const Pbes2KdfParameters& other) = delete;
+      Pbes2KdfParameters(Pbes2KdfParameters&& other) = delete;
+      Pbes2KdfParameters& operator=(const Pbes2KdfParameters& other) = delete;
+      Pbes2KdfParameters& operator=(Pbes2KdfParameters&& other) = delete;
+
+      static std::unique_ptr<Pbes2KdfParameters> decode(const AlgorithmIdentifier& alg_id);
+
+      static std::unique_ptr<Pbes2KdfParameters> tune(std::string_view digest,
+                                                      RandomNumberGenerator& rng,
+                                                      size_t key_length,
+                                                      size_t* msec_in_iterations_out,
+                                                      size_t iterations_if_msec_null);
+
+      secure_vector<uint8_t> derive_key(std::string_view passphrase, size_t default_key_size) const;
+
+      virtual AlgorithmIdentifier algorithm_identifier(bool include_key_length) const = 0;
+
+   protected:
+      static constexpr size_t DefaultSaltBytes = 16;
+
+      const PasswordHash& pwdhash() const { return *m_pwdhash; }
+
+      std::optional<size_t> key_length() const { return m_key_length; }
+
+      std::span<const uint8_t> salt() const { return m_salt; }
+
+      Pbes2KdfParameters(std::vector<uint8_t> salt,
+                         std::optional<size_t> key_length,
+                         std::unique_ptr<PasswordHash> pwdhash) :
+            m_salt(std::move(salt)), m_key_length(key_length), m_pwdhash(std::move(pwdhash)) {}
+
+      static std::vector<uint8_t> generate_salt(RandomNumberGenerator& rng) {
+         return rng.random_vec<std::vector<uint8_t>>(DefaultSaltBytes);
+      }
+
+      static void validate_pbes2_params(size_t salt_len, std::optional<size_t> key_length) {
+         if(key_length && (key_length.value() < 8 || key_length.value() >= 256)) {
+            throw Decoding_Error(fmt("PBES2: Encoded key length ({}) is invalid", key_length.value()));
+         }
+         if(salt_len < 8) {
+            throw Decoding_Error("PBES2: Encoded salt is too small");
+         }
+      }
+
+   private:
+      std::vector<uint8_t> m_salt;
+      std::optional<size_t> m_key_length;
+      std::unique_ptr<PasswordHash> m_pwdhash;
+};
+
+class Pbes2Pbkdf2Parameters final : public Pbes2KdfParameters {
+   public:
+      static std::unique_ptr<Pbes2Pbkdf2Parameters> decode(const AlgorithmIdentifier& kdf_algo);
+
+      static std::unique_ptr<Pbes2Pbkdf2Parameters> tune(std::string_view digest,
+                                                         RandomNumberGenerator& rng,
+                                                         size_t key_length,
+                                                         size_t* msec_in_iterations_out,
+                                                         size_t iterations_if_msec_null);
+
+      Pbes2Pbkdf2Parameters(std::vector<uint8_t> salt,
+                            std::optional<size_t> key_length,
+                            std::unique_ptr<PasswordHash> pwdhash,
+                            std::string prf) :
+            Pbes2KdfParameters(std::move(salt), key_length, std::move(pwdhash)), m_prf(std::move(prf)) {}
+
+      AlgorithmIdentifier algorithm_identifier(bool include_key_length) const override;
+
+   private:
+      static void validate_params(size_t iterations);
+
+      std::string m_prf;
+};
+
+class Pbes2ScryptParameters final : public Pbes2KdfParameters {
+   public:
+      static std::unique_ptr<Pbes2ScryptParameters> decode(const AlgorithmIdentifier& kdf_algo);
+
+      static std::unique_ptr<Pbes2ScryptParameters> tune(RandomNumberGenerator& rng,
+                                                         size_t key_length,
+                                                         size_t* msec_in_iterations_out,
+                                                         size_t iterations_if_msec_null);
+
+      Pbes2ScryptParameters(std::vector<uint8_t> salt,
+                            std::optional<size_t> key_length,
+                            std::unique_ptr<PasswordHash> pwdhash) :
+            Pbes2KdfParameters(std::move(salt), key_length, std::move(pwdhash)) {}
+
+      AlgorithmIdentifier algorithm_identifier(bool include_key_length) const override;
+
+   private:
+      static void validate_params(size_t N, size_t r, size_t p);
+};
+
+/* Dispatching */
+
+secure_vector<uint8_t> Pbes2KdfParameters::derive_key(std::string_view passphrase, size_t default_key_size) const {
+   const size_t kl = m_key_length.value_or(default_key_size);
+   secure_vector<uint8_t> key(kl);
+   m_pwdhash->hash(key, passphrase, m_salt);
+   return key;
+}
+
+std::unique_ptr<Pbes2KdfParameters> Pbes2KdfParameters::tune(std::string_view digest,
+                                                             RandomNumberGenerator& rng,
+                                                             size_t key_length,
+                                                             size_t* msec_in_iterations_out,
+                                                             size_t iterations_if_msec_null) {
+   if(digest == "Scrypt") {
+      return Pbes2ScryptParameters::tune(rng, key_length, msec_in_iterations_out, iterations_if_msec_null);
+   } else {
+      return Pbes2Pbkdf2Parameters::tune(digest, rng, key_length, msec_in_iterations_out, iterations_if_msec_null);
+   }
+}
+
+std::unique_ptr<Pbes2KdfParameters> Pbes2KdfParameters::decode(const AlgorithmIdentifier& kdf_algo) {
+   if(kdf_algo.oid() == OID::from_string("PKCS5.PBKDF2")) {
+      return Pbes2Pbkdf2Parameters::decode(kdf_algo);
+   } else if(kdf_algo.oid() == OID::from_string("Scrypt")) {
+      return Pbes2ScryptParameters::decode(kdf_algo);
+   } else {
+      throw Decoding_Error(fmt("PBES2 unknown or unhandled KDF algorithm '{}'", kdf_algo.oid()));
+   }
+}
+
+/* PBES2 PBKDF2 handling */
+
+std::unique_ptr<Pbes2Pbkdf2Parameters> Pbes2Pbkdf2Parameters::tune(std::string_view digest,
+                                                                   RandomNumberGenerator& rng,
+                                                                   size_t key_length,
+                                                                   size_t* msec_in_iterations_out,
+                                                                   size_t iterations_if_msec_null) {
+   const std::string prf = fmt("HMAC({})", digest);
+
+   auto pwhash_fam = PasswordHashFamily::create(fmt("PBKDF2({})", prf));
+   if(!pwhash_fam) {
+      throw Invalid_Argument(fmt("Unknown password hash digest {}", digest));
+   }
+
+   std::unique_ptr<PasswordHash> pwhash;
+   if(msec_in_iterations_out != nullptr) {
+      pwhash = pwhash_fam->tune_params(key_length, *msec_in_iterations_out);
+      *msec_in_iterations_out = pwhash->iterations();
+   } else {
+      pwhash = pwhash_fam->from_iterations(iterations_if_msec_null);
+   }
+
+   // Ensure we will accept these same parameters when decoding
+   validate_params(pwhash->iterations());
+
+   return std::make_unique<Pbes2Pbkdf2Parameters>(generate_salt(rng), key_length, std::move(pwhash), prf);
+}
+
+//static
+void Pbes2Pbkdf2Parameters::validate_params(size_t iterations) {
+   // NSS, AWS-LC, and BoringSSL all allow up to exactly 100 million for this operation
+   constexpr size_t MaximumPbes2Pbkdf2Iterations = 100'000'000;
+
+   if(iterations == 0 || iterations > MaximumPbes2Pbkdf2Iterations) {
+      throw Decoding_Error(fmt("PBES2: Invalid or unacceptable PBKDF2 iteration count ({})", iterations));
+   }
+}
+
+std::unique_ptr<Pbes2Pbkdf2Parameters> Pbes2Pbkdf2Parameters::decode(const AlgorithmIdentifier& kdf_algo) {
+   std::vector<uint8_t> salt;
+   size_t iterations = 0;
+   std::optional<size_t> key_length;
+
+   AlgorithmIdentifier prf_algo;
+   BER_Decoder(kdf_algo.parameters(), BER_Decoder::Limits::DER())
+      .start_sequence()
+      .decode(salt, ASN1_Type::OctetString)
+      .decode(iterations)
+      .decode_optional(key_length, ASN1_Type::Integer, ASN1_Class::Universal)
+      .decode_optional(prf_algo,
+                       ASN1_Type::Sequence,
+                       ASN1_Class::Constructed,
+                       AlgorithmIdentifier("HMAC(SHA-1)", AlgorithmIdentifier::USE_NULL_PARAM))
+      .end_cons()
+      .verify_end();
+
+   validate_pbes2_params(salt.size(), key_length);
+   validate_params(iterations);
+
+   const std::string prf = [&]() {
+      if(const auto name = prf_algo.oid().registered_name()) {
+         if(name->starts_with("HMAC")) {
+            return *name;
+         }
+      }
+
+      throw Decoding_Error(fmt("Unknown PBES2 PRF '{}'", prf_algo.oid()));
+   }();
+
+   // RFC 8018 A.2 defines the PBKDF2 PRFs with NULL parameters; accept NULL or
+   // absent and reject any other parameter encoding rather than ignoring it.
+   if(!prf_algo.parameters_are_null_or_empty()) {
+      throw Decoding_Error("PBES2 PRF AlgorithmIdentifier has unexpected parameters");
+   }
+
+   auto pbkdf_fam = PasswordHashFamily::create_or_throw(fmt("PBKDF2({})", prf));
+   auto pwdhash = pbkdf_fam->from_params(iterations);
+
+   return std::make_unique<Pbes2Pbkdf2Parameters>(std::move(salt), key_length, std::move(pwdhash), prf);
+}
+
+AlgorithmIdentifier Pbes2Pbkdf2Parameters::algorithm_identifier(bool include_key_length) const {
+   std::vector<uint8_t> params;
+   DER_Encoder(params)
+      .start_sequence()
+      .encode(salt(), ASN1_Type::OctetString)
+      .encode(pwdhash().iterations())
+      .encode_if(include_key_length && key_length().has_value(), key_length().value_or(0))
+      .encode_if(m_prf != "HMAC(SHA-1)", AlgorithmIdentifier(m_prf, AlgorithmIdentifier::USE_NULL_PARAM))
+      .end_cons();
+   return AlgorithmIdentifier("PKCS5.PBKDF2", params);
+}
+
+/* PBES2 Scrypt handling */
+
+std::unique_ptr<Pbes2ScryptParameters> Pbes2ScryptParameters::tune(RandomNumberGenerator& rng,
+                                                                   size_t key_length,
+                                                                   size_t* msec_in_iterations_out,
+                                                                   size_t iterations_if_msec_null) {
+   auto pwhash_fam = PasswordHashFamily::create_or_throw("Scrypt");
+
+   std::unique_ptr<PasswordHash> pwhash;
+   if(msec_in_iterations_out != nullptr) {
+      pwhash = pwhash_fam->tune_params(key_length, *msec_in_iterations_out);
+      *msec_in_iterations_out = 0;
+   } else {
+      pwhash = pwhash_fam->from_iterations(iterations_if_msec_null);
+   }
+
+   // Ensure we will accept these same parameters when decoding
+   validate_params(pwhash->memory_param(), pwhash->iterations(), pwhash->parallelism());
+
+   return std::make_unique<Pbes2ScryptParameters>(generate_salt(rng), key_length, std::move(pwhash));
+}
+
+//static
+void Pbes2ScryptParameters::validate_params(size_t N, size_t r, size_t p) {
+   if(N <= 1 || N > 4194304 || !is_power_of_2(N)) {
+      throw Decoding_Error(fmt("PBES2: Invalid or unacceptable Scrypt parameter N ({})", N));
+   }
+   if(r == 0 || r > 64) {
+      throw Decoding_Error(fmt("PBES2: Invalid or unacceptable Scrypt parameter r ({})", r));
+   }
+   if(p == 0 || p >= 1024) {
+      throw Decoding_Error(fmt("PBES2: Invalid or unacceptable Scrypt parameter p ({})", p));
+   }
+
+   /*
+   * Practically speaking this work limit aligns relatively closely to the 100 million
+   * iteration limit applied in PBES2 and PKCS12
+   */
+   const uint64_t scrypt_work = uint64_t(N) * r * p;
+   constexpr uint64_t MaximumPbes2ScryptWork = (1 << 26);
+
+   if(scrypt_work > MaximumPbes2ScryptWork) {
+      throw Decoding_Error(fmt("PBES2: Invalid or unacceptable Scrypt parameters N={} r={} p={}", N, r, p));
+   }
+}
+
+std::unique_ptr<Pbes2ScryptParameters> Pbes2ScryptParameters::decode(const AlgorithmIdentifier& kdf_algo) {
+   std::vector<uint8_t> salt;
+   size_t N = 0;
+   size_t r = 0;
+   size_t p = 0;
+   std::optional<size_t> key_length;
+
+   BER_Decoder(kdf_algo.parameters(), BER_Decoder::Limits::DER())
+      .start_sequence()
+      .decode(salt, ASN1_Type::OctetString)
+      .decode(N)
+      .decode(r)
+      .decode(p)
+      .decode_optional(key_length, ASN1_Type::Integer, ASN1_Class::Universal)
+      .end_cons()
+      .verify_end();
+
+   validate_pbes2_params(salt.size(), key_length);
+   validate_params(N, r, p);
+
+   auto pwdhash_fam = PasswordHashFamily::create_or_throw("Scrypt");
+   auto pwdhash = pwdhash_fam->from_params(N, r, p);
+
+   return std::make_unique<Pbes2ScryptParameters>(std::move(salt), key_length, std::move(pwdhash));
+}
+
+AlgorithmIdentifier Pbes2ScryptParameters::algorithm_identifier(bool include_key_length) const {
+   std::vector<uint8_t> params;
+   DER_Encoder(params)
+      .start_sequence()
+      .encode(salt(), ASN1_Type::OctetString)
+      .encode(pwdhash().memory_param())
+      .encode(pwdhash().iterations())
+      .encode(pwdhash().parallelism())
+      .encode_if(include_key_length && key_length().has_value(), key_length().value_or(0))
+      .end_cons();
+   return AlgorithmIdentifier(OID::from_string("Scrypt"), params);
+}
+
 bool known_pbes_cipher_mode(std::string_view mode) {
    return (mode == "CBC" || mode == "GCM" || mode == "SIV");
-}
-
-secure_vector<uint8_t> derive_key(std::string_view passphrase,
-                                  const AlgorithmIdentifier& kdf_algo,
-                                  size_t default_key_size) {
-   if(kdf_algo.oid() == OID::from_string("PKCS5.PBKDF2")) {
-      secure_vector<uint8_t> salt;
-      size_t iterations = 0;
-      size_t key_length = 0;
-
-      AlgorithmIdentifier prf_algo;
-      BER_Decoder(kdf_algo.parameters(), BER_Decoder::Limits::DER())
-         .start_sequence()
-         .decode(salt, ASN1_Type::OctetString)
-         .decode(iterations)
-         .decode_optional(key_length, ASN1_Type::Integer, ASN1_Class::Universal)
-         .decode_optional(prf_algo,
-                          ASN1_Type::Sequence,
-                          ASN1_Class::Constructed,
-                          AlgorithmIdentifier("HMAC(SHA-1)", AlgorithmIdentifier::USE_NULL_PARAM))
-         .end_cons()
-         .verify_end();
-
-      if(iterations == 0) {
-         throw Decoding_Error("PBE-PKCS5 v2.0: Iteration count must be positive");
-      }
-
-      if(salt.size() < 8) {
-         throw Decoding_Error("PBE-PKCS5 v2.0: Encoded salt is too small");
-      }
-
-      if(key_length == 0) {
-         key_length = default_key_size;
-      }
-
-      const std::string prf = prf_algo.oid().human_name_or_empty();
-      if(prf.empty() || !prf.starts_with("HMAC")) {
-         throw Decoding_Error(fmt("Unknown PBES2 PRF {}", prf_algo.oid()));
-      }
-
-      auto pbkdf_fam = PasswordHashFamily::create_or_throw(fmt("PBKDF2({})", prf));
-      auto pbkdf = pbkdf_fam->from_params(iterations);
-
-      secure_vector<uint8_t> derived_key(key_length);
-      pbkdf->hash(derived_key, passphrase, salt);
-      return derived_key;
-   } else if(kdf_algo.oid() == OID::from_string("Scrypt")) {
-      secure_vector<uint8_t> salt;
-      size_t N = 0;
-      size_t r = 0;
-      size_t p = 0;
-      size_t key_length = 0;
-
-      const AlgorithmIdentifier prf_algo;
-      BER_Decoder(kdf_algo.parameters(), BER_Decoder::Limits::DER())
-         .start_sequence()
-         .decode(salt, ASN1_Type::OctetString)
-         .decode(N)
-         .decode(r)
-         .decode(p)
-         .decode_optional(key_length, ASN1_Type::Integer, ASN1_Class::Universal)
-         .end_cons()
-         .verify_end();
-
-      if(N == 0 || r == 0 || p == 0) {
-         throw Decoding_Error("PBE-PKCS5 v2.0: Invalid Scrypt parameters");
-      }
-
-      if(key_length == 0) {
-         key_length = default_key_size;
-      }
-
-      secure_vector<uint8_t> derived_key(key_length);
-
-      auto pwdhash_fam = PasswordHashFamily::create_or_throw("Scrypt");
-      auto pwdhash = pwdhash_fam->from_params(N, r, p);
-      pwdhash->hash(derived_key, passphrase, salt);
-
-      return derived_key;
-   } else {
-      throw Decoding_Error(fmt("PBE-PKCS5 v2.0: Unknown KDF algorithm {}", kdf_algo.oid()));
-   }
-}
-
-secure_vector<uint8_t> derive_key(std::string_view passphrase,
-                                  std::string_view digest,
-                                  RandomNumberGenerator& rng,
-                                  size_t* msec_in_iterations_out,
-                                  size_t iterations_if_msec_null,
-                                  size_t key_length,
-                                  bool include_key_length_in_struct,
-                                  AlgorithmIdentifier& kdf_algo) {
-   const size_t salt_len = 16;
-   const secure_vector<uint8_t> salt = rng.random_vec(salt_len);
-
-   if(digest == "Scrypt") {
-      auto pwhash_fam = PasswordHashFamily::create_or_throw("Scrypt");
-
-      std::unique_ptr<PasswordHash> pwhash;
-
-      if(msec_in_iterations_out != nullptr) {
-         pwhash = pwhash_fam->tune_params(key_length, *msec_in_iterations_out);
-      } else {
-         pwhash = pwhash_fam->from_iterations(iterations_if_msec_null);
-      }
-
-      secure_vector<uint8_t> key(key_length);
-      pwhash->hash(key, passphrase, salt);
-
-      const size_t N = pwhash->memory_param();
-      const size_t r = pwhash->iterations();
-      const size_t p = pwhash->parallelism();
-
-      if(msec_in_iterations_out != nullptr) {
-         *msec_in_iterations_out = 0;
-      }
-
-      std::vector<uint8_t> scrypt_params;
-      DER_Encoder(scrypt_params)
-         .start_sequence()
-         .encode(salt, ASN1_Type::OctetString)
-         .encode(N)
-         .encode(r)
-         .encode(p)
-         .encode_if(include_key_length_in_struct, key_length)
-         .end_cons();
-
-      kdf_algo = AlgorithmIdentifier(OID::from_string("Scrypt"), scrypt_params);
-      return key;
-   } else {
-      const std::string prf = fmt("HMAC({})", digest);
-      const std::string pbkdf_name = fmt("PBKDF2({})", prf);
-
-      auto pwhash_fam = PasswordHashFamily::create(pbkdf_name);
-      if(!pwhash_fam) {
-         throw Invalid_Argument(fmt("Unknown password hash digest {}", digest));
-      }
-
-      std::unique_ptr<PasswordHash> pwhash;
-
-      if(msec_in_iterations_out != nullptr) {
-         pwhash = pwhash_fam->tune_params(key_length, *msec_in_iterations_out);
-      } else {
-         pwhash = pwhash_fam->from_iterations(iterations_if_msec_null);
-      }
-
-      secure_vector<uint8_t> key(key_length);
-      pwhash->hash(key, passphrase, salt);
-
-      std::vector<uint8_t> pbkdf2_params;
-
-      const size_t iterations = pwhash->iterations();
-
-      if(msec_in_iterations_out != nullptr) {
-         *msec_in_iterations_out = iterations;
-      }
-
-      DER_Encoder(pbkdf2_params)
-         .start_sequence()
-         .encode(salt, ASN1_Type::OctetString)
-         .encode(iterations)
-         .encode_if(include_key_length_in_struct, key_length)
-         .encode_if(prf != "HMAC(SHA-1)", AlgorithmIdentifier(prf, AlgorithmIdentifier::USE_NULL_PARAM))
-         .end_cons();
-
-      kdf_algo = AlgorithmIdentifier("PKCS5.PBKDF2", pbkdf2_params);
-      return key;
-   }
 }
 
 /*
@@ -35163,25 +37250,18 @@ std::pair<AlgorithmIdentifier, std::vector<uint8_t>> pbes2_encrypt_shared(std::s
    const auto cipher_spec = split_on(cipher, '/');
 
    if(cipher_spec.size() != 2 || !known_pbes_cipher_mode(cipher_spec[1]) || !enc) {
-      throw Encoding_Error(fmt("PBE-PKCS5 v2.0: Invalid or unavailable cipher '{}'", cipher));
+      throw Encoding_Error(fmt("PBES2: Invalid or unavailable cipher '{}'", cipher));
    }
 
    const size_t key_length = enc->key_spec().maximum_keylength();
 
-   const secure_vector<uint8_t> iv = rng.random_vec(enc->default_nonce_length());
-
-   AlgorithmIdentifier kdf_algo;
+   const auto iv = rng.random_vec<std::vector<uint8_t>>(enc->default_nonce_length());
 
    const bool include_key_length_in_struct = enc->key_spec().minimum_keylength() != enc->key_spec().maximum_keylength();
 
-   const auto derived_key = derive_key(passphrase,
-                                       prf,
-                                       rng,
-                                       msec_in_iterations_out,
-                                       iterations_if_msec_null,
-                                       key_length,
-                                       include_key_length_in_struct,
-                                       kdf_algo);
+   auto kdf_params = Pbes2KdfParameters::tune(prf, rng, key_length, msec_in_iterations_out, iterations_if_msec_null);
+   const auto derived_key = kdf_params->derive_key(passphrase, key_length);
+   const auto kdf_algo = kdf_params->algorithm_identifier(include_key_length_in_struct);
 
    enc->set_key(derived_key);
    enc->start(iv);
@@ -35256,21 +37336,34 @@ secure_vector<uint8_t> pbes2_decrypt(std::span<const uint8_t> key_bits,
       .end_cons()
       .verify_end();
 
-   const std::string cipher = enc_algo.oid().human_name_or_empty();
-   const auto cipher_spec = split_on(cipher, '/');
-   if(cipher_spec.size() != 2 || !known_pbes_cipher_mode(cipher_spec[1])) {
-      throw Decoding_Error(fmt("PBE-PKCS5 v2.0: Unknown/invalid cipher OID {}", enc_algo.oid()));
-   }
+   const std::string cipher = [&]() -> std::string {
+      if(const auto name = enc_algo.oid().registered_name()) {
+         const auto cipher_spec = split_on(*name, '/');
+         if(cipher_spec.size() == 2 && known_pbes_cipher_mode(cipher_spec[1])) {
+            return *name;
+         }
+      }
 
-   secure_vector<uint8_t> iv;
+      throw Decoding_Error(fmt("PBES2: Unknown/invalid cipher OID {}", enc_algo.oid()));
+   }();
+
+   std::vector<uint8_t> iv;
    BER_Decoder(enc_algo.parameters(), BER_Decoder::Limits::DER()).decode(iv, ASN1_Type::OctetString).verify_end();
 
    auto dec = Cipher_Mode::create(cipher, Cipher_Dir::Decryption);
    if(!dec) {
-      throw Decoding_Error(fmt("PBE-PKCS5 cannot decrypt no cipher '{}'", cipher));
+      throw Decoding_Error(fmt("PBES2 cannot decrypt due to unavailable cipher '{}'", cipher));
    }
 
-   dec->set_key(derive_key(passphrase, kdf_algo, dec->key_spec().maximum_keylength()));
+   // The cipher parameters carry the IV (RFC 8018 B.2). Require the length be the
+   // expected value; any other length has undocumented semantics.
+   if(iv.size() != dec->default_nonce_length()) {
+      throw Decoding_Error("PBES2 cipher AlgorithmIdentifier has invalid IV length");
+   }
+
+   const size_t default_key_size = dec->key_spec().maximum_keylength();
+   auto pbkdf = Pbes2KdfParameters::decode(kdf_algo);
+   dec->set_key(pbkdf->derive_key(passphrase, default_key_size));
 
    dec->start(iv);
 
@@ -35409,6 +37502,9 @@ secure_vector<uint8_t> PBKDF::pbkdf_timed(size_t out_len,
 #if defined(BOTAN_HAS_PBKDF_BCRYPT)
 #endif
 
+#if defined(BOTAN_HAS_PKCS12_KDF)
+#endif
+
 namespace Botan {
 
 void PasswordHash::derive_key(uint8_t out[],
@@ -35475,6 +37571,15 @@ std::unique_ptr<PasswordHashFamily> PasswordHashFamily::create(std::string_view 
    if(req.algo_name() == "OpenPGP-S2K" && req.arg_count() == 1) {
       if(auto hash = HashFunction::create(req.arg(0))) {
          return std::make_unique<RFC4880_S2K_Family>(std::move(hash));
+      }
+   }
+#endif
+
+#if defined(BOTAN_HAS_PKCS12_KDF)
+   if(req.algo_name() == "PKCS12-KDF" && req.arg_count() == 2) {
+      if(auto hash = HashFunction::create(req.arg(0))) {
+         const auto id_param = req.arg_as_integer(1);
+         return std::make_unique<PKCS12_KDF_Family>(std::move(hash), id_param);
       }
    }
 #endif
@@ -36444,6 +38549,8 @@ class P521Rep final {
       constexpr static std::array<W, N> redc(const std::array<W, 2 * N>& z) {
          // Regardless of word size (32 or 64) the top word is 9 bits long
          constexpr W TOP_BITS = static_cast<W>(0x1FF);
+         // The 23 or 55 bits that should be cleared in the top word
+         constexpr W CLEARED_TOP_BITS = WordInfo<W>::max ^ TOP_BITS;
 
          /*
          * Extract the high part of z (z >> 521)
@@ -36472,15 +38579,28 @@ class P521Rep final {
          Since the modulus P is exactly 2**521 - 1 the only way the computed
          result can be larger than P is if the top word is larger than TOP_BITS
 
-         If this is the case then we need to conditionally subtract P
-
          Since TOP_BITS has the low 9 bits set, we can check if t[N - 1] > TOP_BITS
          by checking if t[N - 1] >> 9 has any bits set. Doing it this way is
          faster than a standard comparison since CT::Mask::is_gt requires
          several bit operations.
          */
 
-         const W need_sub = ~CT::Mask<W>::is_zero(t[N - 1] >> 9).value();
+         const W is_over_p521 = ~CT::Mask<W>::is_zero(t[N - 1] >> 9).value();
+
+         /*
+         * Also must detect/handle x == P
+         */
+         const W is_eq_p521 = [&]() {
+            W sum = WordInfo<W>::max;
+            for(size_t i = 0; i != N - 1; ++i) {
+               sum &= t[i];
+            }
+            sum &= (CLEARED_TOP_BITS | t[N - 1]);
+
+            return CT::Mask<W>::is_zero(sum ^ WordInfo<W>::max).value();
+         }();
+
+         const W need_sub = is_over_p521 | is_eq_p521;
 
          W borrow = 0;
          for(size_t i = 0; i != N - 1; ++i) {
@@ -36972,11 +39092,11 @@ bool LowLevel::C_GetInterfaceList(const Dynamically_Loaded_Library& pkcs11_modul
 bool LowLevel::C_GetInterface(const Dynamically_Loaded_Library& pkcs11_module,
                               const Utf8Char* interface_name_ptr,
                               const Version* version_ptr,
-                              Interface* interface_ptr_ptr,
+                              Interface** interface_ptr_ptr,
                               Flags flags,
                               ReturnValue* return_value) {
    using get_interface =
-      CK_RV (*)(Utf8Char* interface_name_ptr, Version* version_ptr, Interface* interface_ptr_ptr, Flags flags);
+      CK_RV (*)(Utf8Char* interface_name_ptr, Version* version_ptr, Interface** interface_ptr_ptr, Flags flags);
    if(auto get_interface_ptr = pkcs11_module.try_resolve_symbol<get_interface>("C_GetInterface");
       get_interface_ptr.has_value()) {
       return handle_return_value(
@@ -38157,14 +40277,20 @@ PKCS11_EC_PrivateKey::PKCS11_EC_PrivateKey(Session& session,
    session.module()->C_GenerateKeyPair(session.handle(),
                                        &mechanism,
                                        pub_key_props.data(),
-                                       static_cast<Ulong>(pub_key_props.count()),
+                                       checked_ulong_cast(pub_key_props.count()),
                                        props.data(),
-                                       static_cast<Ulong>(props.count()),
+                                       checked_ulong_cast(props.count()),
                                        &pub_key_handle,
                                        &priv_key_handle);
 
    this->reset_handle(priv_key_handle);
    const Object public_key(session, pub_key_handle);
+   auto destroy_public = scoped_cleanup([&]() noexcept {
+      try {
+         public_key.destroy();
+      } catch(...) {  // NOLINT(*-empty-catch)
+      }
+   });
 
    auto pt_bytes = public_key.get_attribute_value(AttributeType::EcPoint);
    m_public_key = decode_public_point(m_domain_params, pt_bytes);
@@ -38175,6 +40301,7 @@ size_t PKCS11_EC_PrivateKey::key_length() const {
 }
 
 std::vector<uint8_t> PKCS11_EC_PrivateKey::raw_public_key_bits() const {
+   // It seems odd that this serializes compressed without ability to control
    return public_ec_point().serialize_uncompressed();
 }
 
@@ -38232,7 +40359,7 @@ secure_vector<uint8_t> PKCS11_ECDH_PrivateKey::private_key_bits() const {
 namespace {
 class PKCS11_ECDH_KA_Operation final : public PK_Ops::Key_Agreement {
    public:
-      PKCS11_ECDH_KA_Operation(const PKCS11_EC_PrivateKey& key, std::string_view params) :
+      PKCS11_ECDH_KA_Operation(const PKCS11_ECDH_PrivateKey& key, std::string_view params) :
             PK_Ops::Key_Agreement(), m_key(key), m_mechanism(MechanismWrapper::create_ecdh_mechanism(params)) {}
 
       size_t agreed_value_size() const override { return m_key.domain().get_p_bytes(); }
@@ -38242,6 +40369,14 @@ class PKCS11_ECDH_KA_Operation final : public PK_Ops::Key_Agreement {
       secure_vector<uint8_t> agree(size_t key_len,
                                    std::span<const uint8_t> other_key,
                                    std::span<const uint8_t> salt) override {
+         const auto peer_point = EC_AffinePoint::deserialize(m_key.domain(), other_key);
+         if(!peer_point) {
+            throw Decoding_Error("ECDH - Invalid elliptic curve point: not on curve");
+         }
+         if(peer_point->is_identity()) {
+            throw Decoding_Error("ECDH - Invalid elliptic curve point: identity");
+         }
+
          std::vector<uint8_t> der_encoded_other_key;
          if(m_key.point_encoding() == PublicPointEncoding::Der) {
             DER_Encoder(der_encoded_other_key).encode(other_key.data(), other_key.size(), ASN1_Type::OctetString);
@@ -38250,9 +40385,19 @@ class PKCS11_ECDH_KA_Operation final : public PK_Ops::Key_Agreement {
             m_mechanism.set_ecdh_other_key(other_key.data(), other_key.size());
          }
 
-         if(!salt.empty()) {
+         const bool raw_kdf = (m_mechanism.ecdh_kdf() == KeyDerivation::Null);
+
+         if(raw_kdf && !salt.empty()) {
+            throw Invalid_Argument("PK_Key_Agreement::derive_key requires a KDF to use a salt");
+         }
+
+         if(salt.empty()) {
+            m_mechanism.set_ecdh_salt(nullptr, 0);
+         } else {
             m_mechanism.set_ecdh_salt(salt.data(), salt.size());
          }
+
+         const size_t out_len = raw_kdf ? agreed_value_size() : key_len;
 
          ObjectHandle secret_handle = 0;
          AttributeContainer attributes;
@@ -38260,25 +40405,31 @@ class PKCS11_ECDH_KA_Operation final : public PK_Ops::Key_Agreement {
          attributes.add_bool(AttributeType::Extractable, true);
          attributes.add_numeric(AttributeType::Class, static_cast<CK_OBJECT_CLASS>(ObjectClass::SecretKey));
          attributes.add_numeric(AttributeType::KeyType, static_cast<CK_KEY_TYPE>(KeyType::GenericSecret));
-         attributes.add_numeric(AttributeType::ValueLen, static_cast<CK_ULONG>(key_len));
+         attributes.add_numeric(AttributeType::ValueLen, checked_ulong_cast(out_len));
          m_key.module()->C_DeriveKey(m_key.session().handle(),
                                      m_mechanism.data(),
                                      m_key.handle(),
                                      attributes.data(),
-                                     static_cast<Ulong>(attributes.count()),
+                                     checked_ulong_cast(attributes.count()),
                                      &secret_handle);
 
          const Object secret_object(m_key.session(), secret_handle);
+         auto destroy_secret = scoped_cleanup([&]() noexcept {
+            try {
+               secret_object.destroy();
+            } catch(...) {  // NOLINT(*-empty-catch)
+            }
+         });
          secure_vector<uint8_t> secret = secret_object.get_attribute_value(AttributeType::Value);
-         if(secret.size() < key_len) {
+         if(secret.size() < out_len) {
             throw PKCS11_Error("ECDH key derivation secret length is too short");
          }
-         secret.resize(key_len);
+         secret.resize(out_len);
          return secret;
       }
 
    private:
-      const PKCS11_EC_PrivateKey& m_key;
+      PKCS11_ECDH_PrivateKey m_key;
       MechanismWrapper m_mechanism;
 };
 
@@ -38300,9 +40451,9 @@ PKCS11_ECDH_KeyPair generate_ecdh_keypair(Session& session,
    session.module()->C_GenerateKeyPair(session.handle(),
                                        &mechanism,
                                        pub_props.data(),
-                                       static_cast<Ulong>(pub_props.count()),
+                                       checked_ulong_cast(pub_props.count()),
                                        priv_props.data(),
-                                       static_cast<Ulong>(priv_props.count()),
+                                       checked_ulong_cast(priv_props.count()),
                                        &pub_key_handle,
                                        &priv_key_handle);
 
@@ -38357,6 +40508,17 @@ std::unique_ptr<Public_Key> PKCS11_ECDSA_PrivateKey::public_key() const {
 
 namespace {
 
+// PKCS#11 ECDSA accepts EMSA1(X) as an alias for X; unwrap so callers like
+// algorithm_identifier() see the normalized hash name (e.g. "SHA-256" instead
+// of "EMSA1(SHA-256)") and produce a registered OID such as ECDSA/SHA-256.
+std::string canonical_ecdsa_hash(std::string_view hash) {
+   const SCAN_Name req((std::string(hash)));
+   if(req.algo_name() == "EMSA1" && req.arg_count() == 1) {
+      return req.arg(0);
+   }
+   return std::string(hash);
+}
+
 class PKCS11_ECDSA_Signature_Operation final : public PK_Ops::Signature {
    public:
       PKCS11_ECDSA_Signature_Operation(const PKCS11_ECDSA_PrivateKey& key, std::string_view hash) :
@@ -38364,7 +40526,7 @@ class PKCS11_ECDSA_Signature_Operation final : public PK_Ops::Signature {
             m_key(key),
             m_order_bytes(key.domain().get_order_bytes()),
             m_mechanism(MechanismWrapper::create_ecdsa_mechanism(hash)),
-            m_hash(hash) {}
+            m_hash(canonical_ecdsa_hash(hash)) {}
 
       void update(std::span<const uint8_t> input) override {
          if(!m_initialized) {
@@ -38372,26 +40534,35 @@ class PKCS11_ECDSA_Signature_Operation final : public PK_Ops::Signature {
             m_key.module()->C_SignInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
             m_initialized = true;
             m_first_message.assign(input.begin(), input.end());
+            m_has_first_message = true;
             return;
          }
 
-         if(!m_first_message.empty()) {
+         if(m_has_first_message) {
             // second call to update: start multiple-part operation
             m_key.module()->C_SignUpdate(m_key.session().handle(), m_first_message);
             m_first_message.clear();
+            m_has_first_message = false;
          }
 
-         m_key.module()->C_SignUpdate(m_key.session().handle(), input.data(), static_cast<Ulong>(input.size()));
+         m_key.module()->C_SignUpdate(m_key.session().handle(), input.data(), checked_ulong_cast(input.size()));
       }
 
       std::vector<uint8_t> sign(RandomNumberGenerator& /*rng*/) override {
+         if(!m_initialized) {
+            // sign() called with no prior update(): treat as a single-part operation over the empty message
+            m_key.module()->C_SignInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
+            m_initialized = true;
+            m_has_first_message = true;
+         }
          std::vector<uint8_t> signature;
-         if(!m_first_message.empty()) {
+         if(m_has_first_message) {
             // single call to update: perform single-part operation
             m_key.module()->C_Sign(m_key.session().handle(), m_first_message, signature);
             m_first_message.clear();
+            m_has_first_message = false;
          } else {
-            // multiple calls to update (or none): finish multiple-part operation
+            // multiple calls to update: finish multiple-part operation
             m_key.module()->C_SignFinal(m_key.session().handle(), signature);
          }
          m_initialized = false;
@@ -38411,6 +40582,7 @@ class PKCS11_ECDSA_Signature_Operation final : public PK_Ops::Signature {
       const std::string m_hash;
       secure_vector<uint8_t> m_first_message;
       bool m_initialized = false;
+      bool m_has_first_message = false;
 };
 
 AlgorithmIdentifier PKCS11_ECDSA_Signature_Operation::algorithm_identifier() const {
@@ -38425,7 +40597,7 @@ class PKCS11_ECDSA_Verification_Operation final : public PK_Ops::Verification {
             PK_Ops::Verification(),
             m_key(key),
             m_mechanism(MechanismWrapper::create_ecdsa_mechanism(hash)),
-            m_hash(hash) {}
+            m_hash(canonical_ecdsa_hash(hash)) {}
 
       void update(std::span<const uint8_t> input) override {
          if(!m_initialized) {
@@ -38433,39 +40605,51 @@ class PKCS11_ECDSA_Verification_Operation final : public PK_Ops::Verification {
             m_key.module()->C_VerifyInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
             m_initialized = true;
             m_first_message.assign(input.begin(), input.end());
+            m_has_first_message = true;
             return;
          }
 
-         if(!m_first_message.empty()) {
+         if(m_has_first_message) {
             // second call to update: start multiple-part operation
             m_key.module()->C_VerifyUpdate(m_key.session().handle(), m_first_message);
             m_first_message.clear();
+            m_has_first_message = false;
          }
 
-         m_key.module()->C_VerifyUpdate(m_key.session().handle(), input.data(), static_cast<Ulong>(input.size()));
+         m_key.module()->C_VerifyUpdate(m_key.session().handle(), input.data(), checked_ulong_cast(input.size()));
       }
 
       bool is_valid_signature(std::span<const uint8_t> sig) override {
+         if(!m_initialized) {
+            // is_valid_signature() called with no prior update(): treat as a single-part operation over the empty message
+            m_key.module()->C_VerifyInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
+            m_initialized = true;
+            m_has_first_message = true;
+         }
          ReturnValue return_value = ReturnValue::SignatureInvalid;
-         if(!m_first_message.empty()) {
+         if(m_has_first_message) {
             // single call to update: perform single-part operation
             m_key.module()->C_Verify(m_key.session().handle(),
                                      m_first_message.data(),
-                                     static_cast<Ulong>(m_first_message.size()),
+                                     checked_ulong_cast(m_first_message.size()),
                                      sig.data(),
-                                     static_cast<Ulong>(sig.size()),
+                                     checked_ulong_cast(sig.size()),
                                      &return_value);
             m_first_message.clear();
+            m_has_first_message = false;
          } else {
-            // multiple calls to update (or none): finish multiple-part operation
+            // multiple calls to update: finish multiple-part operation
             m_key.module()->C_VerifyFinal(
-               m_key.session().handle(), sig.data(), static_cast<Ulong>(sig.size()), &return_value);
+               m_key.session().handle(), sig.data(), checked_ulong_cast(sig.size()), &return_value);
          }
          m_initialized = false;
-         if(return_value != ReturnValue::OK && return_value != ReturnValue::SignatureInvalid) {
+         if(return_value == ReturnValue::SignatureInvalid || return_value == ReturnValue::SignatureLenRange) {
+            return false;
+         } else if(return_value == ReturnValue::OK) {
+            return true;
+         } else {
             throw PKCS11_ReturnError(return_value);
          }
-         return return_value == ReturnValue::OK;
       }
 
       std::string hash_function() const override { return m_hash; }
@@ -38476,6 +40660,7 @@ class PKCS11_ECDSA_Verification_Operation final : public PK_Ops::Verification {
       const std::string m_hash;
       secure_vector<uint8_t> m_first_message;
       bool m_initialized = false;
+      bool m_has_first_message = false;
 };
 
 }  // namespace
@@ -38502,9 +40687,9 @@ PKCS11_ECDSA_KeyPair generate_ecdsa_keypair(Session& session,
    session.module()->C_GenerateKeyPair(session.handle(),
                                        &mechanism,
                                        pub_props.data(),
-                                       static_cast<Ulong>(pub_props.count()),
+                                       checked_ulong_cast(pub_props.count()),
                                        priv_props.data(),
-                                       static_cast<Ulong>(priv_props.count()),
+                                       checked_ulong_cast(priv_props.count()),
                                        &pub_key_handle,
                                        &priv_key_handle);
 
@@ -38797,8 +40982,9 @@ std::span<const Utf8Char> name_of(const Interface& p11_interface) {
 }  // namespace
 
 InterfaceWrapper::InterfaceWrapper(Interface p11_interface) : m_p11_interface(p11_interface) {
-   BOTAN_ASSERT_NONNULL(p11_interface.pInterfaceName);
-   BOTAN_ASSERT_NONNULL(p11_interface.pFunctionList);
+   if(p11_interface.pInterfaceName == nullptr || p11_interface.pFunctionList == nullptr) {
+      throw PKCS11_Error("PKCS #11 interface has null pInterfaceName or pFunctionList");
+   }
 }
 
 Version InterfaceWrapper::version() const {
@@ -38817,7 +41003,7 @@ InterfaceWrapper InterfaceWrapper::latest_p11_interface(Dynamically_Loaded_Libra
       // Try the legacy C_GetFunctionList method (for PKCS#11 version 2.40).
       FunctionList* func_list = nullptr;  // NOLINT(*-const-correctness) bug in clang-tidy
       rv = LowLevel::C_GetFunctionList(library, &func_list, nullptr);
-      if(!rv) {
+      if(!rv || func_list == nullptr) {
          throw Invalid_Argument("Failed to load function list for PKCS#11 library.");
       }
 
@@ -38837,9 +41023,12 @@ InterfaceWrapper InterfaceWrapper::latest_p11_interface(Dynamically_Loaded_Libra
    // We only load interfaces named "PKCS 11" (which are the pure ones defined in the spec) with
    // version >= 2.40.
    auto is_valid_interface = [](const Interface& i) {
-      // This is also done by the example in PKCS #11 (version >= 3.0) spec.
-      // Note that version above the currently supported maximal version should
-      // be compatible too.
+      if(i.pFunctionList == nullptr || i.pInterfaceName == nullptr) {
+         return false;
+      }
+      if(!std::ranges::equal(name_of(i), PKCS11_INTERFACE_NAME)) {
+         return false;
+      }
       const Version version = version_of(i);
       return version >= Version{2, 40};
    };
@@ -38950,7 +41139,7 @@ class MechanismData {
 
 class RSA_SignMechanism final : public MechanismData {
    public:
-      explicit RSA_SignMechanism(MechanismType typ) noexcept :
+      explicit RSA_SignMechanism(MechanismType typ) :
             MechanismData(typ), m_hash(static_cast<MechanismType>(0)), m_mgf(MGF::MgfUnused), m_salt_size(0) {
          auto pss_option = PssOptions().find(type());
          if(pss_option != PssOptions().end()) {
@@ -39075,7 +41264,7 @@ MechanismWrapper MechanismWrapper::create_rsa_sign_mechanism(std::string_view pa
       {"PSS(SHA-1,MGF1,20)", RSA_SignMechanism(MechanismType::Sha1RsaPkcsPss)},
 
       {"PSS(SHA-224)", RSA_SignMechanism(MechanismType::Sha224RsaPkcsPss)},
-      {"PSS(SHA-224,MGF1,24)", RSA_SignMechanism(MechanismType::Sha224RsaPkcsPss)},
+      {"PSS(SHA-224,MGF1,28)", RSA_SignMechanism(MechanismType::Sha224RsaPkcsPss)},
 
       {"PSS(SHA-256)", RSA_SignMechanism(MechanismType::Sha256RsaPkcsPss)},
       {"PSS(SHA-256,MGF1,32)", RSA_SignMechanism(MechanismType::Sha256RsaPkcsPss)},
@@ -39137,7 +41326,7 @@ MechanismWrapper MechanismWrapper::create_rsa_sign_mechanism(std::string_view pa
       mech.m_parameters = std::make_shared<MechanismParameters>();
       mech.m_parameters->pss_params.hashAlg = static_cast<CK_MECHANISM_TYPE>(mechanism_info.hash());
       mech.m_parameters->pss_params.mgf = static_cast<CK_RSA_PKCS_MGF_TYPE>(mechanism_info.mgf());
-      mech.m_parameters->pss_params.sLen = static_cast<Ulong>(mechanism_info.salt_size());
+      mech.m_parameters->pss_params.sLen = checked_ulong_cast(mechanism_info.salt_size());
       mech.m_mechanism.pParameter = mech.m_parameters.get();
       mech.m_mechanism.ulParameterLen = sizeof(RsaPkcsPssParams);
    }
@@ -39180,27 +41369,34 @@ MechanismWrapper MechanismWrapper::create_ecdh_mechanism(std::string_view params
                                                                       {"SHA-384", KeyDerivation::Sha384Kdf},
                                                                       {"SHA-512", KeyDerivation::Sha512Kdf}};
 
-   std::vector<std::string> param_parts = split_on(params, ',');
+   const std::vector<std::string> param_parts = split_on(params, ',');
 
    if(param_parts.empty() || param_parts.size() > 2) {
       throw Invalid_Argument(fmt("PKCS #11 ECDH key derivation bad params {}", params));
    }
 
-   const bool use_cofactor =
-      (param_parts[0] == "Cofactor") || (param_parts.size() == 2 && param_parts[1] == "Cofactor");
-
-   const std::string kdf_name = (param_parts[0] == "Cofactor" ? param_parts[1] : param_parts[0]);
-   std::string hash = kdf_name;
-
-   if(kdf_name != "Raw") {
-      const SCAN_Name kdf_hash(kdf_name);
-
-      if(kdf_hash.arg_count() > 0) {
-         hash = kdf_hash.arg(0);
+   // TODO(Botan4) remove this cofactor nonsense
+   bool use_cofactor = false;
+   std::string kdf_name;
+   for(const auto& part : param_parts) {
+      if(part == "Cofactor") {
+         if(use_cofactor) {
+            throw Invalid_Argument(fmt("PKCS #11 ECDH key derivation bad params {}", params));
+         }
+         use_cofactor = true;
+      } else {
+         if(!kdf_name.empty()) {
+            throw Invalid_Argument(fmt("PKCS #11 ECDH key derivation bad params {}", params));
+         }
+         kdf_name = part;
       }
    }
 
-   auto kdf = EcdhHash.find(hash);
+   if(kdf_name.empty()) {
+      throw Invalid_Argument(fmt("PKCS #11 ECDH key derivation bad params {}", params));
+   }
+
+   auto kdf = EcdhHash.find(kdf_name);
    if(kdf == EcdhHash.end()) {
       throw Lookup_Error("PKCS#11 ECDH key derivation does not support KDF " + kdf_name);
    }
@@ -39236,20 +41432,35 @@ Module::Module(Module&& other) noexcept = default;
 
 Module::~Module() noexcept {
    try {
-      m_low_level->C_Finalize(nullptr, nullptr);
+      if(m_low_level) {
+         m_low_level->C_Finalize(nullptr, nullptr);
+      }
    } catch(...) {
       // we are noexcept and must swallow any exception here
    }
 }
 
 void Module::reload(C_InitializeArgs init_args) {
+   // Build the new library + LowLevel in locals so library load and interface
+   // discovery failures leave m_library / m_low_level untouched.
+   auto new_library = std::make_unique<Dynamically_Loaded_Library>(m_file_path);
+   auto new_low_level = std::make_unique<LowLevel>(InterfaceWrapper::latest_p11_interface(*new_library));
+
+   // m_file_path is const, so dlopen typically returns the same handle as the
+   // old module and PKCS#11 state is shared; we must finalize before
+   // re-initializing. Clear the old members up front so a C_Initialize failure
+   // below leaves the Module empty rather than holding a function table for an
+   // already-finalized library.
    if(m_low_level) {
       m_low_level->C_Finalize(nullptr);
    }
-   m_library = std::make_unique<Dynamically_Loaded_Library>(m_file_path);
-   m_low_level = std::make_unique<LowLevel>(InterfaceWrapper::latest_p11_interface(*m_library));
+   m_low_level.reset();
+   m_library.reset();
 
-   m_low_level->C_Initialize(&init_args);
+   new_low_level->C_Initialize(&init_args);
+
+   m_low_level = std::move(new_low_level);
+   m_library = std::move(new_library);
 }
 
 }  // namespace Botan::PKCS11
@@ -39261,6 +41472,8 @@ void Module::reload(C_InitializeArgs init_args) {
 * Botan is released under the Simplified BSD License (see license.txt)
 */
 
+
+#include <cstring>
 #include <map>
 
 namespace Botan::PKCS11 {
@@ -39278,12 +41491,12 @@ void AttributeContainer::add_class(ObjectClass object_class) {
 void AttributeContainer::add_string(AttributeType attribute, std::string_view value) {
    m_strings.push_back(std::string(value));
    add_attribute(
-      attribute, reinterpret_cast<const uint8_t*>(m_strings.back().data()), static_cast<Ulong>(value.size()));
+      attribute, reinterpret_cast<const uint8_t*>(m_strings.back().data()), checked_ulong_cast(value.size()));
 }
 
 void AttributeContainer::add_binary(AttributeType attribute, const uint8_t* value, size_t length) {
    m_vectors.push_back(secure_vector<uint8_t>(value, value + length));
-   add_attribute(attribute, reinterpret_cast<const uint8_t*>(m_vectors.back().data()), static_cast<Ulong>(length));
+   add_attribute(attribute, reinterpret_cast<const uint8_t*>(m_vectors.back().data()), checked_ulong_cast(length));
 }
 
 void AttributeContainer::add_bool(AttributeType attribute, bool value) {
@@ -39325,7 +41538,7 @@ ObjectFinder::ObjectFinder(Session& session, const std::vector<Attribute>& searc
       m_session(session), m_search_terminated(false) {
    module()->C_FindObjectsInit(m_session.get().handle(),
                                const_cast<Attribute*>(search_template.data()),
-                               static_cast<Ulong>(search_template.size()));
+                               checked_ulong_cast(search_template.size()));
 }
 
 ObjectFinder::~ObjectFinder() noexcept {
@@ -39405,7 +41618,7 @@ Object::Object(Session& session, ObjectHandle handle) : m_session(session), m_ha
 
 Object::Object(Session& session, const ObjectProperties& obj_props) : m_session(session), m_handle(0) {
    m_session.get().module()->C_CreateObject(
-      m_session.get().handle(), obj_props.data(), static_cast<Ulong>(obj_props.count()), &m_handle);
+      m_session.get().handle(), obj_props.data(), checked_ulong_cast(obj_props.count()), &m_handle);
 }
 
 secure_vector<uint8_t> Object::get_attribute_value(AttributeType attribute) const {
@@ -39428,7 +41641,7 @@ ObjectHandle Object::copy(const AttributeContainer& modified_attributes) const {
    module()->C_CopyObject(m_session.get().handle(),
                           m_handle,
                           modified_attributes.data(),
-                          static_cast<Ulong>(modified_attributes.count()),
+                          checked_ulong_cast(modified_attributes.count()),
                           &copied_handle);
    return copied_handle;
 }
@@ -39442,6 +41655,8 @@ ObjectHandle Object::copy(const AttributeContainer& modified_attributes) const {
 */
 
 
+#include <limits>
+
 namespace Botan::PKCS11 {
 
 PKCS11_RNG::PKCS11_RNG(Session& session) : m_session(session) {}
@@ -39451,12 +41666,21 @@ size_t PKCS11_RNG::reseed_from_sources(Entropy_Sources& /*srcs*/, size_t /*bits*
 }
 
 void PKCS11_RNG::fill_bytes_with_input(std::span<uint8_t> output, std::span<const uint8_t> input) {
-   if(!input.empty()) {
-      module()->C_SeedRandom(m_session.get().handle(), const_cast<uint8_t*>(input.data()), Ulong(input.size()));
+   // Chunk by std::numeric_limits<Ulong>::max() so requests larger than the
+   // platform's CK_ULONG (32 bits on LLP64) are not silently truncated.
+   const size_t chunk_max = std::numeric_limits<Ulong>::max();
+
+   while(!input.empty()) {
+      const size_t this_chunk = std::min(input.size(), chunk_max);
+      module()->C_SeedRandom(
+         m_session.get().handle(), const_cast<uint8_t*>(input.data()), static_cast<Ulong>(this_chunk));
+      input = input.subspan(this_chunk);
    }
 
-   if(!output.empty()) {
-      module()->C_GenerateRandom(m_session.get().handle(), output.data(), Ulong(output.size()));
+   while(!output.empty()) {
+      const size_t this_chunk = std::min(output.size(), chunk_max);
+      module()->C_GenerateRandom(m_session.get().handle(), output.data(), static_cast<Ulong>(this_chunk));
+      output = output.subspan(this_chunk);
    }
 }
 
@@ -39524,13 +41748,20 @@ PKCS11_RSA_PrivateKey::PKCS11_RSA_PrivateKey(Session& session,
    session.module()->C_GenerateKeyPair(session.handle(),
                                        &mechanism,
                                        pub_key_props.data(),
-                                       static_cast<Ulong>(pub_key_props.count()),
+                                       checked_ulong_cast(pub_key_props.count()),
                                        priv_key_props.data(),
-                                       static_cast<Ulong>(priv_key_props.count()),
+                                       checked_ulong_cast(priv_key_props.count()),
                                        &pub_key_handle,
                                        &priv_key_handle);
 
    this->reset_handle(priv_key_handle);
+   const Object public_key(session, pub_key_handle);
+   auto destroy_public = scoped_cleanup([&]() noexcept {
+      try {
+         public_key.destroy();
+      } catch(...) {  // NOLINT(*-empty-catch)
+      }
+   });
 
    BigInt n = BigInt::from_bytes(get_attribute_value(AttributeType::Modulus));
    BigInt e = BigInt::from_bytes(get_attribute_value(AttributeType::PublicExponent));
@@ -39585,25 +41816,42 @@ class PKCS11_RSA_Decryption_Operation final : public PK_Ops::Decryption {
 
       size_t plaintext_length(size_t /*ctext_len*/) const override { return m_key.get_n().bytes(); }
 
+      size_t ciphertext_length(size_t /*ptext_len*/) const override { return m_key.get_n().bytes(); }
+
       secure_vector<uint8_t> decrypt(uint8_t& valid_mask, std::span<const uint8_t> ctext) override {
          valid_mask = 0;
-         m_key.module()->C_DecryptInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
-
-         std::vector<uint8_t> encrypted_data(ctext.begin(), ctext.end());
 
          const size_t modulus_bytes = (m_key.get_n().bits() + 7) / 8;
 
          // blind for RSA/RAW decryption
          const bool use_blinding = m_mechanism.padding_size() == 0;
 
+         std::vector<uint8_t> encrypted_data(ctext.begin(), ctext.end());
+
          if(use_blinding) {
-            const BigInt blinded = m_blinder.blind(BigInt::from_bytes(encrypted_data));
+            // RFC 8017 5.1.2: ciphertext representative must be in [0, n-1];
+            // check before blinding (which reduces mod n).
+            if(encrypted_data.size() > modulus_bytes) {
+               return secure_vector<uint8_t>{};
+            }
+            const BigInt input_bn = BigInt::from_bytes(encrypted_data);
+            if(input_bn.is_zero() || input_bn >= m_key.get_n()) {
+               return secure_vector<uint8_t>{};
+            }
+            const BigInt blinded = m_blinder.blind(input_bn);
             // SoftHSM at least requires raw RSA inputs be == the modulus size
             encrypted_data = blinded.serialize(modulus_bytes);
          }
 
+         m_key.module()->C_DecryptInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
+
          secure_vector<uint8_t> decrypted_data;
-         m_key.module()->C_Decrypt(m_key.session().handle(), encrypted_data, decrypted_data);
+         try {
+            m_key.module()->C_Decrypt(m_key.session().handle(), encrypted_data, decrypted_data);
+            valid_mask = 0xFF;
+         } catch(PKCS11_Error&) {
+            decrypted_data.clear();
+         }
 
          // Unblind for RSA/RAW decryption
          if(use_blinding) {
@@ -39612,12 +41860,11 @@ class PKCS11_RSA_Decryption_Operation final : public PK_Ops::Decryption {
             unblinded.serialize_to(decrypted_data);
          }
 
-         valid_mask = 0xFF;
          return decrypted_data;
       }
 
    private:
-      const PKCS11_RSA_PrivateKey& m_key;
+      PKCS11_RSA_PrivateKey m_key;
       MechanismWrapper m_mechanism;
       Barrett_Reduction m_mod_n;
       const Montgomery_Params m_monty_n;
@@ -39632,16 +41879,21 @@ class PKCS11_RSA_Decryption_Operation_Software_EME final : public PK_Ops::Decryp
       PKCS11_RSA_Decryption_Operation_Software_EME(const PKCS11_RSA_PrivateKey& key,
                                                    std::string_view padding,
                                                    RandomNumberGenerator& rng) :
-            PK_Ops::Decryption_with_Padding(padding), m_raw_decryptor(key, rng, "Raw") {}
+            PK_Ops::Decryption_with_Padding(padding), m_raw_op(key, "Raw", rng) {}
 
-      size_t plaintext_length(size_t ctext_len) const override { return m_raw_decryptor.plaintext_length(ctext_len); }
+      size_t plaintext_length(size_t ctext_len) const override { return m_raw_op.plaintext_length(ctext_len); }
+
+      size_t ciphertext_length(size_t ptext_len) const override { return m_raw_op.ciphertext_length(ptext_len); }
 
       secure_vector<uint8_t> raw_decrypt(std::span<const uint8_t> input) override {
-         return m_raw_decryptor.decrypt(input);
+         // Returns the fixed-width RSA encoded message (I2OSP(m, k)); the outer
+         // PKCS#1 / OAEP unpadder relies on the leading 0x00 byte being preserved.
+         uint8_t valid_mask = 0;
+         return m_raw_op.decrypt(valid_mask, input);
       }
 
    private:
-      PK_Decryptor_EME m_raw_decryptor;
+      PKCS11_RSA_Decryption_Operation m_raw_op;
 };
 
 // note: multiple-part encryption operations (with C_EncryptUpdate/C_EncryptFinal)
@@ -39649,9 +41901,17 @@ class PKCS11_RSA_Decryption_Operation_Software_EME final : public PK_Ops::Decryp
 class PKCS11_RSA_Encryption_Operation final : public PK_Ops::Encryption {
    public:
       PKCS11_RSA_Encryption_Operation(const PKCS11_RSA_PublicKey& key, std::string_view padding) :
-            m_key(key),
-            m_mechanism(MechanismWrapper::create_rsa_crypt_mechanism(padding)),
-            m_bits(8 * (key.get_n().bytes() - m_mechanism.padding_size()) - 1) {}
+            m_key(key), m_mechanism(MechanismWrapper::create_rsa_crypt_mechanism(padding)) {
+         const size_t k = key.get_n().bytes();
+         const size_t pad = m_mechanism.padding_size();
+         if(pad == 0) {
+            m_bits = 8 * k - 1;
+         } else if(k > pad) {
+            m_bits = 8 * (k - pad);
+         } else {
+            m_bits = 0;
+         }
+      }
 
       size_t ciphertext_length(size_t /*ptext_len*/) const override { return m_key.get_n().bytes(); }
 
@@ -39667,9 +41927,9 @@ class PKCS11_RSA_Encryption_Operation final : public PK_Ops::Encryption {
       }
 
    private:
-      const PKCS11_RSA_PublicKey& m_key;
+      PKCS11_RSA_PublicKey m_key;
       MechanismWrapper m_mechanism;
-      size_t m_bits;
+      size_t m_bits = 0;
 };
 
 class PKCS11_RSA_Signature_Operation final : public PK_Ops::Signature {
@@ -39685,26 +41945,35 @@ class PKCS11_RSA_Signature_Operation final : public PK_Ops::Signature {
             m_key.module()->C_SignInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
             m_initialized = true;
             m_first_message.assign(input.begin(), input.end());
+            m_has_first_message = true;
             return;
          }
 
-         if(!m_first_message.empty()) {
+         if(m_has_first_message) {
             // second call to update: start multiple-part operation
             m_key.module()->C_SignUpdate(m_key.session().handle(), m_first_message);
             m_first_message.clear();
+            m_has_first_message = false;
          }
 
-         m_key.module()->C_SignUpdate(m_key.session().handle(), input.data(), static_cast<Ulong>(input.size()));
+         m_key.module()->C_SignUpdate(m_key.session().handle(), input.data(), checked_ulong_cast(input.size()));
       }
 
       std::vector<uint8_t> sign(RandomNumberGenerator& /*rng*/) override {
+         if(!m_initialized) {
+            // sign() called with no prior update(): treat as a single-part operation over the empty message
+            m_key.module()->C_SignInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
+            m_initialized = true;
+            m_has_first_message = true;
+         }
          std::vector<uint8_t> signature;
-         if(!m_first_message.empty()) {
+         if(m_has_first_message) {
             // single call to update: perform single-part operation
             m_key.module()->C_Sign(m_key.session().handle(), m_first_message, signature);
             m_first_message.clear();
+            m_has_first_message = false;
          } else {
-            // multiple calls to update (or none): finish multiple-part operation
+            // multiple calls to update: finish multiple-part operation
             m_key.module()->C_SignFinal(m_key.session().handle(), signature);
          }
          m_initialized = false;
@@ -39718,6 +41987,7 @@ class PKCS11_RSA_Signature_Operation final : public PK_Ops::Signature {
    private:
       PKCS11_RSA_PrivateKey m_key;
       bool m_initialized = false;
+      bool m_has_first_message = false;
       secure_vector<uint8_t> m_first_message;
       MechanismWrapper m_mechanism;
 };
@@ -39800,39 +42070,51 @@ class PKCS11_RSA_Verification_Operation final : public PK_Ops::Verification {
             m_key.module()->C_VerifyInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
             m_initialized = true;
             m_first_message.assign(input.begin(), input.end());
+            m_has_first_message = true;
             return;
          }
 
-         if(!m_first_message.empty()) {
+         if(m_has_first_message) {
             // second call to update: start multiple-part operation
             m_key.module()->C_VerifyUpdate(m_key.session().handle(), m_first_message);
             m_first_message.clear();
+            m_has_first_message = false;
          }
 
-         m_key.module()->C_VerifyUpdate(m_key.session().handle(), input.data(), static_cast<Ulong>(input.size()));
+         m_key.module()->C_VerifyUpdate(m_key.session().handle(), input.data(), checked_ulong_cast(input.size()));
       }
 
       bool is_valid_signature(std::span<const uint8_t> sig) override {
+         if(!m_initialized) {
+            // is_valid_signature() called with no prior update(): treat as a single-part operation over the empty message
+            m_key.module()->C_VerifyInit(m_key.session().handle(), m_mechanism.data(), m_key.handle());
+            m_initialized = true;
+            m_has_first_message = true;
+         }
          ReturnValue return_value = ReturnValue::SignatureInvalid;
-         if(!m_first_message.empty()) {
+         if(m_has_first_message) {
             // single call to update: perform single-part operation
             m_key.module()->C_Verify(m_key.session().handle(),
                                      m_first_message.data(),
-                                     static_cast<Ulong>(m_first_message.size()),
+                                     checked_ulong_cast(m_first_message.size()),
                                      sig.data(),
-                                     static_cast<Ulong>(sig.size()),
+                                     checked_ulong_cast(sig.size()),
                                      &return_value);
             m_first_message.clear();
+            m_has_first_message = false;
          } else {
-            // multiple calls to update (or none): finish multiple-part operation
+            // multiple calls to update: finish multiple-part operation
             m_key.module()->C_VerifyFinal(
-               m_key.session().handle(), sig.data(), static_cast<Ulong>(sig.size()), &return_value);
+               m_key.session().handle(), sig.data(), checked_ulong_cast(sig.size()), &return_value);
          }
          m_initialized = false;
-         if(return_value != ReturnValue::OK && return_value != ReturnValue::SignatureInvalid) {
+         if(return_value == ReturnValue::SignatureInvalid || return_value == ReturnValue::SignatureLenRange) {
+            return false;
+         } else if(return_value == ReturnValue::OK) {
+            return true;
+         } else {
             throw PKCS11_ReturnError(return_value);
          }
-         return return_value == ReturnValue::OK;
       }
 
       std::string hash_function() const override;
@@ -39840,6 +42122,7 @@ class PKCS11_RSA_Verification_Operation final : public PK_Ops::Verification {
    private:
       const PKCS11_RSA_PublicKey m_key;
       bool m_initialized = false;
+      bool m_has_first_message = false;
       secure_vector<uint8_t> m_first_message;
       MechanismWrapper m_mechanism;
 };
@@ -39888,9 +42171,9 @@ PKCS11_RSA_KeyPair generate_rsa_keypair(Session& session,
    session.module()->C_GenerateKeyPair(session.handle(),
                                        &mechanism,
                                        pub_props.data(),
-                                       static_cast<Ulong>(pub_props.count()),
+                                       checked_ulong_cast(pub_props.count()),
                                        priv_props.data(),
-                                       static_cast<Ulong>(priv_props.count()),
+                                       checked_ulong_cast(priv_props.count()),
                                        &pub_key_handle,
                                        &priv_key_handle);
 
@@ -39929,6 +42212,11 @@ Session::Session(Slot& slot, SessionHandle handle) : m_slot(slot), m_handle(hand
    } else {
       m_logged_in = true;
    }
+}
+
+Session::Session(Session&& other) noexcept :
+      m_slot(other.m_slot), m_handle(other.release()), m_logged_in(other.m_logged_in) {
+   other.m_logged_in = false;
 }
 
 Session::~Session() noexcept {
@@ -40037,6 +42325,11 @@ void Slot::initialize(std::string_view label, const secure_string& so_pin) const
 #if defined(BOTAN_HAS_X509_CERTIFICATES)
 
 namespace Botan::PKCS11 {
+
+const X509_Certificate& PKCS11_X509_Certificate::certificate() const {
+   // TODO(Botan4) this should instead return a ref to a member variable
+   return (*this);
+}
 
 X509_CertificateProperties::X509_CertificateProperties(const std::vector<uint8_t>& subject,
                                                        const std::vector<uint8_t>& value) :
@@ -40151,9 +42444,17 @@ namespace Botan {
 
 std::unique_ptr<Public_Key> load_public_key(const AlgorithmIdentifier& alg_id,
                                             [[maybe_unused]] std::span<const uint8_t> key_bits) {
-   const std::string oid_str = alg_id.oid().to_formatted_string();
-   const std::vector<std::string> alg_info = split_on(oid_str, '/');
-   const std::string_view alg_name = alg_info[0];
+   const std::string alg_name = [&]() -> std::string {
+      if(const auto name = alg_id.oid().registered_name()) {
+         const std::vector<std::string> alg_info = split_on(*name, '/');
+         if(!alg_info.empty()) {
+            return alg_info[0];
+         }
+      }
+
+      throw Decoding_Error(
+         fmt("Public key decoding failed, no algorithm associated with {}", alg_id.oid().to_string()));
+   }();
 
 #if defined(BOTAN_HAS_RSA)
    if(alg_name == "RSA") {
@@ -40175,7 +42476,7 @@ std::unique_ptr<Public_Key> load_public_key(const AlgorithmIdentifier& alg_id,
 
 #if defined(BOTAN_HAS_MCELIECE)
    if(alg_name == "McEliece") {
-      return std::make_unique<McEliece_PublicKey>(key_bits);
+      return std::make_unique<McEliece_PublicKey>(alg_id, key_bits);
    }
 #endif
 
@@ -40265,7 +42566,7 @@ std::unique_ptr<Public_Key> load_public_key(const AlgorithmIdentifier& alg_id,
 
 #if defined(BOTAN_HAS_XMSS_RFC8391)
    if(alg_name == "XMSS") {
-      return std::make_unique<XMSS_PublicKey>(key_bits);
+      return std::make_unique<XMSS_PublicKey>(alg_id, key_bits);
    }
 #endif
 
@@ -40283,7 +42584,7 @@ std::unique_ptr<Public_Key> load_public_key(const AlgorithmIdentifier& alg_id,
 
 #if defined(BOTAN_HAS_HSS_LMS)
    if(alg_name == "HSS-LMS") {
-      return std::make_unique<HSS_LMS_PublicKey>(key_bits);
+      return std::make_unique<HSS_LMS_PublicKey>(alg_id, key_bits);
    }
 #endif
 
@@ -40310,9 +42611,17 @@ std::unique_ptr<Public_Key> load_public_key(const AlgorithmIdentifier& alg_id,
 
 std::unique_ptr<Private_Key> load_private_key(const AlgorithmIdentifier& alg_id,
                                               [[maybe_unused]] std::span<const uint8_t> key_bits) {
-   const std::string oid_str = alg_id.oid().to_formatted_string();
-   const std::vector<std::string> alg_info = split_on(oid_str, '/');
-   const std::string_view alg_name = alg_info[0];
+   const std::string alg_name = [&]() -> std::string {
+      if(const auto name = alg_id.oid().registered_name()) {
+         const std::vector<std::string> alg_info = split_on(*name, '/');
+         if(!alg_info.empty()) {
+            return alg_info[0];
+         }
+      }
+
+      throw Decoding_Error(
+         fmt("Private key decoding failed, no algorithm associated with {}", alg_id.oid().to_string()));
+   }();
 
 #if defined(BOTAN_HAS_RSA)
    if(alg_name == "RSA") {
@@ -40376,7 +42685,7 @@ std::unique_ptr<Private_Key> load_private_key(const AlgorithmIdentifier& alg_id,
 
 #if defined(BOTAN_HAS_MCELIECE)
    if(alg_name == "McEliece") {
-      return std::make_unique<McEliece_PrivateKey>(key_bits);
+      return std::make_unique<McEliece_PrivateKey>(alg_id, key_bits);
    }
 #endif
 
@@ -40424,7 +42733,7 @@ std::unique_ptr<Private_Key> load_private_key(const AlgorithmIdentifier& alg_id,
 
 #if defined(BOTAN_HAS_XMSS_RFC8391)
    if(alg_name == "XMSS") {
-      return std::make_unique<XMSS_PrivateKey>(key_bits);
+      return std::make_unique<XMSS_PrivateKey>(alg_id, key_bits);
    }
 #endif
 
@@ -40442,7 +42751,7 @@ std::unique_ptr<Private_Key> load_private_key(const AlgorithmIdentifier& alg_id,
 
 #if defined(BOTAN_HAS_HSS_LMS)
    if(alg_name == "HSS-LMS-Private-Key") {
-      return std::make_unique<HSS_LMS_PrivateKey>(key_bits);
+      return std::make_unique<HSS_LMS_PrivateKey>(alg_id, key_bits);
    }
 #endif
 
@@ -40832,7 +43141,7 @@ std::vector<uint8_t> Public_Key::subject_public_key() const {
    DER_Encoder(output)
       .start_sequence()
       .encode(algorithm_identifier())
-      .encode(public_key_bits(), ASN1_Type::BitString)
+      .encode_octet_aligned_bitstring(public_key_bits())
       .end_cons();
 
    return output;
@@ -40947,7 +43256,7 @@ std::vector<uint8_t> PK_Ops::Encryption_with_Padding::encrypt(std::span<const ui
    const size_t max_input_bytes = (max_input_bits + 7) / 8;
    BOTAN_ARG_CHECK(msg.size() <= max_input_bytes, "Plaintext too large");
 
-   secure_vector<uint8_t> padded_ptext(max_input_bits);
+   secure_vector<uint8_t> padded_ptext(max_input_bytes);
    const size_t written = m_padding->pad(padded_ptext, msg, max_input_bits, rng);
    return raw_encrypt(std::span{padded_ptext}.first(written), rng);
 }
@@ -41075,7 +43384,13 @@ std::string PK_Ops::Verification_with_Hash::hash_function() const {
 PK_Ops::Verification_with_Hash::Verification_with_Hash(const AlgorithmIdentifier& alg_id,
                                                        std::string_view pk_algo,
                                                        bool allow_null_parameters) {
-   const auto oid_info = split_on(alg_id.oid().to_formatted_string(), '/');
+   const auto oid_name = alg_id.oid().registered_name();
+   if(!oid_name) {
+      throw Decoding_Error(
+         fmt("Unexpected AlgorithmIdentifier OID {} in association with {} key", alg_id.oid(), pk_algo));
+   }
+
+   const auto oid_info = split_on(*oid_name, '/');
 
    if(oid_info.size() != 2 || oid_info[0] != pk_algo) {
       throw Decoding_Error(
@@ -41203,6 +43518,7 @@ secure_vector<uint8_t> PKCS8_extract(DataSource& source, AlgorithmIdentifier& pb
       .start_sequence()
       .decode(pbe_alg_id)
       .decode(key_data, ASN1_Type::OctetString)
+      .end_cons()
       .verify_end();
 
    return key_data;
@@ -41253,7 +43569,7 @@ secure_vector<uint8_t> PKCS8_decode(DataSource& source,
 
    try {
       if(is_encrypted) {
-         if(pbe_alg_id.oid().to_formatted_string() != "PBE-PKCS5v20") {
+         if(pbe_alg_id.oid().registered_name() != "PBE-PKCS5v20") {
             throw PKCS8_Exception(fmt("Unknown PBE type {}", pbe_alg_id.oid()));
          }
 
@@ -41471,12 +43787,11 @@ std::unique_ptr<Private_Key> load_key(DataSource& source,
    AlgorithmIdentifier alg_id;
    secure_vector<uint8_t> pkcs8_key = PKCS8_decode(source, get_pass, alg_id, is_encrypted);
 
-   const std::string alg_name = alg_id.oid().human_name_or_empty();
-   if(alg_name.empty()) {
+   if(const auto alg_name = alg_id.oid().registered_name()) {
+      return load_private_key(alg_id, pkcs8_key);
+   } else {
       throw PKCS8_Exception(fmt("Unknown algorithm OID {}", alg_id.oid()));
    }
-
-   return load_private_key(alg_id, pkcs8_key);
 }
 
 }  // namespace
@@ -41649,6 +43964,10 @@ PK_Decryptor_EME& PK_Decryptor_EME::operator=(PK_Decryptor_EME&&) noexcept = def
 
 size_t PK_Decryptor_EME::plaintext_length(size_t ctext_len) const {
    return m_op->plaintext_length(ctext_len);
+}
+
+size_t PK_Decryptor_EME::ciphertext_length(size_t ptext_len) const {
+   return m_op->ciphertext_length(ptext_len);
 }
 
 secure_vector<uint8_t> PK_Decryptor_EME::do_decrypt(uint8_t& valid_mask, const uint8_t in[], size_t in_len) const {
@@ -42128,7 +44447,7 @@ std::unique_ptr<Public_Key> load_key(DataSource& source) {
          BER_Decoder(source, BER_Decoder::Limits::DER())
             .start_sequence()
             .decode(alg_id)
-            .decode(key_bits, ASN1_Type::BitString)
+            .decode_octet_aligned_bitstring(key_bits)
             .end_cons()
             .verify_end();
       } else {
@@ -42137,7 +44456,7 @@ std::unique_ptr<Public_Key> load_key(DataSource& source) {
          BER_Decoder(ber, BER_Decoder::Limits::DER())
             .start_sequence()
             .decode(alg_id)
-            .decode(key_bits, ASN1_Type::BitString)
+            .decode_octet_aligned_bitstring(key_bits)
             .end_cons()
             .verify_end();
       }
@@ -42165,9 +44484,7 @@ std::unique_ptr<Public_Key> load_key(DataSource& source) {
 #endif
 
 #if defined(BOTAN_HAS_SYSTEM_RNG)
-#endif
-
-#if defined(BOTAN_HAS_OS_UTILS)
+#elif defined(BOTAN_HAS_OS_UTILS)
 #endif
 
 
@@ -42175,23 +44492,26 @@ namespace Botan {
 
 void RandomNumberGenerator::randomize_with_ts_input(std::span<uint8_t> output) {
    if(this->accepts_input()) {
-      std::array<uint8_t, 32> additional_input = {0};
-
-#if defined(BOTAN_HAS_OS_UTILS)
-      store_le(std::span{additional_input}.subspan<0, 8>(), OS::get_high_resolution_clock());
-      store_le(std::span{additional_input}.subspan<8, 4>(), OS::get_process_id());
-      constexpr size_t offset = 12;
-#else
-      constexpr size_t offset = 0;
-#endif
+      std::array<uint8_t, 16> additional_input = {0};
 
 #if defined(BOTAN_HAS_SYSTEM_RNG)
-      system_rng().randomize(std::span{additional_input}.subspan<offset>());
+      // If we have a system RNG just read 128 bits from that
+      system_rng().randomize(additional_input);
+      constexpr size_t written = additional_input.size();
+#elif defined(BOTAN_HAS_OS_UTILS)
+      // Otherwise take clock + pid
+      const uint64_t clock = OS::get_high_resolution_clock();
+      const uint32_t pid = OS::get_process_id();  // 0 if no PIDs on this system
+
+      store_le(std::span{additional_input}.first<8>(), clock);
+      store_le(std::span{additional_input}.subspan<8, 4>(), pid);
+      const size_t written = 8 + (pid != 0) ? 4 : 0;
 #else
-      BOTAN_UNUSED(offset);
+      // Nothing to use in this case
+      constexpr size_t written = 0;
 #endif
 
-      this->fill_bytes_with_input(output, additional_input);
+      this->fill_bytes_with_input(output, std::span{additional_input}.first(written));
    } else {
       this->fill_bytes_with_input(output, {});
    }
@@ -42982,25 +45302,49 @@ Sqlite3_Database::Sqlite3_Database(std::string_view db_filename, std::optional<i
    // concurrently from multiple threads.
    const int open_flags =
       sqlite_open_flags.value_or(SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX);
-   const int rc = ::sqlite3_open_v2(std::string(db_filename).c_str(), &m_db, open_flags, nullptr);
+   sqlite3* db = nullptr;
+   const int rc = ::sqlite3_open_v2(std::string(db_filename).c_str(), &db, open_flags, nullptr);
 
    if(rc != 0) [[unlikely]] {
-      const std::string err_msg = ::sqlite3_errmsg(m_db);
-      ::sqlite3_close(m_db);
-      m_db = nullptr;
+      const std::string err_msg = (db != nullptr) ? ::sqlite3_errmsg(db) : "unknown error";
+      ::sqlite3_close_v2(db);
       throw SQL_DB_Error("sqlite3_open failed - " + err_msg);
    }
+
+   m_db = std::shared_ptr<sqlite3>(db, [](sqlite3* p) noexcept { ::sqlite3_close_v2(p); });
 }
 
-Sqlite3_Database::~Sqlite3_Database() {
-   if(m_db != nullptr) [[likely]] {
-      ::sqlite3_close(m_db);
-   }
-   m_db = nullptr;
-}
+Sqlite3_Database::~Sqlite3_Database() = default;
 
 std::shared_ptr<SQL_Database::Statement> Sqlite3_Database::new_statement(std::string_view base_sql) const {
    return std::make_shared<Sqlite3_Statement>(m_db, base_sql);
+}
+
+std::shared_ptr<SQL_Database::Statement> Sqlite3_Database::upsert(
+   std::string_view table, std::initializer_list<std::string_view> columns) const {
+   BOTAN_ARG_CHECK(columns.size() > 0, "upsert requires at least one column");
+
+   std::string sql = "INSERT OR REPLACE INTO ";
+   sql += table;
+   sql += " (";
+   bool first = true;
+   for(const auto& col : columns) {
+      if(!first) {
+         sql += ", ";
+      }
+      sql += col;
+      first = false;
+   }
+   sql += ") VALUES (";
+   for(size_t i = 1; i <= columns.size(); ++i) {
+      if(i > 1) {
+         sql += ", ";
+      }
+      sql += fmt("?{}", i);
+   }
+   sql += ")";
+
+   return new_statement(sql);
 }
 
 size_t Sqlite3_Database::row_count(std::string_view table_name) {
@@ -43013,45 +45357,77 @@ size_t Sqlite3_Database::row_count(std::string_view table_name) {
    }
 }
 
-void Sqlite3_Database::create_table(std::string_view table_schema) {
+void Sqlite3_Database::create_table(const Table_Schema& schema) {
+   BOTAN_ARG_CHECK(!schema.name().empty(), "create_table requires a table name");
+   BOTAN_ARG_CHECK(!schema.columns().empty(), "create_table requires at least one column");
+
+   std::string sql = "CREATE TABLE ";
+   if(schema.is_if_not_exists()) {
+      sql += "IF NOT EXISTS ";
+   }
+   sql += schema.name();
+   sql += " (";
+   bool first = true;
+   for(const auto& col : schema.columns()) {
+      if(!first) {
+         sql += ", ";
+      }
+      sql += col.name();
+      sql += ' ';
+      switch(col.type()) {
+         case Column_Type::Blob:
+            sql += "BLOB";
+            break;
+         case Column_Type::String:
+            sql += "TEXT";
+            break;
+         case Column_Type::Integer:
+            sql += "INTEGER";
+            break;
+      }
+      if(col.is_primary_key()) {
+         sql += " PRIMARY KEY";
+      }
+      if(col.is_unique()) {
+         sql += " UNIQUE";
+      }
+      if(col.is_not_null()) {
+         sql += " NOT NULL";
+      }
+      first = false;
+   }
+   sql += ")";
+
    char* errmsg = nullptr;
-   const int rc = ::sqlite3_exec(m_db, std::string(table_schema).c_str(), nullptr, nullptr, &errmsg);
+   const int rc = ::sqlite3_exec(m_db.get(), sql.c_str(), nullptr, nullptr, &errmsg);
 
    if(rc != SQLITE_OK) {
-      const std::string err_msg = errmsg;
+      const std::string err_msg = (errmsg != nullptr) ? errmsg : "unknown error";
       ::sqlite3_free(errmsg);
-      ::sqlite3_close(m_db);
-      m_db = nullptr;
-      throw SQL_DB_Error("sqlite3_exec for table failed - " + err_msg);
+      throw SQL_DB_Error("sqlite3_exec for create_table failed - " + err_msg, rc);
    }
 }
 
 size_t Sqlite3_Database::rows_changed_by_last_statement() {
-   const auto result = ::sqlite3_changes64(m_db);
+   const auto result = ::sqlite3_changes64(m_db.get());
    BOTAN_ASSERT_NOMSG(result >= 0);
    return static_cast<size_t>(result);
 }
 
 bool Sqlite3_Database::is_threadsafe() const {
-   const int flag = sqlite3_threadsafe();
-
-   // `flag` can have three values:
+   // sqlite3_db_mutex() returns the connection's mutex if the connection is in
+   // serialized mode, and nullptr otherwise. This reflects both the compile-time
+   // SQLITE_THREADSAFE setting and the per-connection SQLITE_OPEN_(FULL|NO)MUTEX
+   // open flags actually used.
    //
-   // 0 - single threaded:  no locking is done inside the SQLite code
-   // 1 - serialized:       all SQLite database features can be used safely
-   //                       from multiple threads
-   // 2 - reduced locking:  application must ensure not to use a single
-   //                       database connection across threads
-   //
-   // https://www.sqlite.org/c3ref/threadsafe.html
-
-   // When opening the database connection we explicitly request
-   // SQLITE_OPEN_FULLMUTEX to ensure restrictive locking in SQLite.
-   return flag >= 1;
+   // https://www.sqlite.org/c3ref/db_mutex.html
+   return ::sqlite3_db_mutex(m_db.get()) != nullptr;
 }
 
-Sqlite3_Database::Sqlite3_Statement::Sqlite3_Statement(sqlite3* db, std::string_view base_sql) : m_stmt{} {
-   const int rc = ::sqlite3_prepare_v2(db, base_sql.data(), static_cast<int>(base_sql.size()), &m_stmt, nullptr);
+Sqlite3_Database::Sqlite3_Statement::Sqlite3_Statement(std::shared_ptr<sqlite3> db, std::string_view base_sql) :
+      m_db(std::move(db)), m_stmt{} {
+   const int rc =
+      ::sqlite3_prepare_v2(m_db.get(), base_sql.data(), static_cast<int>(base_sql.size()), &m_stmt, nullptr);
 
    if(rc != SQLITE_OK) {
       throw SQL_DB_Error(fmt("sqlite3_prepare failed on '{}' with err {}", base_sql, rc), rc);
@@ -43059,6 +45435,10 @@ Sqlite3_Database::Sqlite3_Statement::Sqlite3_Statement(sqlite3* db, std::string_
 }
 
 void Sqlite3_Database::Sqlite3_Statement::bind(int column, std::string_view val) {
+   if(val.data() == nullptr) {
+      bind_null(column);
+      return;
+   }
    const int rc = ::sqlite3_bind_text64(m_stmt, column, val.data(), val.size(), SQLITE_TRANSIENT, SQLITE_UTF8);
    if(rc != SQLITE_OK) {
       throw SQL_DB_Error("sqlite3_bind_text failed", rc);
@@ -43078,23 +45458,31 @@ void Sqlite3_Database::Sqlite3_Statement::bind(int column, std::chrono::system_c
 }
 
 void Sqlite3_Database::Sqlite3_Statement::bind(int column, const std::vector<uint8_t>& val) {
-   const int rc = ::sqlite3_bind_blob64(m_stmt, column, val.data(), val.size(), SQLITE_TRANSIENT);
-   if(rc != SQLITE_OK) {
-      throw SQL_DB_Error("sqlite3_bind_text failed", rc);
-   }
+   bind(column, val.data(), val.size());
 }
 
 void Sqlite3_Database::Sqlite3_Statement::bind(int column, const uint8_t* p, size_t len) {
+   if(p == nullptr) {
+      bind_null(column);
+      return;
+   }
    const int rc = ::sqlite3_bind_blob64(m_stmt, column, p, len, SQLITE_TRANSIENT);
    if(rc != SQLITE_OK) {
-      throw SQL_DB_Error("sqlite3_bind_text failed", rc);
+      throw SQL_DB_Error("sqlite3_bind_blob failed", rc);
    }
 }
 
-std::pair<const uint8_t*, size_t> Sqlite3_Database::Sqlite3_Statement::get_blob(int column) {
+void Sqlite3_Database::Sqlite3_Statement::bind_null(int column) {
+   const int rc = ::sqlite3_bind_null(m_stmt, column);
+   if(rc != SQLITE_OK) {
+      throw SQL_DB_Error("sqlite3_bind_null failed", rc);
+   }
+}
+
+std::span<const uint8_t> Sqlite3_Database::Sqlite3_Statement::get_blob(int column) {
    const auto column_type = ::sqlite3_column_type(m_stmt, column);
    if(column_type == SQLITE_NULL) {
-      return {nullptr, 0};
+      return {};
    }
 
    BOTAN_ASSERT(column_type == SQLITE_BLOB, "Return value is a blob");
@@ -43104,15 +45492,22 @@ std::pair<const uint8_t*, size_t> Sqlite3_Database::Sqlite3_Statement::get_blob(
 
    BOTAN_ASSERT(session_blob_size >= 0, "Blob size is non-negative");
 
-   return std::make_pair(static_cast<const uint8_t*>(session_blob), static_cast<size_t>(session_blob_size));
+   return {static_cast<const uint8_t*>(session_blob), static_cast<size_t>(session_blob_size)};
 }
 
-std::string Sqlite3_Database::Sqlite3_Statement::get_str(int column) {
-   BOTAN_ASSERT(::sqlite3_column_type(m_stmt, column) == SQLITE_TEXT, "Return value is text");
+std::optional<std::string> Sqlite3_Database::Sqlite3_Statement::get_str(int column) {
+   const auto column_type = ::sqlite3_column_type(m_stmt, column);
+   if(column_type == SQLITE_NULL) {
+      return std::nullopt;
+   }
+
+   BOTAN_ASSERT(column_type == SQLITE_TEXT, "Return value is text");
 
    const unsigned char* str = ::sqlite3_column_text(m_stmt, column);
+   const int len = ::sqlite3_column_bytes(m_stmt, column);
+   BOTAN_ASSERT(len >= 0, "Text length is non-negative");
 
-   return std::string(cast_uint8_ptr_to_char(str));
+   return std::string(cast_uint8_ptr_to_char(str), static_cast<size_t>(len));
 }
 
 size_t Sqlite3_Database::Sqlite3_Statement::get_size_t(int column) {
@@ -43131,7 +45526,14 @@ size_t Sqlite3_Database::Sqlite3_Statement::spin() {
 }
 
 bool Sqlite3_Database::Sqlite3_Statement::step() {
-   return (::sqlite3_step(m_stmt) == SQLITE_ROW);
+   const int rc = ::sqlite3_step(m_stmt);
+   if(rc == SQLITE_ROW) {
+      return true;
+   }
+   if(rc == SQLITE_DONE) {
+      return false;
+   }
+   throw SQL_DB_Error(fmt("sqlite3_step failed - {}", ::sqlite3_errmsg(::sqlite3_db_handle(m_stmt))), rc);
 }
 
 Sqlite3_Database::Sqlite3_Statement::~Sqlite3_Statement() {
@@ -43237,6 +45639,7 @@ void Stateful_RNG::reseed_from_rng(RandomNumberGenerator& rng, size_t poll_bits)
 void Stateful_RNG::reset_reseed_counter() {
    // Lock is held whenever this function is called
    m_reseed_counter = 1;
+   m_last_pid = OS::get_process_id();
 }
 
 void Stateful_RNG::reseed_check() {
@@ -43289,7 +45692,6 @@ void Stateful_RNG::reseed_check() {
 #endif
 
 #if defined(BOTAN_TARGET_OS_HAS_RTLGENRANDOM)
-   #include <limits>
 #elif defined(BOTAN_TARGET_OS_HAS_CRYPTO_NG)
    #include <bcrypt.h>
    #include <windows.h>
@@ -43650,6 +46052,382 @@ RandomNumberGenerator& system_rng() {
 
 }  // namespace Botan
 /*
+* (C) 2026 Jack Lloyd
+*
+* Botan is released under the Simplified BSD License (see license.txt)
+*/
+
+
+
+namespace Botan {
+
+namespace {
+
+std::optional<uint16_t> parse_port(std::string_view s) {
+   // RFC 3986 port is "*DIGIT" but we reject leading zeros ("host:0080")
+   if(const auto port = parse_u16(s, /*require_canonical=*/true)) {
+      if(*port > 0) {
+         return port;
+      }
+   }
+
+   return {};
+}
+
+bool is_valid_percent_escape(char c1, char c2) {
+   auto is_hex_digit = [](char c) {
+      return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+   };
+
+   if(!is_hex_digit(c1) || !is_hex_digit(c2)) {
+      return false;
+   }
+
+   // Proactively reject embedded null (%00)
+   if(c1 == '0' && c2 == '0') {
+      return false;
+   }
+
+   return true;
+}
+
+bool validate_path_query_fragment(std::string_view tail) {
+   /*
+   * RFC 3986 syntax for the path/query/fragment of a URI:
+   *
+   *   URI           = scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+   *   pchar         = unreserved / pct-encoded / sub-delims / ":" / "@"
+   *   segment       = *pchar
+   *   path-abempty  = *( "/" segment )
+   *   query         = *( pchar / "/" / "?" )
+   *   fragment     =  *( pchar / "/" / "?" )
+   */
+
+   constexpr auto is_pchar_or_slash = CharacterValidityTable::alpha_numeric_plus("-._~!$&'()*+,;=:@/");
+
+   enum class State : uint8_t { Path, Query, Fragment };
+   State state = State::Path;
+
+   for(size_t i = 0; i < tail.size(); ++i) {
+      const char c = tail[i];
+      if(c == '%') {
+         if(i + 2 >= tail.size() || !is_valid_percent_escape(tail[i + 1], tail[i + 2])) {
+            return false;
+         }
+         i += 2;
+         continue;
+      }
+      if(c == '?') {
+         // First '?' transitions from path to query, any further '?' are literal
+         if(state == State::Path) {
+            state = State::Query;
+         }
+         continue;
+      }
+      if(c == '#') {
+         // There is only one '#' fragment delimiter, second '#' is invalid
+         if(state == State::Fragment) {
+            return false;
+         }
+         state = State::Fragment;
+         continue;
+      }
+      if(!is_pchar_or_slash(c)) {
+         return false;
+      }
+   }
+   return true;
+}
+
+bool validate_userinfo(std::string_view userinfo) {
+   constexpr auto is_valid_userinfo_char = CharacterValidityTable::alpha_numeric_plus("-._~!$&'()*+,;=:");
+
+   for(size_t i = 0; i < userinfo.size(); ++i) {
+      const char c = userinfo[i];
+      if(c == '%') {
+         if(i + 2 >= userinfo.size() || !is_valid_percent_escape(userinfo[i + 1], userinfo[i + 2])) {
+            return false;
+         }
+         i += 2;
+         continue;
+      }
+      if(!is_valid_userinfo_char(c)) {
+         return false;
+      }
+   }
+   return true;
+}
+
+}  // namespace
+
+std::strong_ordering URI::operator<=>(const URI& other) const {
+   const bool has_authority = raw_authority().has_value();
+   const bool other_has_authority = other.raw_authority().has_value();
+
+   return std::tie(m_scheme, has_authority, m_authority, m_path, m_query, m_fragment) <=>
+          std::tie(
+             other.m_scheme, other_has_authority, other.m_authority, other.m_path, other.m_query, other.m_fragment);
+}
+
+bool URI::operator==(const URI& other) const {
+   return m_scheme == other.m_scheme && raw_authority().has_value() == other.raw_authority().has_value() &&
+          m_authority == other.m_authority && m_path == other.m_path && m_query == other.m_query &&
+          m_fragment == other.m_fragment;
+}
+
+std::optional<std::string_view> URI::raw_authority() const {
+   const auto colon = m_raw.find(':');
+   BOTAN_ASSERT_NOMSG(colon != std::string::npos);
+
+   const size_t rest_offset = colon + 1;
+   if(m_raw.size() < rest_offset + 2 || m_raw[rest_offset] != '/' || m_raw[rest_offset + 1] != '/') {
+      return std::nullopt;
+   }
+
+   const size_t authority_start = rest_offset + 2;
+   const auto authority_end = m_raw.find_first_of("/?#", authority_start);
+   const size_t authority_len =
+      (authority_end == std::string::npos) ? std::string::npos : authority_end - authority_start;
+   return std::string_view(m_raw).substr(authority_start, authority_len);
+}
+
+std::strong_ordering URI::Authority::operator<=>(const URI::Authority& other) const {
+   /*
+   Userinfo is compared without normalization; RFC 3986 6.2.2.1:
+      When a URI uses components of the generic syntax, the component
+      syntax equivalence rules always apply; namely, that the scheme
+      and host are case-insensitive and therefore should be normalized
+      to lowercase. ... The other generic syntax components are assumed
+      to be case-sensitive unless specifically defined otherwise by the
+      scheme.
+   */
+   return std::tie(m_userinfo, m_host, m_port) <=> std::tie(other.m_userinfo, other.m_host, other.m_port);
+}
+
+bool URI::Authority::operator==(const URI::Authority& other) const {
+   return m_userinfo == other.m_userinfo && m_host == other.m_host && m_port == other.m_port;
+}
+
+//static
+std::optional<URI> URI::from_string(std::string_view raw) {
+   // Empty string is not a valid URI
+   if(raw.empty()) {
+      return {};
+   }
+
+   // RFC 3986:
+   // scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." )
+   constexpr auto is_scheme_cont_char = CharacterValidityTable::alpha_numeric_plus("+-.");
+
+   const auto is_ascii_alpha = [](char c) -> bool { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); };
+
+   // Check the first scheme character
+   if(!is_ascii_alpha(raw.front())) {
+      return {};
+   }
+
+   // Scan the rest of the scheme
+   size_t i = 1;
+   while(i < raw.size() && is_scheme_cont_char(raw[i])) {
+      ++i;
+   }
+   // Scheme wasn't followed by ':' -> invalid
+   if(i >= raw.size() || raw[i] != ':') {
+      return {};
+   }
+
+   // Canonicalize the scheme
+   const std::string scheme = tolower_string(raw.substr(0, i));
+
+   auto rest = raw.substr(i + 1);
+
+   std::optional<Authority> parsed_authority;
+   std::string_view path_query_fragment;
+
+   if(rest.starts_with("//")) {
+      rest.remove_prefix(2);  // Strip off the '//'
+
+      // Authority runs to the first '/', '?' or '#'. The remaining is `path ? query # fragment`,
+      // which is validated against the RFC 3986 character set.
+      const auto end = rest.find_first_of("/?#");
+      const auto authority = (end == std::string_view::npos) ? rest : rest.substr(0, end);
+      path_query_fragment = (end == std::string_view::npos) ? std::string_view{} : rest.substr(end);
+
+      // Parse and validate non-empty authority strings (hostname, IPv4, or IPv6 address)
+      if(!authority.empty()) {
+         parsed_authority = Authority::from_string(authority);
+         if(!parsed_authority.has_value()) {
+            return {};
+         }
+      }
+   } else {
+      path_query_fragment = rest;
+   }
+
+   // Validate any `path ? query # fragment` portions of the URL
+   if(!validate_path_query_fragment(path_query_fragment)) {
+      return {};
+   }
+
+   // Split into path / query / fragment. Validation above guarantees at most
+   // one '#', so the first '#' is the fragment delimiter, and within the
+   // pre-fragment portion the first '?' (if any) is the query delimiter.
+   const auto hash = path_query_fragment.find('#');
+   const auto pre_fragment =
+      (hash == std::string_view::npos) ? path_query_fragment : path_query_fragment.substr(0, hash);
+   std::optional<std::string> fragment;
+   if(hash != std::string_view::npos) {
+      fragment = std::string(path_query_fragment.substr(hash + 1));
+   }
+
+   const auto qmark = pre_fragment.find('?');
+   const auto path = (qmark == std::string_view::npos) ? pre_fragment : pre_fragment.substr(0, qmark);
+   std::optional<std::string> query;
+   if(qmark != std::string_view::npos) {
+      query = std::string(pre_fragment.substr(qmark + 1));
+   }
+
+   // Accept
+   return URI(
+      std::string(raw), scheme, std::move(parsed_authority), std::string(path), std::move(query), std::move(fragment));
+}
+
+//static
+std::optional<URI::Authority> URI::Authority::from_string(std::string_view raw) {
+   if(raw.empty()) {
+      return {};
+   }
+
+   // Capture the full input now; the userinfo prefix is stripped from
+   // `raw` below, and m_raw must reflect the original
+   const std::string original_input(raw);
+
+   /*
+   RFC 3986
+     userinfo = *( unreserved / pct-encoded / sub-delims / ":" )
+
+   Thus a unencoded '@' is not allowed inside userinfo, and the single '@' splits the
+   username from the authority. The @ being present at all is significant; an empty
+   userinfo ("https://@example.com/") is distinct from no userinfo at all.
+   */
+   std::optional<std::string> userinfo;
+   const auto first_at = raw.find('@');
+   if(first_at != std::string_view::npos) {
+      if(raw.find('@', first_at + 1) != std::string_view::npos) {
+         return {};
+      }
+      const auto userinfo_view = raw.substr(0, first_at);
+      if(!validate_userinfo(userinfo_view)) {
+         return {};
+      }
+      userinfo = std::string(userinfo_view);
+      raw.remove_prefix(first_at + 1);
+   }
+
+   std::string_view host_view;
+   std::string_view port_str;
+   std::optional<Host> host;
+
+   if(!raw.empty() && raw.front() == '[') {
+      // Bracketed IPv6 literal.
+      const auto close = raw.find(']');
+      if(close == std::string_view::npos) {
+         return {};
+      }
+      host_view = raw.substr(1, close - 1);
+      if(host_view.empty()) {
+         return {};
+      }
+      const auto after = raw.substr(close + 1);
+      if(!after.empty()) {
+         if(after.front() != ':') {
+            return {};
+         }
+         port_str = after.substr(1);
+      }
+      auto ipv6 = IPv6Address::from_string(host_view);
+      if(!ipv6.has_value()) {
+         return {};
+      }
+      host = *ipv6;
+   } else {
+      // host[:port] with no brackets. Only one ':' is allowed (port).
+      const auto colon = raw.find(':');
+      if(colon == std::string_view::npos) {
+         host_view = raw;
+      } else {
+         host_view = raw.substr(0, colon);
+         port_str = raw.substr(colon + 1);
+
+         // Verify the `:` char is the only one that appears
+         if(port_str.find(':') != std::string::npos) {
+            return {};
+         }
+      }
+
+      if(host_view.empty()) {
+         return {};
+      }
+
+      // Technically valid per RFC 3986 but likely not something we want to support
+      if(host_view.ends_with('.')) {
+         return {};
+      }
+
+      if(auto ipv4 = IPv4Address::from_string(host_view)) {
+         host = *ipv4;
+      } else if(auto dns = DNSName::from_string(host_view)) {
+         host = std::move(*dns);
+      } else {
+         return {};
+      }
+   }
+
+   std::optional<uint16_t> port;
+
+   if(!port_str.empty()) {
+      port = parse_port(port_str);
+      if(!port.has_value()) {
+         return {};
+      }
+   }
+
+   return Authority(original_input, std::move(userinfo), std::move(*host), port);
+}
+
+std::string URI::Authority::host_to_string() const {
+   return std::visit([](const auto& h) -> std::string { return h.to_string(); }, m_host);
+}
+
+URI::Authority::HostKind URI::Authority::host_kind() const {
+   if(std::holds_alternative<DNSName>(m_host)) {
+      return HostKind::DNS;
+   } else if(std::holds_alternative<IPv4Address>(m_host)) {
+      return HostKind::IPv4;
+   } else if(std::holds_alternative<IPv6Address>(m_host)) {
+      return HostKind::IPv6;
+   } else {
+      BOTAN_ASSERT_UNREACHABLE();
+   }
+}
+
+//static
+std::vector<URI> URI::filter_scheme(std::string_view scheme, std::span<const URI> uris) {
+   std::vector<URI> results;
+
+   const auto normalized_scheme = tolower_string(scheme);
+
+   for(const auto& uri : uris) {
+      if(uri.scheme() == normalized_scheme && uri.authority().has_value()) {
+         results.push_back(uri);
+      }
+   }
+
+   return results;
+}
+
+}  // namespace Botan
+/*
 * (C) 2017,2023 Jack Lloyd
 *
 * Botan is released under the Simplified BSD License (see license.txt)
@@ -43789,32 +46567,10 @@ void assert_unreachable(const char* file, int line) {
 */
 
 
-#include <ctime>
 
 namespace Botan {
 
 namespace {
-
-// TODO replace this with https://howardhinnant.github.io/date_algorithms.html#civil_from_days
-std::tm do_gmtime(std::time_t time_val) {
-   std::tm tm{};
-
-#if defined(BOTAN_TARGET_OS_HAS_WIN32)
-   ::gmtime_s(&tm, &time_val);  // Windows
-#elif defined(BOTAN_TARGET_OS_HAS_POSIX1)
-   if(::gmtime_r(&time_val, &tm) == nullptr) {
-      throw Encoding_Error("do_gmtime could not convert");
-   }
-#else
-   std::tm* tm_p = std::gmtime(&time_val);
-   if(tm_p == nullptr) {
-      throw Encoding_Error("do_gmtime could not convert");
-   }
-   tm = *tm_p;
-#endif
-
-   return tm;
-}
 
 /*
 Portable replacement for timegm, _mkgmtime, etc
@@ -43822,11 +46578,12 @@ Portable replacement for timegm, _mkgmtime, etc
 Algorithm due to Howard Hinnant
 
 See https://howardhinnant.github.io/date_algorithms.html#days_from_civil
-for details and explanation. The code is slightly simplified by our assumption
-that the date is at least 1970, which is sufficient for our purposes.
+for details and explanation. The result is negative for dates before the epoch.
+The code is slightly simplified by our assumption that the date is at least 1950,
+which is sufficient for our purposes (ASN1_Time uses the same lower bound).
 */
-uint64_t days_since_epoch(uint32_t year, uint32_t month, uint32_t day) {
-   BOTAN_ARG_CHECK(year >= 1970, "Years before 1970 not supported");
+int64_t days_since_epoch(uint32_t year, uint32_t month, uint32_t day) {
+   BOTAN_ARG_CHECK(year >= 1950, "Years before 1950 not supported");
 
    if(month <= 2) {
       year -= 1;
@@ -43835,44 +46592,106 @@ uint64_t days_since_epoch(uint32_t year, uint32_t month, uint32_t day) {
    const uint32_t yoe = year - era * 400;                                          // [0, 399]
    const uint32_t doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;  // [0, 365]
    const uint32_t doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;                     // [0, 146096]
-   return era * 146097 + doe - 719468;
+   return static_cast<int64_t>(era) * 146097 + static_cast<int64_t>(doe) - 719468;
+}
+
+/*
+Portable replacement for gmtime, gmtime_r, _gmtime_s, etc
+
+Algorithm due to Howard Hinnant
+
+See https://howardhinnant.github.io/date_algorithms.html#civil_from_days
+for details and explanation.
+*/
+std::array<uint32_t, 6> civil_from_time_point(const std::chrono::system_clock::time_point& tp) {
+   const int64_t t = static_cast<int64_t>(std::chrono::system_clock::to_time_t(tp));
+
+   // Split into days since epoch and seconds within the day, flooring towards
+   // negative infinity so that times before the epoch are handled correctly.
+   int64_t days = t / 86400;
+   int64_t tod = t % 86400;
+   if(tod < 0) {
+      tod += 86400;
+      days -= 1;
+   }
+
+   const int64_t z = days + 719468;
+   const int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+   const int64_t doe = z - era * 146097;                                       // [0, 146096]
+   const int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;  // [0, 399]
+   const int64_t y = yoe + era * 400;
+   const int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);  // [0, 365]
+   const int64_t mp = (5 * doy + 2) / 153;                       // [0, 11]
+   const int64_t day = doy - (153 * mp + 2) / 5 + 1;             // [1, 31]
+   const int64_t month = mp < 10 ? mp + 3 : mp - 9;              // [1, 12]
+   const int64_t year = y + (month <= 2 ? 1 : 0);
+
+   return {static_cast<uint32_t>(year),
+           static_cast<uint32_t>(month),
+           static_cast<uint32_t>(day),
+           static_cast<uint32_t>(tod / 3600),
+           static_cast<uint32_t>((tod % 3600) / 60),
+           static_cast<uint32_t>(tod % 60)};
 }
 
 }  // namespace
 
-uint64_t calendar_point::seconds_since_epoch() const {
+calendar_point::calendar_point(uint32_t y, uint32_t mon, uint32_t d, uint32_t h, uint32_t min, uint32_t sec) :
+      m_year(static_cast<uint16_t>(y)),
+      m_month(static_cast<uint8_t>(mon)),
+      m_day(static_cast<uint8_t>(d)),
+      m_hour(static_cast<uint8_t>(h)),
+      m_minutes(static_cast<uint8_t>(min)),
+      m_seconds(static_cast<uint8_t>(sec)) {
+   BOTAN_ARG_CHECK(y <= 9999, "Year is outside representable range");
+   BOTAN_ARG_CHECK(mon >= 1 && mon <= 12, "Month is outside range");
+   BOTAN_ARG_CHECK(d >= 1 && d <= 31, "Day is outside range");
+   BOTAN_ARG_CHECK(h < 24, "Hour is outside range");
+   BOTAN_ARG_CHECK(min < 60, "Minute is outside range");
+   BOTAN_ARG_CHECK(sec < 60, "Seconds is outside range");
+}
+
+int64_t calendar_point::seconds_since_epoch() const {
    return (days_since_epoch(year(), month(), day()) * 86400) + (hour() * 60 * 60) + (minutes() * 60) + seconds();
 }
 
 std::chrono::system_clock::time_point calendar_point::to_std_timepoint() const {
-   const uint64_t seconds_64 = this->seconds_since_epoch();
+   const int64_t seconds_64 = this->seconds_since_epoch();
+
+   /*
+   * The tick of a system_clock varies by implementation, and so also the
+   * largest and smallest representable values vary. Ensure this date is within
+   * range of the clock implementation.
+   */
+   constexpr int64_t max_representable_seconds = static_cast<int64_t>(
+      std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::duration::max()).count());
+   constexpr int64_t min_representable_seconds = static_cast<int64_t>(
+      std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::duration::min()).count());
+
+   if(seconds_64 > max_representable_seconds || seconds_64 < min_representable_seconds) {
+      throw Invalid_Argument("calendar_point::to_std_timepoint time is outside the representable range");
+   }
+
    const time_t seconds_time_t = static_cast<time_t>(seconds_64);
 
    if(seconds_64 - seconds_time_t != 0) {
-      throw Invalid_Argument("calendar_point::to_std_timepoint time_t overflow");
+      throw Invalid_Argument("calendar_point::to_std_timepoint time is outside the representable range");
    }
 
    return std::chrono::system_clock::from_time_t(seconds_time_t);
 }
 
-std::string calendar_point::to_string() const {
-   // desired format: <YYYY>-<MM>-<dd>T<HH>:<mm>:<ss>
-   std::stringstream output;
-   output << std::setfill('0') << std::setw(4) << year() << "-" << std::setw(2) << month() << "-" << std::setw(2)
-          << day() << "T" << std::setw(2) << hour() << ":" << std::setw(2) << minutes() << ":" << std::setw(2)
-          << seconds();
-   return output.str();
-}
-
 calendar_point::calendar_point(const std::chrono::system_clock::time_point& time_point) {
-   const std::tm tm = do_gmtime(std::chrono::system_clock::to_time_t(time_point));
+   const auto [year, month, day, hour, minute, second] = civil_from_time_point(time_point);
 
-   m_year = tm.tm_year + 1900;
-   m_month = tm.tm_mon + 1;
-   m_day = tm.tm_mday;
-   m_hour = tm.tm_hour;
-   m_minutes = tm.tm_min;
-   m_seconds = tm.tm_sec;
+   BOTAN_ARG_CHECK(year <= 9999, "Year is outside representable range");
+
+   m_year = static_cast<uint16_t>(year);
+   m_month = static_cast<uint8_t>(month);
+   m_day = static_cast<uint8_t>(day);
+   m_hour = static_cast<uint8_t>(hour);
+   m_minutes = static_cast<uint8_t>(minute);
+   m_seconds = static_cast<uint8_t>(second);
 }
 
 }  // namespace Botan
@@ -43923,7 +46742,9 @@ void append_utf8_for(std::string& s, uint32_t c) {
    }
 }
 
-uint32_t next_utf8_codepoint(const std::string& utf8, size_t& pos) {
+}  // namespace
+
+uint32_t next_utf8_codepoint(std::string_view utf8, size_t& pos) {
    auto read_continuation = [&]() -> uint32_t {
       if(pos >= utf8.size()) {
          throw Decoding_Error("Invalid UTF-8 sequence");
@@ -43935,6 +46756,9 @@ uint32_t next_utf8_codepoint(const std::string& utf8, size_t& pos) {
       return b & 0x3F;
    };
 
+   if(pos >= utf8.size()) {
+      throw Decoding_Error("Invalid UTF-8 sequence");
+   }
    const uint8_t lead = static_cast<uint8_t>(utf8[pos++]);
    uint32_t c = 0;
 
@@ -43975,9 +46799,7 @@ uint32_t next_utf8_codepoint(const std::string& utf8, size_t& pos) {
    return c;
 }
 
-}  // namespace
-
-bool is_valid_utf8(const std::string& utf8) {
+bool is_valid_utf8(std::string_view utf8) {
    try {
       size_t pos = 0;
       while(pos < utf8.size()) {
@@ -43990,23 +46812,23 @@ bool is_valid_utf8(const std::string& utf8) {
    return true;
 }
 
-std::string ucs2_to_utf8(const uint8_t ucs2[], size_t len) {
-   if(len % 2 != 0) {
+std::string ucs2_to_utf8(std::span<const uint8_t> ucs2) {
+   if(ucs2.size() % 2 != 0) {
       throw Decoding_Error("Invalid length for UCS-2 string");
    }
 
-   const size_t chars = len / 2;
+   const size_t chars = ucs2.size() / 2;
 
    std::string s;
    for(size_t i = 0; i != chars; ++i) {
-      const uint32_t c = load_be<uint16_t>(ucs2, i);
+      const uint32_t c = load_be<uint16_t>(ucs2.data(), i);
       append_utf8_for(s, c);
    }
 
    return s;
 }
 
-std::vector<uint8_t> utf8_to_ucs2(const std::string& utf8) {
+std::vector<uint8_t> utf8_to_ucs2(std::string_view utf8) {
    std::vector<uint8_t> out;
    out.reserve(utf8.size() * 2);
 
@@ -44024,23 +46846,23 @@ std::vector<uint8_t> utf8_to_ucs2(const std::string& utf8) {
    return out;
 }
 
-std::string ucs4_to_utf8(const uint8_t ucs4[], size_t len) {
-   if(len % 4 != 0) {
+std::string ucs4_to_utf8(std::span<const uint8_t> ucs4) {
+   if(ucs4.size() % 4 != 0) {
       throw Decoding_Error("Invalid length for UCS-4 string");
    }
 
-   const size_t chars = len / 4;
+   const size_t chars = ucs4.size() / 4;
 
    std::string s;
    for(size_t i = 0; i != chars; ++i) {
-      const uint32_t c = load_be<uint32_t>(ucs4, i);
+      const uint32_t c = load_be<uint32_t>(ucs4.data(), i);
       append_utf8_for(s, c);
    }
 
    return s;
 }
 
-std::vector<uint8_t> utf8_to_ucs4(const std::string& utf8) {
+std::vector<uint8_t> utf8_to_ucs4(std::string_view utf8) {
    std::vector<uint8_t> out;
    out.reserve(utf8.size() * 4);
 
@@ -44059,36 +46881,81 @@ std::vector<uint8_t> utf8_to_ucs4(const std::string& utf8) {
 /*
 * Convert from ISO 8859-1 to UTF-8
 */
-std::string latin1_to_utf8(const uint8_t chars[], size_t len) {
+std::string latin1_to_utf8(std::span<const uint8_t> chars) {
    std::string s;
-   for(size_t i = 0; i != len; ++i) {
-      const uint32_t c = static_cast<uint8_t>(chars[i]);
-      append_utf8_for(s, c);
+   for(const uint8_t b : chars) {
+      append_utf8_for(s, static_cast<uint32_t>(b));
    }
    return s;
 }
 
-std::string format_char_for_display(char c) {
-   std::ostringstream oss;
+bool is_ascii_control_char(char c) {
+   const uint8_t b = static_cast<uint8_t>(c);
+   return b < 0x20 || b == 0x7F;
+}
 
-   oss << "'";
+bool is_unicode_control_char(uint32_t cp) {
+   return cp < 0x20 || (cp >= 0x7F && cp <= 0x9F);
+}
 
-   if(c == '\t') {
-      oss << "\\t";
-   } else if(c == '\n') {
-      oss << "\\n";
-   } else if(c == '\r') {
-      oss << "\\r";
-   } else if(static_cast<unsigned char>(c) >= 128) {
-      const unsigned char z = static_cast<unsigned char>(c);
-      oss << "\\x" << std::hex << std::uppercase << static_cast<int>(z);
-   } else {
-      oss << c;
+std::string escape_control_chars(std::string_view utf8) {
+   std::string out;
+   out.reserve(utf8.size());
+
+   const auto append_hex_escape = [&](uint8_t b) {
+      out += "\\x";
+      out += nibble_to_hex(b >> 4);
+      out += nibble_to_hex(b);
+   };
+
+   size_t pos = 0;
+   while(pos < utf8.size()) {
+      const size_t start = pos;
+
+      uint32_t cp = 0;
+      try {
+         cp = next_utf8_codepoint(utf8, pos);
+      } catch(const Decoding_Error&) {
+         // Not valid UTF-8: escape the offending byte and resume
+         append_hex_escape(static_cast<uint8_t>(utf8[start]));
+         pos = start + 1;
+         continue;
+      }
+
+      if(is_unicode_control_char(cp)) {
+         for(size_t i = start; i < pos; ++i) {
+            append_hex_escape(static_cast<uint8_t>(utf8[i]));
+         }
+      } else {
+         out.append(utf8.substr(start, pos - start));
+      }
    }
 
-   oss << "'";
+   return out;
+}
 
-   return oss.str();
+std::string format_char_for_display(char c) {
+   std::string out;
+   out += '\'';
+
+   if(c == '\t') {
+      out += "\\t";
+   } else if(c == '\n') {
+      out += "\\n";
+   } else if(c == '\r') {
+      out += "\\r";
+   } else if(is_ascii_control_char(c) || static_cast<uint8_t>(c) >= 0x80) {
+      const auto b = static_cast<uint8_t>(c);
+      out += "\\x";
+      out += nibble_to_hex(b >> 4);
+      out += nibble_to_hex(b);
+   } else {
+      out += c;
+   }
+
+   out += '\'';
+
+   return out;
 }
 
 }  // namespace Botan
@@ -44404,6 +47271,50 @@ DataSource_Stream::~DataSource_Stream() = default;
 
 }  // namespace Botan
 /*
+* (C) 2026 Jack Lloyd
+*
+* Botan is released under the Simplified BSD License (see license.txt)
+*/
+
+
+
+namespace Botan {
+
+bool SQL_Database::is_valid_table_name(std::string_view table) const {
+   if(table.empty()) {
+      return false;
+   }
+
+   constexpr auto valid_table_name_char = CharacterValidityTable::alpha_numeric_plus("_");
+   for(const char c : table) {
+      if(!valid_table_name_char(c)) {
+         return false;
+      }
+   }
+   return true;
+}
+
+std::shared_ptr<SQL_Database::Statement> SQL_Database::select(std::string_view columns,
+                                                              std::string_view table,
+                                                              std::string_view where,
+                                                              std::optional<size_t> limit) const {
+   std::string sql = "SELECT ";
+   sql += columns;
+   sql += " FROM ";
+   sql += table;
+   if(!where.empty()) {
+      sql += " WHERE ";
+      sql += where;
+   }
+   if(limit.has_value()) {
+      sql += " LIMIT ";
+      sql += std::to_string(*limit);
+   }
+   return new_statement(sql);
+}
+
+}  // namespace Botan
+/*
 * (C) 2017 Jack Lloyd
 *
 * Botan is released under the Simplified BSD License (see license.txt)
@@ -44555,7 +47466,6 @@ Not_Implemented::Not_Implemented(std::string_view err) : Exception("Not implemen
 
 #if defined(BOTAN_TARGET_OS_HAS_POSIX1)
    #include <dirent.h>
-   #include <functional>
    #include <sys/stat.h>
    #include <sys/types.h>
 #elif defined(BOTAN_TARGET_OS_HAS_WIN32)
@@ -44705,7 +47615,6 @@ bool constant_time_compare(std::span<const uint8_t> x, std::span<const uint8_t> 
 */
 
 
-#include <cstring>
 
 #if defined(BOTAN_TARGET_OS_HAS_EXPLICIT_BZERO)
    #include <string.h>
@@ -44770,40 +47679,71 @@ void secure_zeroize_buffer(void* ptr, size_t n) {
 */
 
 
-#include <limits>
+#include <concepts>
 
 namespace Botan {
 
-uint16_t to_uint16(std::string_view str) {
-   const uint32_t x = to_u32bit(str);
+namespace {
 
-   if(x != static_cast<uint16_t>(x)) {
-      throw Invalid_Argument("Integer value exceeds 16 bit range");
+std::optional<size_t> digit_from_ascii(char c) {
+   if(c >= '0' && c <= '9') {
+      return c - '0';
+   } else {
+      return {};
    }
-
-   return static_cast<uint16_t>(x);
 }
 
-uint32_t to_u32bit(std::string_view str_view) {
-   const std::string str(str_view);
+template <std::unsigned_integral T>
+std::optional<T> parse_decimal_integer(std::string_view input, bool require_canonical) {
+   if(input.empty() || input.size() > (std::numeric_limits<T>::digits10 + 1)) {
+      return {};
+   }
 
-   // std::stoul is not strict enough. Ensure that str is digit only [0-9]*
-   for(const char chr : str) {
-      if(chr < '0' || chr > '9') {
-         throw Invalid_Argument("to_u32bit invalid decimal string '" + str + "'");
+   // The canonical encoding of zero is "0"; no other value starts with a zero
+   if(require_canonical && input.size() > 1 && input.front() == '0') {
+      return {};
+   }
+
+   T accum = 0;
+
+   for(const char c : input) {
+      if(const auto digit = digit_from_ascii(c)) {
+         if(accum > (std::numeric_limits<T>::max() - static_cast<T>(*digit)) / 10) {
+            return {};
+         }
+         accum = accum * 10 + static_cast<T>(*digit);
+      } else {
+         return {};
       }
    }
 
-   const unsigned long int x = std::stoul(str);
+   return accum;
+}
 
-   if constexpr(sizeof(unsigned long int) > 4) {
-      // x might be uint64
-      if(x > std::numeric_limits<uint32_t>::max()) {
-         throw Invalid_Argument("Integer value of " + str + " exceeds 32 bit range");
-      }
+}  // namespace
+
+std::optional<uint16_t> parse_u16(std::string_view input, bool require_canonical) {
+   return parse_decimal_integer<uint16_t>(input, require_canonical);
+}
+
+std::optional<uint32_t> parse_u32(std::string_view input, bool require_canonical) {
+   return parse_decimal_integer<uint32_t>(input, require_canonical);
+}
+
+std::optional<uint64_t> parse_u64(std::string_view input, bool require_canonical) {
+   return parse_decimal_integer<uint64_t>(input, require_canonical);
+}
+
+std::optional<size_t> parse_sz(std::string_view input, bool require_canonical) {
+   return parse_decimal_integer<size_t>(input, require_canonical);
+}
+
+uint32_t to_u32bit(std::string_view input) {
+   if(const auto parsed = parse_u32(input)) {
+      return *parsed;
+   } else {
+      throw Invalid_Argument(fmt("Failed to parse input '{}' as a 32-bit integer", input));
    }
-
-   return static_cast<uint32_t>(x);
 }
 
 /*
@@ -44905,231 +47845,6 @@ std::string string_join(const std::vector<std::string>& strs, char delim) {
    return out.str();
 }
 
-/*
-* Convert a decimal-dotted string to binary IP
-*/
-std::optional<uint32_t> string_to_ipv4(std::string_view str) {
-   // At least 3 dots + 4 1-digit integers
-   // At most 3 dots + 4 3-digit integers
-   if(str.size() < 3 + 4 * 1 || str.size() > 3 + 4 * 3) {
-      return {};
-   }
-
-   // the final result
-   uint32_t ip = 0;
-   // the number of '.' seen so far
-   size_t dots = 0;
-   // accumulates one quad (range 0-255)
-   uint32_t accum = 0;
-   // # of digits pushed to accum since last dot
-   size_t cur_digits = 0;
-
-   for(const char c : str) {
-      if(c == '.') {
-         // . without preceding digit is invalid
-         if(cur_digits == 0) {
-            return {};
-         }
-         dots += 1;
-         // too many dots
-         if(dots > 3) {
-            return {};
-         }
-
-         cur_digits = 0;
-         ip = (ip << 8) | accum;
-         accum = 0;
-      } else if(c >= '0' && c <= '9') {
-         const auto d = static_cast<uint8_t>(c - '0');
-
-         // prohibit leading zero in quad (used for octal)
-         if(cur_digits > 0 && accum == 0) {
-            return {};
-         }
-         accum = (accum * 10) + d;
-
-         if(accum > 255) {
-            return {};
-         }
-
-         cur_digits++;
-         BOTAN_ASSERT_NOMSG(cur_digits <= 3);
-      } else {
-         return {};
-      }
-   }
-
-   // no trailing digits?
-   if(cur_digits == 0) {
-      return {};
-   }
-
-   // insufficient # of dots
-   if(dots != 3) {
-      return {};
-   }
-
-   ip = (ip << 8) | accum;
-
-   return ip;
-}
-
-std::optional<std::array<uint8_t, 16>> string_to_ipv6(std::string_view str) {
-   if(str.empty()) {
-      return {};
-   }
-
-   // Parsed hex groups, split by whether they appeared before or after a "::".
-   // If no "::" appears, only `pre` is populated and must reach exactly 8 groups.
-   std::array<uint16_t, 8> pre{};
-   std::array<uint16_t, 8> post{};
-   size_t pre_count = 0;
-   size_t post_count = 0;
-   bool seen_double_colon = false;
-
-   auto hex_value = [](char c) -> std::optional<uint8_t> {
-      if(c >= '0' && c <= '9') {
-         return c - '0';
-      } else if(c >= 'a' && c <= 'f') {
-         return 10 + (c - 'a');
-      } else if(c >= 'A' && c <= 'F') {
-         return 10 + (c - 'A');
-      } else {
-         return {};
-      }
-   };
-
-   size_t idx = 0;
-   bool expect_group = true;  // set after any separator, cleared after a group
-
-   while(idx < str.size()) {
-      if(str[idx] == ':') {
-         if(idx + 1 < str.size() && str[idx + 1] == ':') {
-            if(seen_double_colon) {
-               return {};  // at most one "::"
-            }
-            seen_double_colon = true;
-            idx += 2;
-            expect_group = (idx < str.size());
-            continue;
-         }
-         // single ':' separator between groups — only valid after a group
-         if(expect_group) {
-            return {};
-         }
-         expect_group = true;
-         idx += 1;
-         continue;
-      }
-
-      // Parse a hex group of 1..4 digits
-      uint32_t group = 0;
-      size_t hex_chars = 0;
-      while(idx < str.size() && hex_chars < 4) {
-         const auto digit = hex_value(str[idx]);
-         if(digit.has_value() == false) {
-            break;
-         }
-         group = (group << 4) | static_cast<uint32_t>(digit.value());
-         idx += 1;
-         hex_chars += 1;
-      }
-      if(hex_chars == 0) {
-         return {};
-      }
-      // If a 5th hex digit follows, the group is oversized.
-      if(hex_chars == 4 && idx < str.size() && hex_value(str[idx]).has_value()) {
-         return {};
-      }
-
-      if(seen_double_colon) {
-         if(post_count >= 8) {
-            return {};
-         }
-         post[post_count++] = static_cast<uint16_t>(group);
-      } else {
-         if(pre_count >= 8) {
-            return {};
-         }
-         pre[pre_count++] = static_cast<uint16_t>(group);
-      }
-      expect_group = false;
-   }
-
-   // Trailing single ':' is invalid
-   if(expect_group) {
-      return {};
-   }
-
-   const size_t total_groups = pre_count + post_count;
-   if(seen_double_colon) {
-      // "::" has to cover at least one zero group
-      if(total_groups > 7) {
-         return {};
-      }
-   } else {
-      if(total_groups != 8) {
-         return {};
-      }
-   }
-
-   std::array<uint8_t, 16> out{};
-   for(size_t i = 0; i != pre_count; ++i) {
-      out[2 * i] = get_byte<0>(pre[i]);
-      out[2 * i + 1] = get_byte<1>(pre[i]);
-   }
-   const size_t gap = 8 - total_groups;
-   for(size_t i = 0; i != post_count; ++i) {
-      const size_t target = pre_count + gap + i;
-      out[2 * target] = get_byte<0>(post[i]);
-      out[2 * target + 1] = get_byte<1>(post[i]);
-   }
-   return out;
-}
-
-std::string ipv6_to_string(std::span<const uint8_t, 16> a) {
-   static const char* hex = "0123456789abcdef";
-
-   std::string out;
-   out.reserve(39);
-
-   for(size_t i = 0; i != 16; i += 2) {
-      if(i != 0) {
-         out.push_back(':');
-      }
-      const uint16_t group = make_uint16(a[i], a[i + 1]);
-      bool started = false;
-      // Write each nibble omitting leading 0s
-      for(int s = 12; s >= 0; s -= 4) {
-         const auto nibble = (group >> s) & 0xF;
-         if(nibble != 0 || started || s == 0) {
-            out.push_back(hex[nibble]);
-            started = true;
-         }
-      }
-   }
-   return out;
-}
-
-/*
-* Convert an IP address to decimal-dotted string
-*/
-std::string ipv4_to_string(uint32_t ip) {
-   uint8_t bits[4];
-   store_be(ip, bits);
-
-   std::string str;
-
-   for(size_t i = 0; i != 4; ++i) {
-      if(i > 0) {
-         str += ".";
-      }
-      str += std::to_string(bits[i]);
-   }
-
-   return str;
-}
-
 std::string tolower_string(std::string_view str) {
    // Locale-independent ASCII fold; the only callers (DNS name canonicalization
    // for SAN/name-constraints) work on ASCII strings per RFC 1035.
@@ -45140,228 +47855,6 @@ std::string tolower_string(std::string_view str) {
       }
    }
    return lower;
-}
-
-bool host_wildcard_match(std::string_view issued, std::string_view host) {
-   if(host.empty() || issued.empty()) {
-      return false;
-   }
-
-   // Maximum valid DNS name
-   if(host.size() > 253) {
-      return false;
-   }
-
-   /*
-   The wildcard if existing absorbs (host.size() - issued.size() + 1) chars,
-   which must be non-negative. So issued cannot possibly exceed host.size() + 1.
-   */
-   if(issued.size() > host.size() + 1) {
-      return false;
-   }
-
-   /*
-   If there are embedded nulls in your issued name
-   Well I feel bad for you son
-   */
-   if(issued.find('\0') != std::string_view::npos) {
-      return false;
-   }
-
-   // '*' is not a valid character in DNS names so should not appear on the host side
-   if(host.find('*') != std::string_view::npos) {
-      return false;
-   }
-
-   // Similarly a DNS name can't end in .
-   if(host.back() == '.') {
-      return false;
-   }
-
-   // And a host can't have an empty name component, so reject that
-   if(host.find("..") != std::string_view::npos) {
-      return false;
-   }
-
-   // ASCII-only case-insensitive char equality, avoids locale overhead from tolower
-   auto dns_char_eq = [](char a, char b) -> bool {
-      if(a == b) {
-         return true;
-      }
-      const auto la = static_cast<unsigned char>(a | 0x20);
-      const auto lb = static_cast<unsigned char>(b | 0x20);
-      return la == lb && la >= 'a' && la <= 'z';
-   };
-
-   auto dns_char_eq_range = [&](std::string_view a, std::string_view b) -> bool {
-      if(a.size() != b.size()) {
-         return false;
-      }
-      for(size_t i = 0; i != a.size(); ++i) {
-         if(!dns_char_eq(a[i], b[i])) {
-            return false;
-         }
-      }
-      return true;
-   };
-
-   // Exact match: accept
-   if(dns_char_eq_range(issued, host)) {
-      return true;
-   }
-
-   // First detect offset of wildcard '*' if included
-   const size_t first_star = issued.find('*');
-   const bool has_wildcard = (first_star != std::string_view::npos);
-
-   // At most one wildcard is allowed
-   if(has_wildcard && issued.find('*', first_star + 1) != std::string_view::npos) {
-      return false;
-   }
-
-   // If no * at all then not a wildcard, and so not a match
-   if(!has_wildcard) {
-      return false;
-   }
-
-   /*
-   Now walk through the issued string, making sure every character
-   matches. When we come to the (singular) '*', jump forward in the
-   hostname by the corresponding amount. We know exactly how much
-   space the wildcard takes because it must be exactly `len(host) -
-   len(issued) + 1 chars`.
-
-   We also verify that the '*' comes in the leftmost component, and
-   doesn't skip over any '.' in the hostname.
-   */
-   size_t dots_seen = 0;
-   size_t host_idx = 0;
-
-   for(size_t i = 0; i != issued.size(); ++i) {
-      if(issued[i] == '.') {
-         dots_seen += 1;
-      }
-
-      if(issued[i] == '*') {
-         // Fail: wildcard can only come in leftmost component
-         if(dots_seen > 0) {
-            return false;
-         }
-
-         /*
-         Since there is only one * we know the tail of the issued and
-         hostname must be an exact match. In this case advance host_idx
-         to match.
-         */
-         const size_t advance = (host.size() - issued.size() + 1);
-
-         if(host_idx + advance > host.size()) {  // shouldn't happen
-            return false;
-         }
-
-         // Can't be any intervening .s that we would have skipped
-         for(size_t k = host_idx; k != host_idx + advance; ++k) {
-            if(host[k] == '.') {
-               return false;
-            }
-         }
-
-         host_idx += advance;
-      } else {
-         if(!dns_char_eq(issued[i], host[host_idx])) {
-            return false;
-         }
-
-         host_idx += 1;
-      }
-   }
-
-   // Wildcard issued name must have at least 3 components
-   if(dots_seen < 2) {
-      return false;
-   }
-
-   return true;
-}
-
-std::string check_and_canonicalize_dns_name(std::string_view name) {
-   if(name.size() > 255) {
-      throw Decoding_Error("DNS name exceeds maximum allowed length");
-   }
-
-   if(name.empty()) {
-      throw Decoding_Error("DNS name cannot be empty");
-   }
-
-   if(name.starts_with(".") || name.ends_with(".")) {
-      throw Decoding_Error("DNS name cannot start or end with a dot");
-   }
-
-   /*
-   * Table mapping uppercase to lowercase and only including values for valid DNS names
-   * namely A-Z, a-z, 0-9, hyphen, and dot, plus '*' for wildcarding. (RFC 1035)
-   */
-   // clang-format off
-   constexpr uint8_t DNS_CHAR_MAPPING[128] = {
-      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-      '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0',
-      '\0', '\0', '\0', '\0',  '*', '\0', '\0',  '-',  '.', '\0',  '0',  '1',  '2',  '3',  '4',  '5',  '6',  '7',  '8',
-       '9', '\0', '\0', '\0', '\0', '\0', '\0', '\0',  'a',  'b',  'c',  'd',  'e',  'f',  'g',  'h',  'i',  'j',  'k',
-       'l',  'm',  'n',  'o',  'p',  'q',  'r',  's',  't',  'u',  'v',  'w',  'x',  'y',  'z', '\0', '\0', '\0', '\0',
-      '\0', '\0',  'a',  'b',  'c',  'd',  'e',  'f',  'g',  'h',  'i',  'j',  'k',  'l',  'm',  'n',  'o',  'p',  'q',
-       'r',  's',  't',  'u',  'v',  'w',  'x',  'y',  'z', '\0', '\0', '\0', '\0', '\0',
-   };
-   // clang-format on
-
-   std::string canon;
-   canon.reserve(name.size());
-
-   // RFC 1035: DNS labels must not exceed 63 characters
-   size_t current_label_length = 0;
-
-   for(size_t i = 0; i != name.size(); ++i) {
-      const char c = name[i];
-
-      if(c == '.') {
-         if(i > 0 && name[i - 1] == '.') {
-            throw Decoding_Error("DNS name contains sequential period chars");
-         }
-
-         if(current_label_length == 0) {
-            throw Decoding_Error("DNS name contains empty label");
-         }
-         current_label_length = 0;  // Reset for next label
-      } else {
-         current_label_length++;
-
-         if(current_label_length > 63) {  // RFC 1035 Maximum DNS label length
-            throw Decoding_Error("DNS name label exceeds maximum length of 63 characters");
-         }
-      }
-
-      const uint8_t cu = static_cast<uint8_t>(c);
-      if(cu >= 128) {
-         throw Decoding_Error("DNS name must not contain any extended ASCII code points");
-      }
-      const uint8_t mapped = DNS_CHAR_MAPPING[cu];
-      if(mapped == 0) {
-         throw Decoding_Error("DNS name includes invalid character");
-      }
-
-      if(mapped == '-') {
-         if(i == 0 || (i > 0 && name[i - 1] == '.')) {
-            throw Decoding_Error("DNS name has label with leading hyphen");
-         } else if(i == name.size() - 1 || (i < name.size() - 1 && name[i + 1] == '.')) {
-            throw Decoding_Error("DNS name has label with trailing hyphen");
-         }
-      }
-      canon.push_back(static_cast<char>(mapped));
-   }
-
-   if(current_label_length == 0) {
-      throw Decoding_Error("DNS name contains empty label");
-   }
-   return canon;
 }
 
 }  // namespace Botan
@@ -45377,13 +47870,13 @@ namespace Botan {
 
 uint64_t prefetch_array_raw(size_t bytes, const void* arrayv) noexcept {
 #if defined(__cpp_lib_hardware_interference_size)
-   const size_t cache_line_size = std::hardware_destructive_interference_size;
+   constexpr size_t cache_line_size = std::hardware_destructive_interference_size;
 #else
    // We arbitrarily use a 64 byte cache line, which is by far the most
    // common size.
    //
    // Runtime detection adds too much overhead to this function.
-   const size_t cache_line_size = 64;
+   constexpr size_t cache_line_size = 64;
 #endif
 
    const uint8_t* array = static_cast<const uint8_t*>(arrayv);
@@ -45578,11 +48071,15 @@ std::string make_arg(const std::vector<std::pair<size_t, std::string>>& name, si
       }
 
       if(name[i].first > level) {
-         output += "(" + name[i].second;
-         ++paren_depth;
+         for(size_t j = level; j < name[i].first; j++) {
+            output += "(";
+            ++paren_depth;
+         }
+         output += name[i].second;
       } else if(name[i].first < level) {
          for(size_t j = name[i].first; j < level; j++) {
             output += ")";
+            BOTAN_ASSERT_NOMSG(paren_depth != 0);
             --paren_depth;
          }
          output += "," + name[i].second;
@@ -45605,18 +48102,24 @@ std::string make_arg(const std::vector<std::pair<size_t, std::string>>& name, si
 
 }  // namespace
 
-SCAN_Name::SCAN_Name(const char* algo_spec) : SCAN_Name(std::string(algo_spec)) {}
-
 SCAN_Name::SCAN_Name(std::string_view algo_spec) : m_orig_algo_spec(algo_spec) {
    if(algo_spec.empty()) {
       throw Invalid_Argument("Expected algorithm name, got empty string");
+   }
+
+   // Fast path for a bare name with no arguments or modes (eg "SHA-256"),
+   // which is the common case. Equivalent to the general parse below, which
+   // for such input produces a single token and no args/modes.
+   if(algo_spec.find_first_of("(),/") == std::string_view::npos) {
+      m_alg_name = std::string(algo_spec);
+      return;
    }
 
    std::vector<std::pair<size_t, std::string>> name;
    size_t level = 0;
    std::pair<size_t, std::string> accum = std::make_pair(level, "");
 
-   const std::string decoding_error = "Bad SCAN name '" + m_orig_algo_spec + "': ";
+   bool expect_token = true;
 
    for(const char c : algo_spec) {
       if(c == '/' || c == ',' || c == '(' || c == ')') {
@@ -45624,21 +48127,27 @@ SCAN_Name::SCAN_Name(std::string_view algo_spec) : m_orig_algo_spec(algo_spec) {
             ++level;
          } else if(c == ')') {
             if(level == 0) {
-               throw Decoding_Error(decoding_error + "Mismatched parens");
+               throw Invalid_Algorithm_Name(m_orig_algo_spec);
             }
             --level;
          }
 
          if(c == '/' && level > 0) {
             accum.second.push_back(c);
+            expect_token = false;
          } else {
+            if(expect_token) {
+               throw Invalid_Algorithm_Name(m_orig_algo_spec);
+            }
             if(!accum.second.empty()) {
                name.push_back(accum);
             }
             accum = std::make_pair(level, "");
+            expect_token = (c != ')');
          }
       } else {
          accum.second.push_back(c);
+         expect_token = false;
       }
    }
 
@@ -45647,11 +48156,16 @@ SCAN_Name::SCAN_Name(std::string_view algo_spec) : m_orig_algo_spec(algo_spec) {
    }
 
    if(level != 0) {
-      throw Decoding_Error(decoding_error + "Missing close paren");
+      throw Invalid_Algorithm_Name(m_orig_algo_spec);
+   }
+
+   if(expect_token) {
+      // A trailing separator with no following token, eg "Foo/" or "Foo,"
+      throw Invalid_Algorithm_Name(m_orig_algo_spec);
    }
 
    if(name.empty()) {
-      throw Decoding_Error(decoding_error + "Empty name");
+      throw Invalid_Algorithm_Name(m_orig_algo_spec);
    }
 
    m_alg_name = name[0].second;
@@ -45788,47 +48302,110 @@ std::string runtime_version_check(uint32_t major, uint32_t minor, uint32_t patch
 namespace Botan {
 
 void AlternativeName::add_uri(std::string_view uri) {
-   if(!uri.empty()) {
-      m_uri.insert(std::string(uri));
+   if(uri.empty()) {
+      return;
    }
+   if(auto parsed = URI::from_string(uri)) {
+      add_uri(std::move(*parsed));
+   } else {
+      throw Decoding_Error("Invalid URI in SubjectAlternativeName");
+   }
+}
+
+void AlternativeName::add_uri(URI uri) {
+   m_uri.insert(std::move(uri));
+}
+
+std::set<std::string> AlternativeName::uris() const {
+   std::set<std::string> out;
+   for(const auto& uri : m_uri) {
+      out.insert(uri.original_input());
+   }
+   return out;
 }
 
 void AlternativeName::add_email(std::string_view addr) {
-   if(!addr.empty()) {
-      m_email.insert(std::string(addr));
+   if(addr.empty()) {
+      return;
+   }
+   if(auto parsed = EmailAddress::from_string(addr)) {
+      add_email(std::move(*parsed));
+   } else {
+      throw Decoding_Error("Invalid email address in SubjectAlternativeName");
    }
 }
 
-void AlternativeName::add_dns(std::string_view dns) {
-   if(!dns.empty()) {
-      m_dns.insert(tolower_string(dns));
+void AlternativeName::add_email(EmailAddress addr) {
+   m_email.insert(std::move(addr));
+}
+
+std::set<std::string> AlternativeName::email() const {
+   std::set<std::string> out;
+   for(const auto& addr : m_email) {
+      out.insert(addr.to_string());
    }
+   return out;
+}
+
+void AlternativeName::add_dns(std::string_view dns) {
+   if(dns.empty()) {
+      return;
+   }
+   if(auto parsed = DNSName::from_san_string(dns)) {
+      add_dns(std::move(*parsed));
+   } else {
+      throw Decoding_Error("Invalid DNS name in SubjectAlternativeName");
+   }
+}
+
+void AlternativeName::add_dns(DNSName dns) {
+   m_dns.insert(std::move(dns));
+}
+
+std::set<std::string> AlternativeName::dns() const {
+   std::set<std::string> out;
+   for(const auto& name : m_dns) {
+      out.insert(name.to_string());
+   }
+   return out;
 }
 
 void AlternativeName::add_other_name(const OID& oid, const ASN1_String& value) {
    m_othernames.insert(std::make_pair(oid, value));
+   std::vector<uint8_t> raw;
+   DER_Encoder(raw).encode(value);
+   m_other_name_values.insert(OtherNameValue(oid, std::move(raw)));
+}
+
+void AlternativeName::add_other_name_value(const OID& oid, std::span<const uint8_t> value) {
+   m_other_name_values.insert(OtherNameValue(oid, value));
+}
+
+void AlternativeName::add_registered_id(const OID& oid) {
+   m_registered_ids.insert(oid);
 }
 
 void AlternativeName::add_dn(const X509_DN& dn) {
    m_dn_names.insert(dn);
 }
 
-void AlternativeName::add_ipv4_address(uint32_t ip) {
-   m_ipv4_addr.insert(ip);
+void AlternativeName::add_ipv4_address(const IPv4Address& ip) {
+   m_ipv4_addrs.insert(ip);
 }
 
 void AlternativeName::add_ipv6_address(const IPv6Address& ip) {
-   m_ipv6_addr.insert(ip);
+   m_ipv6_addrs.insert(ip);
 }
 
 size_t AlternativeName::count() const {
    const auto sum = checked_add(m_dns.size(),
                                 m_uri.size(),
                                 m_email.size(),
-                                m_ipv4_addr.size(),
-                                m_ipv6_addr.size(),
+                                m_ipv4_addrs.size(),
+                                m_ipv6_addrs.size(),
                                 m_dn_names.size(),
-                                m_othernames.size());
+                                m_other_name_values.size(),
+                                m_registered_ids.size());
 
    BOTAN_ASSERT_NOMSG(sum.has_value());
    return sum.value();
@@ -45836,6 +48413,10 @@ size_t AlternativeName::count() const {
 
 bool AlternativeName::has_items() const {
    return this->count() > 0;
+}
+
+bool AlternativeName::is_empty() const {
+   return this->count() == 0;
 }
 
 void AlternativeName::encode_into(DER_Encoder& der) const {
@@ -45854,22 +48435,22 @@ void AlternativeName::encode_into(DER_Encoder& der) const {
         registeredID                    [8]     OBJECT IDENTIFIER }
    */
 
-   for(const auto& othername : m_othernames) {
+   for(const auto& othername : m_other_name_values) {
       der.start_explicit(0)
-         .encode(othername.first)
+         .encode(othername.oid())
          .start_explicit(0)
-         .encode(othername.second)
+         .raw_bytes(othername.value())
          .end_explicit()
          .end_explicit();
    }
 
-   for(const auto& name : m_email) {
-      const ASN1_String str(name, ASN1_Type::Ia5String);
+   for(const auto& addr : m_email) {
+      const ASN1_String str(addr.to_string(), ASN1_Type::Ia5String);
       der.add_object(ASN1_Type(1), ASN1_Class::ContextSpecific, str.value());
    }
 
    for(const auto& name : m_dns) {
-      const ASN1_String str(name, ASN1_Type::Ia5String);
+      const ASN1_String str(name.to_string(), ASN1_Type::Ia5String);
       der.add_object(ASN1_Type(2), ASN1_Class::ContextSpecific, str.value());
    }
 
@@ -45878,19 +48459,24 @@ void AlternativeName::encode_into(DER_Encoder& der) const {
    }
 
    for(const auto& name : m_uri) {
-      const ASN1_String str(name, ASN1_Type::Ia5String);
+      const ASN1_String str(name.original_input(), ASN1_Type::Ia5String);
       der.add_object(ASN1_Type(6), ASN1_Class::ContextSpecific, str.value());
    }
 
-   for(const uint32_t ip : m_ipv4_addr) {
-      auto ip_buf = store_be(ip);
+   for(const auto& ip : m_ipv4_addrs) {
       // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
-      der.add_object(ASN1_Type(7), ASN1_Class::ContextSpecific, ip_buf.data(), 4);
+      der.add_object(ASN1_Type(7), ASN1_Class::ContextSpecific, ip.to_bytes());
    }
 
-   for(const auto& ip : m_ipv6_addr) {
+   for(const auto& ip : m_ipv6_addrs) {
       // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
       der.add_object(ASN1_Type(7), ASN1_Class::ContextSpecific, ip.address().data(), ip.address().size());
+   }
+
+   for(const auto& reg_id : m_registered_ids) {
+      // [8] registeredID is IMPLICIT OBJECT IDENTIFIER.
+      // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+      der.encode_implicit(reg_id, ASN1_Type(8), ASN1_Class::ContextSpecific);
    }
 
    der.end_cons();
@@ -45907,32 +48493,61 @@ void AlternativeName::decode_from(BER_Decoder& source) {
 
          OID oid;
          othername.decode(oid);
-         if(othername.more_items()) {
-            const BER_Object othername_value_outer = othername.get_next_object();
-            othername.verify_end();
+         const BER_Object othername_value_outer = othername.get_next_object();
+         othername.verify_end();
 
-            if(!othername_value_outer.is_a(0, ASN1_Class::ExplicitContextSpecific)) {
-               throw Decoding_Error("Invalid tags on otherName value");
+         if(!othername_value_outer.is_a(0, ASN1_Class::ExplicitContextSpecific)) {
+            throw Decoding_Error("Invalid tags on otherName value");
+         }
+
+         BER_Decoder othername_value_inner(othername_value_outer, names.limits());
+
+         const BER_Object value = othername_value_inner.get_next_object();
+         othername_value_inner.verify_end();
+
+         // Capture the inner ANY value verbatim so applications can retrieve
+         // it regardless of its ASN.1 form.
+         std::vector<uint8_t> raw_value;
+         DER_Encoder(raw_value).add_object(value.type_tag(), value.class_tag(), value.data());
+         m_other_name_values.insert(OtherNameValue{oid, std::move(raw_value)});
+
+         // Populate old string view for compatibility
+         if(ASN1_String::is_string_type(value.type()) && value.get_class() == ASN1_Class::Universal) {
+            try {
+               m_othernames.insert(std::make_pair(oid, ASN1_String(ASN1::to_string(value), value.type())));
+            } catch(const Invalid_Argument&) {  // NOLINT(*-empty-catch)
             }
+         }
 
-            BER_Decoder othername_value_inner(othername_value_outer, names.limits());
-
-            const BER_Object value = othername_value_inner.get_next_object();
-            othername_value_inner.verify_end();
-
-            if(ASN1_String::is_string_type(value.type()) && value.get_class() == ASN1_Class::Universal) {
-               add_othername(oid, ASN1::to_string(value), value.type());
+         if(oid == OID::from_string("PKIX.SmtpUTF8Mailbox")) {
+            if(!value.is_a(ASN1_Type::Utf8String, ASN1_Class::Universal)) {
+               throw Decoding_Error("SmtpUTF8Mailbox otherName must contain a UTF8String");
             }
+            auto parsed_mailbox = SmtpUtf8Mailbox::from_string(ASN1::to_string(value));
+            if(!parsed_mailbox.has_value()) {
+               throw Decoding_Error("Invalid SmtpUTF8Mailbox encoding");
+            }
+            m_smtp_utf8_mailboxes.insert(std::move(*parsed_mailbox));
          }
       } else if(obj.is_a(1, ASN1_Class::ContextSpecific)) {
          add_email(ASN1::to_string(obj));
       } else if(obj.is_a(2, ASN1_Class::ContextSpecific)) {
-         m_dns.insert(check_and_canonicalize_dns_name(ASN1::to_string(obj)));
+         add_dns(ASN1::to_string(obj));
+      } else if(obj.is_a(3, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
+         // x400Address not supported but it is a SEQUENCE so we know it cannot be empty
+         if(obj.length() == 0) {
+            throw Decoding_Error("Invalid x400Address field");
+         }
       } else if(obj.is_a(4, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
          BER_Decoder dec(obj, names.limits());
          X509_DN dn;
-         dec.decode(dn);
+         dec.decode(dn).verify_end();
          this->add_dn(dn);
+      } else if(obj.is_a(5, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
+         // ediPartyName not supported but it is a SEQUENCE so we know it cannot be empty
+         if(obj.length() == 0) {
+            throw Decoding_Error("Invalid ediPartyName field");
+         }
       } else if(obj.is_a(6, ASN1_Class::ContextSpecific)) {
          this->add_uri(ASN1::to_string(obj));
       } else if(obj.is_a(7, ASN1_Class::ContextSpecific)) {
@@ -45945,6 +48560,15 @@ void AlternativeName::decode_from(BER_Decoder& source) {
          } else {
             throw Decoding_Error("Invalid IP constraint neither IPv4 or IPv6");
          }
+      } else if(obj.is_a(8, ASN1_Class::ContextSpecific)) {
+         // [8] registeredID is IMPLICIT OBJECT IDENTIFIER.
+         OID oid;
+         names.decode_implicit(obj, oid, ASN1_Type::ObjectId, ASN1_Class::Universal);
+         this->add_registered_id(oid);
+      } else {
+         throw Decoding_Error(fmt("Unknown GeneralName tag {}/class {}",
+                                  static_cast<uint32_t>(obj.type_tag()),
+                                  static_cast<uint32_t>(obj.class_tag())));
       }
    }
 }
@@ -45957,6 +48581,8 @@ void AlternativeName::decode_from(BER_Decoder& source) {
 *
 * Botan is released under the Simplified BSD License (see license.txt)
 */
+
+// TODO(Botan4) this entire file can be deleted
 
 
 
@@ -45979,7 +48605,7 @@ AlternativeName::AlternativeName(std::string_view email_addr,
       add_uri(uri);
    }
    if(!ip.empty()) {
-      if(auto ipv4 = string_to_ipv4(ip)) {
+      if(auto ipv4 = IPv4Address::from_string(ip)) {
          add_ipv4_address(*ipv4);
       } else {
          throw Invalid_Argument(fmt("Invalid IPv4 address '{}'", ip));
@@ -46002,12 +48628,13 @@ void AlternativeName::add_attribute(std::string_view type, std::string_view valu
    } else if(type == "URI") {
       this->add_uri(value);
    } else if(type == "DN") {
-      X509_DN dn;
-      std::istringstream ss{std::string(value)};
-      ss >> dn;
-      this->add_dn(dn);
+      if(auto dn = X509_DN::parse(value)) {
+         this->add_dn(*dn);
+      } else {
+         throw Invalid_Argument(fmt("Invalid X.509 DN '{}'", value));
+      }
    } else if(type == "IP") {
-      if(auto ipv4 = string_to_ipv4(value)) {
+      if(auto ipv4 = IPv4Address::from_string(value)) {
          add_ipv4_address(*ipv4);
       } else {
          throw Invalid_Argument(fmt("Invalid IPv4 address '{}'", value));
@@ -46045,11 +48672,11 @@ std::multimap<std::string, std::string> AlternativeName::contents() const {
       names.emplace("URI", nm);
    }
 
-   for(const uint32_t ipv4 : this->ipv4_address()) {
-      names.emplace("IP", ipv4_to_string(ipv4));
+   for(const auto& ipv4 : this->ipv4_addresses()) {
+      names.emplace("IP", ipv4.to_string());
    }
 
-   for(const auto& ipv6 : this->ipv6_address()) {
+   for(const auto& ipv6 : this->ipv6_addresses()) {
       names.emplace("IPv6", ipv6.to_string());
    }
 
@@ -46107,8 +48734,8 @@ std::vector<std::string> AlternativeName::get_attribute(std::string_view attr) c
       return ret;
    } else if(attr == "IP") {
       std::vector<std::string> ip_str;
-      for(const uint32_t ipv4 : this->ipv4_address()) {
-         ip_str.push_back(ipv4_to_string(ipv4));
+      for(const auto& ipv4 : this->ipv4_addresses()) {
+         ip_str.push_back(ipv4.to_string());
       }
       return ip_str;
    } else {
@@ -46123,19 +48750,22 @@ X509_DN AlternativeName::dn() const {
    X509_DN combined_dn;
 
    for(const auto& dn : this->directory_names()) {
-      std::ostringstream oss;
-      oss << dn;
-
-      std::istringstream iss(oss.str());
-      iss >> combined_dn;
+      for(const auto& rdn : dn.rdns()) {
+         combined_dn.add_rdn(rdn);
+      }
    }
 
    return combined_dn;
 }
 
-/*
-* Return if this object has anything useful
-*/
+std::set<uint32_t> AlternativeName::ipv4_address() const {
+   std::set<uint32_t> out;
+   for(const auto& a : m_ipv4_addrs) {
+      out.insert(a.address());
+   }
+   return out;
+}
+
 }  // namespace Botan
 /*
 * (C) 2016 Jack Lloyd
@@ -46233,6 +48863,12 @@ const char* to_string(Certificate_Status_Code code) {
          return "IP Address Blocks extension invalid";
       case Certificate_Status_Code::AS_BLOCKS_ERROR:
          return "AS Number Blocks extension invalid";
+      case Certificate_Status_Code::NO_REV_AVAIL_INVALID_USE:
+         return "noRevAvail extension used in an invalid manner";
+      case Certificate_Status_Code::INVALID_OCSP_NOCHECK:
+         return "Invalid use of OCSP NoCheck extension";
+      case Certificate_Status_Code::CRL_HAS_UNKNOWN_CRITICAL_EXTENSION:
+         return "CRL contains a critical extension that could not be processed";
       case Certificate_Status_Code::UNKNOWN_CRITICAL_EXTENSION:
          return "Unknown critical extension encountered";
       case Certificate_Status_Code::DUPLICATE_CERT_EXTENSION:
@@ -46563,7 +49199,10 @@ namespace Botan {
 class CRL_Entry_Data final {
    public:
       CRL_Entry_Data(const X509_Certificate& cert, CRL_Code why) :
-            m_serial(cert.serial_number()), m_time(X509_Time(std::chrono::system_clock::now())), m_reason(why) {
+            m_serial(cert.serial()),
+            m_serial_bits(cert.serial_number()),
+            m_time(X509_Time(std::chrono::system_clock::now())),
+            m_reason(why) {
          if(why != CRL_Code::Unspecified) {
             m_extensions.add(std::make_unique<Cert_Extension::CRL_ReasonCode>(why));
          }
@@ -46572,7 +49211,8 @@ class CRL_Entry_Data final {
       CRL_Entry_Data() = default;
 
       // NOLINTBEGIN(*non-private-member-variables-in-classes)
-      std::vector<uint8_t> m_serial;
+      X509_Serial_Number m_serial;
+      std::vector<uint8_t> m_serial_bits;
       X509_Time m_time;
       CRL_Code m_reason = CRL_Code::Unspecified;
       Extensions m_extensions;
@@ -46590,7 +49230,7 @@ CRL_Entry::CRL_Entry(const X509_Certificate& cert, CRL_Code why) {
 * Compare two CRL_Entry structs for equality
 */
 bool operator==(const CRL_Entry& a1, const CRL_Entry& a2) {
-   if(a1.serial_number() != a2.serial_number()) {
+   if(a1.serial() != a2.serial()) {
       return false;
    }
    if(a1.expire_time() != a2.expire_time()) {
@@ -46613,13 +49253,13 @@ bool operator!=(const CRL_Entry& a1, const CRL_Entry& a2) {
 * DER encode a CRL_Entry
 */
 void CRL_Entry::encode_into(DER_Encoder& der) const {
-   der.start_sequence()
-      .encode(BigInt::from_bytes(serial_number()))
-      .encode(expire_time())
-      .start_sequence()
-      .encode(extensions())
-      .end_cons()
-      .end_cons();
+   der.start_sequence().encode(serial()).encode(expire_time());
+
+   if(extensions().count() > 0) {
+      der.start_sequence().encode(extensions()).end_cons();
+   }
+
+   der.end_cons();
 }
 
 /*
@@ -46630,16 +49270,31 @@ void CRL_Entry::decode_from(BER_Decoder& source) {
 
    BER_Decoder entry = source.start_sequence();
 
-   BigInt serial;
-   entry.decode(serial);
-   data->m_serial = serial.serialize();
-
+   entry.decode(data->m_serial);
    entry.decode(data->m_time);
 
+   data->m_serial_bits = data->m_serial.magnitude();
+
    if(entry.more_items()) {
-      entry.decode(data->m_extensions);
+      data->m_extensions.decode_from(entry, Extension_Context::CRL_Entry);
+
+      // TODO(Botan4) start checking that CRLEntry extensions is not empty
+      // Extensions  ::=  SEQUENCE SIZE (1..MAX) OF Extension
+
       if(const auto* ext = data->m_extensions.get_extension_object_as<Cert_Extension::CRL_ReasonCode>()) {
-         data->m_reason = ext->get_reason();
+         const auto reason = ext->get_reason();
+
+         /*
+         * This reason code only makes sense in the context of delta CRL processing, which
+         * we do not currently support. Seeing it in a regular CRL suggests that something
+         * has gone very wrong (eg we are somehow processing a delta CRL, though that
+         * shouldn't happen since the delta CRL indicator extension should be a critical
+         * extension which we will reject.)
+         */
+         if(reason == CRL_Code::RemoveFromCrl) {
+            throw Decoding_Error("CRL entry ReasonCode extension included invalid RemoveFromCrl");
+         }
+         data->m_reason = reason;
       } else {
          data->m_reason = CRL_Code::Unspecified;
       }
@@ -46659,6 +49314,10 @@ const CRL_Entry_Data& CRL_Entry::data() const {
 }
 
 const std::vector<uint8_t>& CRL_Entry::serial_number() const {
+   return data().m_serial_bits;
+}
+
+const X509_Serial_Number& CRL_Entry::serial() const {
    return data().m_serial;
 }
 
@@ -46782,12 +49441,267 @@ bool Key_Constraints::compatible_with(const Public_Key& pub_key) const {
 
 namespace Botan {
 
-class DER_Encoder;
+namespace {
+
+enum class RequireFQDN : bool { Yes = true, No = false };
+
+/*
+* Validate a host constraint - either a DNS name or a subtree of the
+* form of "." followed by a DNS name. RFC 5280 4.2.1.10 defines this
+* style for URI and email constraints. For DNS it is silent, but it
+* seems in practice implementations accept subtrees for DNS
+* constraints as well.
+*/
+std::optional<std::string> validate_subtree_constraint_host(std::string_view input, RequireFQDN require_fqdn) {
+   if(input.empty()) {
+      return std::nullopt;
+   }
+   const bool subtree = input.starts_with('.');
+   const std::string_view body = subtree ? input.substr(1) : input;
+   auto dns = DNSName::from_string(body);
+   if(!dns.has_value()) {
+      return std::nullopt;
+   }
+   if(require_fqdn == RequireFQDN::Yes && dns->to_string().find('.') == std::string::npos) {
+      return std::nullopt;
+   }
+
+   if(subtree) {
+      return std::string(".") + dns->to_string();
+   } else {
+      return dns->to_string();
+   }
+}
+
+}  // namespace
+
+std::optional<GeneralName::DNSConstraint> GeneralName::DNSConstraint::from_string(std::string_view input) {
+   // TODO(C++23): validate_subtree_constraint_host(input, RequireFQDN::No)
+   //                        .transform([](std::string s) { return DNSConstraint(std::move(s)); });
+   if(auto canonical = validate_subtree_constraint_host(input, RequireFQDN::No)) {
+      return DNSConstraint(std::move(*canonical));
+   } else {
+      return std::nullopt;
+   }
+}
+
+std::optional<GeneralName::DNSConstraint> GeneralName::DNSConstraint::from_san_value(std::string_view input) {
+   if(auto parsed = DNSName::from_san_string(input)) {
+      return DNSConstraint(parsed->to_string());
+   } else {
+      return std::nullopt;
+   }
+}
+
+std::optional<GeneralName::URIConstraint> GeneralName::URIConstraint::from_string(std::string_view input) {
+   /*
+   RFC 5280 4.2.1.10:
+      The constraint MUST be specified as a fully qualified domain
+      name and MAY specify a host or a domain.  Examples would be
+      "host.example.com" and ".example.com".
+   */
+   if(auto canonical = validate_subtree_constraint_host(input, RequireFQDN::Yes)) {
+      return URIConstraint(std::move(*canonical));
+   } else {
+      return std::nullopt;
+   }
+}
+
+std::optional<GeneralName::URIConstraint> GeneralName::URIConstraint::from_san_value(std::string_view full_uri) {
+   if(URI::from_string(full_uri).has_value()) {
+      return URIConstraint(std::string(full_uri));
+   } else {
+      return std::nullopt;
+   }
+}
+
+std::optional<GeneralName::EmailConstraint> GeneralName::EmailConstraint::from_string(std::string_view input) {
+   if(input.empty()) {
+      return std::nullopt;
+   }
+   if(input.find('@') != std::string_view::npos) {
+      // Mailbox form:
+      auto email = EmailAddress::from_string(input);
+      if(!email.has_value()) {
+         return std::nullopt;
+      }
+      return EmailConstraint(email->to_string());
+   }
+   if(auto canonical = validate_subtree_constraint_host(input, RequireFQDN::No)) {
+      // Host form
+      return EmailConstraint(std::move(*canonical));
+   }
+   return std::nullopt;
+}
 
 namespace {
 
-std::string canonicalize_dns_name(std::string_view name) {
-   return tolower_string(name);
+/*
+* Match a single DNS label against an RFC 6125 6.4.3 wildcard pattern
+* label (containing exactly one '*'). The candidate must have no dots
+* (it is a single label).
+*/
+bool wildcard_label_matches(std::string_view pattern_label, std::string_view candidate) {
+   if(candidate.find('.') != std::string_view::npos) {
+      return false;
+   }
+   const auto star = pattern_label.find('*');
+   if(star == std::string_view::npos) {
+      return pattern_label == candidate;
+   }
+   const auto prefix = pattern_label.substr(0, star);
+   const auto suffix = pattern_label.substr(star + 1);
+   if(candidate.size() < prefix.size() + suffix.size()) {
+      return false;
+   }
+   return candidate.starts_with(prefix) && candidate.ends_with(suffix);
+}
+
+}  // namespace
+
+/*
+* Does the wildcard SAN @p pattern have some expansion that falls inside the
+* excluded DNS subtree @p constraint?
+*
+* This function is similar to but subtly different from host_wildcard_match,
+* which is trying to answer a different question, namely "is `host` a name that
+* a client should trust this wildcard cert for", including various checks such
+* as the maximum length of labels. In contrast here we want to check for any
+* possible overlap - could this wildcard expand to any name inside the excluded
+* subtree.
+*/
+bool wildcard_intersects_excluded_dns_subtree(std::string_view pattern, std::string_view constraint) {
+   if(pattern.empty() || constraint.empty()) {
+      return false;
+   }
+   const bool subtree_form = (constraint.front() == '.');
+   const std::string_view c_base = subtree_form ? constraint.substr(1) : constraint;
+   if(c_base.empty()) {
+      return false;
+   }
+
+   const auto first_dot = pattern.find('.');
+   const std::string_view p_left = (first_dot == std::string_view::npos) ? pattern : pattern.substr(0, first_dot);
+   const std::string_view p_tail =
+      (first_dot == std::string_view::npos) ? std::string_view{} : pattern.substr(first_dot);
+
+   if(p_tail.empty()) {
+      // Single-label wildcard. Matches single-label names only, so it
+      // can only land inside a bare-host subtree whose base is also a
+      // single label.
+      if(subtree_form || c_base.find('.') != std::string_view::npos) {
+         return false;
+      }
+      return wildcard_label_matches(p_left, c_base);
+   }
+
+   // p_tail starts with ".". If it ends (label-aligned) with "." + c_base,
+   // then every wildcard expansion produces a name ending with that
+   // suffix, which is inside c_base's subtree (both bare-host and
+   // leading-dot forms accept proper-subdomain entries).
+   if(auto suffix_len = checked_add(c_base.size(), size_t{1})) {
+      if(p_tail.size() >= *suffix_len) {
+         const auto tail_suffix = p_tail.substr(p_tail.size() - *suffix_len);
+         if(tail_suffix.front() == '.' && tail_suffix.substr(1) == c_base) {
+            return true;
+         }
+      }
+   }
+
+   // Bare-host subtrees also contain c_base itself. The wildcard can
+   // produce c_base directly iff c_base = (single label) + p_tail and
+   // the prefix label fits p_left.
+   if(!subtree_form && c_base.size() > p_tail.size() && c_base.substr(c_base.size() - p_tail.size()) == p_tail) {
+      const auto x_view = c_base.substr(0, c_base.size() - p_tail.size());
+      return wildcard_label_matches(p_left, x_view);
+   }
+
+   return false;
+}
+
+namespace {
+
+/*
+* RFC 5280 subtree matching for DNS-form names: a bare-host constraint
+* matches the host itself or any name with extra leading labels (so
+* "host.example.com" matches "host.example.com" and "www.host.example.com"
+* but not "host1.example.com"). A constraint with a leading dot matches
+* proper subdomains only.
+*
+* Used as-is for DNS name constraints. URI / RFC822 host-form constraints
+* differ from this -- they're exact-match only on the bare-host form, and
+* only the leading-dot ".host" form here is shared with them. Callers
+* dispatch the leading-dot case to this helper.
+*
+* Both inputs are assumed to already be lowercased.
+*/
+bool dns_subtree_match(std::string_view name, std::string_view constraint) {
+   // Embedded nulls should have been rejected during decoding before this point
+   BOTAN_DEBUG_ASSERT(name.find('\0') == std::string_view::npos);
+
+   if(name.size() == constraint.size()) {
+      return name == constraint;
+   } else if(constraint.size() > name.size()) {
+      // The constraint is longer than the issued name: not possibly a match
+      return false;
+   }
+
+   if(constraint.empty()) {
+      return true;
+   }
+
+   BOTAN_ASSERT_NOMSG(name.size() > constraint.size());
+
+   const std::string_view substr = name.substr(name.size() - constraint.size());
+
+   if(constraint.front() == '.') {
+      return substr == constraint;
+   } else {
+      return substr == constraint && name[name.size() - constraint.size() - 1] == '.';
+   }
+}
+
+/*
+* RFC 5280 4.2.1.10 RFC822 name constraint matching.
+*
+* The constraint @p c is one of:
+*   - "local@host"    - matches exactly one mailbox (case-insensitive)
+*   - "host"          - matches addresses whose domain is exactly host
+*   - ".host"         - matches addresses in any subdomain of host
+*                       (but NOT the base host itself)
+*
+* @p c is assumed to be already lowercased and validated at decode time.
+*/
+bool email_subtree_match(const EmailAddress& candidate, std::string_view c) {
+   /*
+   RFC 5280 7.5:
+      Two email addresses are considered to match if:
+         1)  the local-part of each name is an exact match, AND
+         2)  the host-part of each name matches using a case-insensitive
+             ASCII comparison.
+
+   The candidate's domain comes through DNSName as canonical-lowercase, and the
+   constraint string was lowercased only on its host portion at decode, so a
+   plain string compare on each side produces the correct result.
+   */
+   const std::string& candidate_domain = candidate.domain().to_string();
+   const auto at = c.find('@');
+   if(at != std::string_view::npos) {
+      // Mailbox form: exact-match against candidate
+      return (candidate.local_part() == c.substr(0, at)) && (candidate_domain == c.substr(at + 1));
+   }
+   if(!c.empty() && c.front() == '.') {
+      // Subtree form: any subdomain, but not the base host.
+      return dns_subtree_match(candidate_domain, c);
+   }
+   /*
+   RFC 5280 4.2.1.10:
+      To indicate all Internet mail addresses on a particular host, the
+      constraint is specified as the host name.  For example, the
+      constraint "example.com" is satisfied by any mail address at the
+      host "example.com".
+   */
+   return candidate_domain == c;
 }
 
 }  // namespace
@@ -46816,19 +49730,47 @@ std::string GeneralName::type() const {
 }
 
 GeneralName GeneralName::email(std::string_view email) {
-   return GeneralName::make<RFC822_IDX>(email);
+   if(auto constraint = EmailConstraint::from_string(email)) {
+      return {NameType::RFC822, std::move(*constraint)};
+   } else {
+      throw Invalid_Argument(fmt("Invalid RFC822 name constraint '{}'", email));
+   }
 }
 
 GeneralName GeneralName::dns(std::string_view dns) {
-   return GeneralName::make<DNS_IDX>(dns);
+   if(auto constraint = DNSConstraint::from_string(dns)) {
+      return {NameType::DNS, std::move(*constraint)};
+   } else {
+      throw Invalid_Argument(fmt("Invalid DNS name constraint '{}'", dns));
+   }
 }
 
 GeneralName GeneralName::uri(std::string_view uri) {
-   return GeneralName::make<URI_IDX>(uri);
+   if(auto constraint = URIConstraint::from_string(uri)) {
+      return {NameType::URI, std::move(*constraint)};
+   } else {
+      throw Invalid_Argument(fmt("Invalid URI name constraint '{}'", uri));
+   }
+}
+
+GeneralName GeneralName::_uri_san_value(std::string_view full_uri) {
+   if(auto uri = URIConstraint::from_san_value(full_uri)) {
+      return {NameType::URI, std::move(*uri)};
+   } else {
+      throw Invalid_Argument(fmt("Invalid URI SAN value '{}'", full_uri));
+   }
+}
+
+GeneralName GeneralName::_dns_san_value(std::string_view dns_name) {
+   if(auto dns = DNSConstraint::from_san_value(dns_name)) {
+      return {NameType::DNS, std::move(*dns)};
+   } else {
+      throw Invalid_Argument(fmt("Invalid DNS SAN value '{}'", dns_name));
+   }
 }
 
 GeneralName GeneralName::directory_name(Botan::X509_DN dn) {
-   return GeneralName::make<DN_IDX>(std::move(dn));
+   return {NameType::DN, std::move(dn)};
 }
 
 GeneralName GeneralName::ipv4_address(uint32_t ipv4) {
@@ -46836,49 +49778,40 @@ GeneralName GeneralName::ipv4_address(uint32_t ipv4) {
 }
 
 GeneralName GeneralName::ipv4_address(uint32_t ipv4, uint32_t mask) {
-   auto subnet = IPv4Subnet::from_address_and_mask(ipv4, mask);
-   if(!subnet.has_value()) {
+   if(auto subnet = IPv4Subnet::from_address_and_mask(ipv4, mask)) {
+      return {NameType::IPv4, *subnet};
+   } else {
       throw Invalid_Argument("IPv4 subnet mask is not a contiguous CIDR prefix");
    }
-   return GeneralName::make<IPV4_IDX>(*subnet);
 }
 
 GeneralName GeneralName::ipv4_address(IPv4Address ipv4) {
-   return GeneralName::make<IPV4_IDX>(IPv4Subnet::host(ipv4));
+   return {NameType::IPv4, IPv4Subnet::host(ipv4)};
 }
 
 GeneralName GeneralName::ipv4_address(const IPv4Subnet& subnet) {
-   return GeneralName::make<IPV4_IDX>(subnet);
+   return {NameType::IPv4, subnet};
 }
 
 GeneralName GeneralName::ipv6_address(const IPv6Address& ipv6) {
-   return GeneralName::make<IPV6_IDX>(IPv6Subnet::host(ipv6));
+   return {NameType::IPv6, IPv6Subnet::host(ipv6)};
 }
 
 GeneralName GeneralName::ipv6_address(const IPv6Subnet& subnet) {
-   return GeneralName::make<IPV6_IDX>(subnet);
+   return {NameType::IPv6, subnet};
 }
 
 std::string GeneralName::name() const {
-   const size_t index = m_name.index();
-
-   if(index == RFC822_IDX) {
-      return std::get<RFC822_IDX>(m_name);
-   } else if(index == DNS_IDX) {
-      return std::get<DNS_IDX>(m_name);
-   } else if(index == URI_IDX) {
-      return std::get<URI_IDX>(m_name);
-   } else if(index == DN_IDX) {
-      return std::get<DN_IDX>(m_name).to_string();
-   } else if(index == IPV4_IDX) {
-      const auto& subnet = std::get<IPV4_IDX>(m_name);
-      return subnet.is_host() ? subnet.address().to_string() : subnet.to_string();
-   } else if(index == IPV6_IDX) {
-      const auto& subnet = std::get<IPV6_IDX>(m_name);
-      return subnet.is_host() ? subnet.address().to_string() : subnet.to_string();
-   } else {
-      BOTAN_ASSERT_UNREACHABLE();
-   }
+   return std::visit(
+      Botan::overloaded{
+         [](const EmailConstraint& c) -> std::string { return c.value(); },
+         [](const DNSConstraint& c) -> std::string { return c.value(); },
+         [](const URIConstraint& c) -> std::string { return c.value(); },
+         [](const X509_DN& dn) -> std::string { return dn.to_string(); },
+         [](const IPv4Subnet& s) -> std::string { return s.is_host() ? s.address().to_string() : s.to_string(); },
+         [](const IPv6Subnet& s) -> std::string { return s.is_host() ? s.address().to_string() : s.to_string(); },
+      },
+      m_name);
 }
 
 std::vector<uint8_t> GeneralName::binary_name() const {
@@ -46893,8 +49826,62 @@ std::vector<uint8_t> GeneralName::binary_name() const {
                      m_name);
 }
 
-void GeneralName::encode_into(DER_Encoder& /*to*/) const {
-   throw Not_Implemented("GeneralName encoding");
+void GeneralName::encode_into(DER_Encoder& to) const {
+   /*
+   GeneralName ::= CHOICE {
+        otherName                       [0]     OtherName,
+        rfc822Name                      [1]     IA5String,
+        dNSName                         [2]     IA5String,
+        x400Address                     [3]     ORAddress,
+        directoryName                   [4]     Name,
+        ediPartyName                    [5]     EDIPartyName,
+        uniformResourceIdentifier       [6]     IA5String,
+        iPAddress                       [7]     OCTET STRING,
+        registeredID                    [8]     OBJECT IDENTIFIER }
+   */
+   auto emit_ia5_implicit = [&](uint32_t tag, std::string_view value) {
+      const ASN1_String str(value, ASN1_Type::Ia5String);
+      to.add_object(ASN1_Type(tag), ASN1_Class::ContextSpecific, str.value());
+   };
+
+   switch(m_type) {
+      case NameType::RFC822:
+         emit_ia5_implicit(1, std::get<EmailConstraint>(m_name).value());
+         return;
+      case NameType::DNS:
+         emit_ia5_implicit(2, std::get<DNSConstraint>(m_name).value());
+         return;
+      case NameType::URI:
+         emit_ia5_implicit(6, std::get<URIConstraint>(m_name).value());
+         return;
+      case NameType::DN:
+         to.add_object(ASN1_Type(4), ASN1_Class::ExplicitContextSpecific, std::get<X509_DN>(m_name).DER_encode());
+         return;
+      case NameType::IPv4: {
+         // In a name constraint the iPAddress is always address followed by mask,
+         // even for a single host (unlike the SAN form)
+         const auto& subnet = std::get<IPv4Subnet>(m_name);
+         const auto addr_and_mask =
+            concat(subnet.address().to_bytes(), IPv4Address::netmask(subnet.prefix_length()).to_bytes());
+         // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+         to.add_object(ASN1_Type(7), ASN1_Class::ContextSpecific, addr_and_mask);
+         return;
+      }
+      case NameType::IPv6: {
+         const auto& subnet = std::get<IPv6Subnet>(m_name);
+         const auto addr_and_mask =
+            concat(subnet.address().address(), IPv6Address::netmask(subnet.prefix_length()).address());
+         // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+         to.add_object(ASN1_Type(7), ASN1_Class::ContextSpecific, addr_and_mask);
+         return;
+      }
+      case NameType::Other:
+      case NameType::Unknown:
+         // Decoding retains only the type tag for these forms, not the value
+         break;
+   }
+
+   throw Encoding_Error("Cannot encode GeneralName of Other or Unknown type");
 }
 
 void GeneralName::decode_from(BER_Decoder& ber) {
@@ -46903,27 +49890,48 @@ void GeneralName::decode_from(BER_Decoder& ber) {
    if(obj.is_a(0, ASN1_Class::ExplicitContextSpecific)) {
       m_type = NameType::Other;
    } else if(obj.is_a(1, ASN1_Class::ContextSpecific)) {
+      /*
+      RFC 5280 4.2.1.10:
+         A name constraint for Internet mail addresses MAY specify a
+         particular mailbox, all addresses at a particular host, or all
+         mailboxes in a domain.
+      EmailConstraint::from_string validates and canonicalizes per the
+      Section 7.5 matching rules.
+      */
+      auto constraint = EmailConstraint::from_string(ASN1::to_string(obj));
+      if(!constraint.has_value()) {
+         throw Decoding_Error("Malformed RFC822 name in GeneralName");
+      }
       m_type = NameType::RFC822;
-      m_name.emplace<RFC822_IDX>(ASN1::to_string(obj));
+      m_name = std::move(*constraint);
    } else if(obj.is_a(2, ASN1_Class::ContextSpecific)) {
-      // Store it in case insensitive form so we don't have to do it
-      // again while matching
-      auto dns = canonicalize_dns_name(ASN1::to_string(obj));
-      // An empty DNS subtree has no clear meaning, reject immediately
-      if(dns.empty()) {
-         throw Decoding_Error("Empty DNS name in GeneralName");
+      auto constraint = DNSConstraint::from_string(ASN1::to_string(obj));
+      if(!constraint.has_value()) {
+         throw Decoding_Error("Malformed DNS name in GeneralName");
       }
       m_type = NameType::DNS;
-      m_name.emplace<DNS_IDX>(std::move(dns));
+      m_name = std::move(*constraint);
    } else if(obj.is_a(6, ASN1_Class::ContextSpecific)) {
+      /*
+      RFC 5280 4.2.1.10:
+         For URIs, the constraint applies to the host part of the name.
+         The constraint MUST be specified as a fully qualified domain
+         name and MAY specify a host or a domain.  Examples would be
+         "host.example.com" and ".example.com".
+      */
+      auto constraint = URIConstraint::from_string(ASN1::to_string(obj));
+      if(!constraint.has_value()) {
+         throw Decoding_Error("Malformed URI name in GeneralName");
+      }
       m_type = NameType::URI;
-      m_name.emplace<URI_IDX>(ASN1::to_string(obj));
+      m_name = std::move(*constraint);
    } else if(obj.is_a(4, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
       X509_DN dn;
       BER_Decoder dec(obj, ber.limits());
       dn.decode_from(dec);
+      dec.verify_end();
       m_type = NameType::DN;
-      m_name.emplace<DN_IDX>(dn);
+      m_name.emplace<X509_DN>(dn);
    } else if(obj.is_a(7, ASN1_Class::ContextSpecific)) {
       if(obj.length() == 8) {
          const auto addr_and_mask = std::span<const uint8_t, 8>{obj.bits(), 8};
@@ -46933,7 +49941,7 @@ void GeneralName::decode_from(BER_Decoder& ber) {
          }
 
          m_type = NameType::IPv4;
-         m_name.emplace<IPV4_IDX>(*subnet);
+         m_name.emplace<IPv4Subnet>(*subnet);
       } else if(obj.length() == 32) {
          const auto addr_and_mask = std::span<const uint8_t, 32>{obj.bits(), 32};
          auto subnet = IPv6Subnet::from_address_and_mask(addr_and_mask);
@@ -46942,7 +49950,7 @@ void GeneralName::decode_from(BER_Decoder& ber) {
          }
 
          m_type = NameType::IPv6;
-         m_name.emplace<IPV6_IDX>(*subnet);
+         m_name.emplace<IPv6Subnet>(*subnet);
       } else {
          throw Decoding_Error("Invalid IP name constraint size " + std::to_string(obj.length()));
       }
@@ -46953,32 +49961,131 @@ void GeneralName::decode_from(BER_Decoder& ber) {
 
 bool GeneralName::matches_dns(const std::string& dns_name) const {
    if(m_type == NameType::DNS) {
-      const auto& constraint = std::get<DNS_IDX>(m_name);
-      return matches_dns(dns_name, constraint);
+      return dns_subtree_match(dns_name, std::get<DNSConstraint>(m_name).value());
+   }
+   return false;
+}
+
+bool GeneralName::matches_dns(const DNSName& dns_name) const {
+   if(m_type == NameType::DNS) {
+      return dns_subtree_match(dns_name.to_string(), std::get<DNSConstraint>(m_name).value());
    }
    return false;
 }
 
 bool GeneralName::matches_ipv4(uint32_t ip) const {
    if(m_type == NameType::IPv4) {
-      return std::get<IPV4_IDX>(m_name).contains(IPv4Address(ip));
+      return std::get<IPv4Subnet>(m_name).contains(IPv4Address(ip));
    }
    return false;
 }
 
 bool GeneralName::matches_ipv6(const IPv6Address& ip) const {
    if(m_type == NameType::IPv6) {
-      return std::get<IPV6_IDX>(m_name).contains(ip);
+      return std::get<IPv6Subnet>(m_name).contains(ip);
    }
    return false;
 }
 
 bool GeneralName::matches_dn(const X509_DN& dn) const {
    if(m_type == NameType::DN) {
-      const X509_DN& constraint = std::get<DN_IDX>(m_name);
-      return matches_dn(dn, constraint);
+      return matches_dn(dn, std::get<X509_DN>(m_name));
    }
    return false;
+}
+
+bool GeneralName::matches_uri(const URI& uri) const {
+   if(m_type != NameType::URI) {
+      return false;
+   }
+   // RFC 5280 4.2.1.10 does not provide for applying a DNS-form URI
+   // constraint to an IP-literal host.
+   const auto host = uri.host();
+   if(!host.has_value() || !std::holds_alternative<DNSName>(host->get())) {
+      return false;
+   }
+   const std::string& dns_host = std::get<DNSName>(host->get()).to_string();
+   const std::string& constraint = std::get<URIConstraint>(m_name).value();
+   /*
+   RFC 5280 4.2.1.10:
+      When the constraint begins with a period, it MAY be expanded with
+      one or more labels.  That is, the constraint ".example.com" is
+      satisfied by both host.example.com and my.host.example.com.
+      However, the constraint ".example.com" is not satisfied by
+      "example.com".  When the constraint does not begin with a period,
+      it specifies a host.
+
+   So a bare-host URI constraint is exact-match only; subdomains don't
+   satisfy it. dns_subtree_match handles the leading-dot form correctly.
+   */
+   if(!constraint.empty() && constraint.front() == '.') {
+      return dns_subtree_match(dns_host, constraint);
+   }
+   return dns_host == constraint;
+}
+
+bool GeneralName::matches_email(const EmailAddress& addr) const {
+   if(m_type != NameType::RFC822) {
+      return false;
+   }
+   return email_subtree_match(addr, std::get<EmailConstraint>(m_name).value());
+}
+
+bool GeneralName::matches_email(const SmtpUtf8Mailbox& mailbox) const {
+   if(m_type != NameType::RFC822) {
+      return false;
+   }
+   /*
+   RFC 9598 Section 6:
+      Setup converts the inputs of the comparison ... to constraint
+      comparison form.  For both the name constraint and the subject,
+      this will convert all A-labels and NR-LDH labels to lowercase.
+      Strip the Local-part and "@" separator from each rfc822Name and
+      SmtpUTF8Mailbox, which leaves just the domain part.  After setup,
+      follow the comparison steps defined in Section 4.2.1.10 of
+      [RFC5280] as follows.  If the resulting name constraint domain
+      starts with a "." character, then for the name constraint to
+      match, a suffix of the resulting subject alternative name domain
+      MUST match the name constraint (including the leading ".") octet
+      for octet.  If the resulting name constraint domain does not
+      start with a "." character, then for the name constraint to
+      match, the entire resulting subject alternative name domain MUST
+      match the name constraint octet for octet.
+
+   Per RFC 9598 Section 3 the SmtpUTF8Mailbox domain is already A-label /
+   NR-LDH and lowercase by construction (DNSName::from_string enforces
+   LDH + lowercase). The rfc822Name constraint flows through the same
+   DNSName validation. So octet-for-octet comparison is the correct
+   algorithm with no IDNA conversion required.
+   */
+   const std::string& candidate_domain = mailbox.domain().to_string();
+   const std::string& constraint = std::get<EmailConstraint>(m_name).value();
+   if(constraint.find('@') != std::string::npos) {
+      /*
+      * The situation with SmtpUTF8Mailbox mailbox constraints (with '@') is a bit confused.
+      *
+      * RFC 9549 updates RFC 5280 to completely drop support for mailbox constraints.
+      * Then RFC 9598 Section 6 (relevant section quoted above) defines a mechanism to
+      * apply rfc822 mailbox name constraints to SmtpUTF8Mailbox, but it does so in a
+      * completely insecure way, namely by stripping off the local-part and comparing just
+      * the domains. Under these rules, if an intermediate certificate had a permittedSubtrees
+      * containing alice@example.com then a leaf certificate could have a SmtpUTF8Mailbox
+      * containing bob@example.com, and per RFC 9598 that's fine because we are supposed
+      * to just check the domains.
+      *
+      * This is obviously nonsense. Here we return false, which ensures that
+      * is_permitted_smtp_utf8 never accepts on a mailbox constraint. In is_excluded_smtp_utf8
+      * we first call matches_email then additionally (for mailbox constraints) reject any
+      * matching domain using the additional check in mailbox_form_constraint_covers_domain.
+      */
+      return false;
+   }
+   if(!constraint.empty() && constraint.front() == '.') {
+      // Leading-dot subtree form: suffix match including the dot.
+      return candidate_domain.ends_with(constraint);
+   }
+   // Host form: exact match on the domain.
+   return candidate_domain == constraint;
 }
 
 GeneralName::MatchResult GeneralName::matches(const X509_Certificate& cert) const {
@@ -47016,50 +50123,65 @@ GeneralName::MatchResult GeneralName::matches(const X509_Certificate& cert) cons
    MatchScore score;
 
    if(m_type == NameType::DNS) {
-      const auto& constraint = std::get<DNS_IDX>(m_name);
+      const auto& constraint = std::get<DNSConstraint>(m_name).value();
 
-      const auto& alt_names = alt_name.dns();
-
-      for(const std::string& dns : alt_names) {
-         score.add(matches_dns(dns, constraint));
+      for(const auto& dns : alt_name.dns_names()) {
+         score.add(dns_subtree_match(dns.to_string(), constraint));
       }
 
-      if(alt_name.count() == 0) {
+      if(alt_name.is_empty()) {
+         // TODO(Botan4): CN fallback is deprecated for removal in Botan4.
          // Check CN instead...
          for(const std::string& cn : dn.get_attribute("CN")) {
-            if(!string_to_ipv4(cn).has_value()) {
-               score.add(matches_dns(canonicalize_dns_name(cn), constraint));
+            if(cn.find('.') == std::string::npos) {
+               continue;
+            }
+            if(IPv4Address::from_string(cn).has_value()) {
+               continue;
+            }
+            if(auto dns_form = DNSName::from_san_string(cn)) {
+               score.add(dns_subtree_match(dns_form->to_string(), constraint));
             }
          }
       }
    } else if(m_type == NameType::DN) {
-      const X509_DN& constraint = std::get<DN_IDX>(m_name);
+      const X509_DN& constraint = std::get<X509_DN>(m_name);
       score.add(matches_dn(dn, constraint));
 
       for(const auto& alt_dn : alt_name.directory_names()) {
          score.add(matches_dn(alt_dn, constraint));
       }
    } else if(m_type == NameType::IPv4) {
-      const auto& subnet = std::get<IPV4_IDX>(m_name);
+      const auto& subnet = std::get<IPv4Subnet>(m_name);
 
-      if(alt_name.count() == 0) {
+      if(alt_name.is_empty()) {
+         // TODO(Botan4): CN fallback is deprecated for removal in Botan4.
          // Check CN instead...
          for(const std::string& cn : dn.get_attribute("CN")) {
-            if(auto ipv4 = string_to_ipv4(cn)) {
-               score.add(subnet.contains(IPv4Address(*ipv4)));
+            if(auto ipv4 = IPv4Address::from_string(cn)) {
+               score.add(subnet.contains(*ipv4));
             }
          }
       } else {
-         for(const uint32_t ipv4 : alt_name.ipv4_address()) {
-            score.add(subnet.contains(IPv4Address(ipv4)));
+         for(const auto& ipv4 : alt_name.ipv4_addresses()) {
+            score.add(subnet.contains(ipv4));
          }
       }
    } else if(m_type == NameType::IPv6) {
-      for(const auto& ipv6 : alt_name.ipv6_address()) {
+      for(const auto& ipv6 : alt_name.ipv6_addresses()) {
          score.add(matches_ipv6(ipv6));
       }
+   } else if(m_type == NameType::URI) {
+      for(const auto& uri : alt_name.uri_names()) {
+         score.add(matches_uri(uri));
+      }
+   } else if(m_type == NameType::RFC822) {
+      for(const auto& addr : alt_name.email_addresses()) {
+         score.add(matches_email(addr));
+      }
    } else {
-      // URI and email name constraint matching not implemented
+      // Only NameType::Other (and the sentinel Unknown) remain; those
+      // cannot be matched without per-OID semantics.
       return MatchResult::UnknownType;
    }
 
@@ -47067,51 +50189,17 @@ GeneralName::MatchResult GeneralName::matches(const X509_Certificate& cert) cons
 }
 
 //static
-bool GeneralName::matches_dns(std::string_view name, std::string_view constraint) {
-   // both constraint and name are assumed already tolower
-   if(name.size() == constraint.size()) {
-      return name == constraint;
-   } else if(constraint.size() > name.size()) {
-      // The constraint is longer than the issued name: not possibly a match
-      return false;
-   } else {
-      BOTAN_ASSERT_NOMSG(name.size() > constraint.size());
-
-      if(constraint.empty()) {
-         return true;
-      }
-
-      const std::string_view substr = name.substr(name.size() - constraint.size(), constraint.size());
-
-      if(constraint.front() == '.') {
-         return substr == constraint;
-      } else if(substr[0] == '.') {
-         return substr.substr(1) == constraint;
-      } else {
-         return substr == constraint && name[name.size() - constraint.size() - 1] == '.';
-      }
-   }
-}
-
-//static
 bool GeneralName::matches_dn(const X509_DN& name, const X509_DN& constraint) {
-   // Perform DN matching by comparing RDNs in sequence, i.e.,
-   // whether the constraint is a prefix of the name.
-   const auto& name_info = name.dn_info();
-   const auto& constraint_info = constraint.dn_info();
+   /*
+   RFC 5280 7.1:
+     Two RelativeDistinguishedNames RDN1 and RDN2 match if they have
+     the same number of naming attributes and for each naming attribute
+     in RDN1 there is a matching naming attribute in RDN2.
 
-   if(constraint_info.size() > name_info.size()) {
-      return false;
-   }
-
-   for(size_t i = 0; i < constraint_info.size(); ++i) {
-      if(name_info[i].first != constraint_info[i].first ||
-         !x500_name_cmp(name_info[i].second.value(), constraint_info[i].second.value())) {
-         return false;
-      }
-   }
-
-   return !constraint_info.empty();
+   This is implementing directoryName subtree match, so the constraint's RDN
+   sequence must be a prefix of the name's RDN sequence.
+   */
+   return x509_dn_subtree_match(name, constraint);
 }
 
 std::ostream& operator<<(std::ostream& os, const GeneralName& gn) {
@@ -47121,8 +50209,15 @@ std::ostream& operator<<(std::ostream& os, const GeneralName& gn) {
 
 GeneralSubtree::GeneralSubtree() = default;
 
-void GeneralSubtree::encode_into(DER_Encoder& /*to*/) const {
-   throw Not_Implemented("GeneralSubtree encoding");
+void GeneralSubtree::encode_into(DER_Encoder& to) const {
+   /*
+   * RFC 5280 Section 4.2.1.10:
+   *    Within this profile, the minimum and maximum fields are not used with any
+   *    name forms, thus, the minimum MUST be zero, and maximum MUST be absent.
+   *
+   * minimum is DEFAULT 0 so it is not encoded.
+   */
+   to.start_sequence().encode(m_base).end_cons();
 }
 
 void GeneralSubtree::decode_from(BER_Decoder& ber) {
@@ -47197,13 +50292,26 @@ bool NameConstraints::is_permitted(const X509_Certificate& cert, bool reject_unk
    }
 
    if(reject_unknown) {
-      if(m_permitted_name_types.contains(GeneralName::NameType::Other) && !alt_name.other_names().empty()) {
+      /* A critical NC restricting an unrecognized GeneralName form (e.g. x400Address)
+      * causes immediate rejection.
+      *
+      * RFC 5280 4.2.1.10 leaves this both unspecified
+      *   The syntax and semantics for name constraints for otherName, ediPartyName, and
+      *   registeredID are not defined by this specification
+      * and discouraged
+      *    Conforming CAs [...] SHOULD NOT impose name constraints on the x400Address,
+      *    ediPartyName, or registeredID name forms.
+      *
+      * In principle we should only reject when the constrained form appears in the
+      * certificate. But this situation in general seems to be a minefield, with no help
+      * from specs, test suites, etc. Lacking any obvious use case, just fail closed.
+      *
+      * If you happen to hit this with a real chain, open an issue.
+      */
+      if(m_permitted_name_types.contains(GeneralName::NameType::Unknown)) {
          return false;
       }
-      if(m_permitted_name_types.contains(GeneralName::NameType::URI) && !alt_name.uris().empty()) {
-         return false;
-      }
-      if(m_permitted_name_types.contains(GeneralName::NameType::RFC822) && !alt_name.email().empty()) {
+      if(m_permitted_name_types.contains(GeneralName::NameType::Other) && !alt_name.other_name_values().empty()) {
          return false;
       }
    }
@@ -47224,11 +50332,7 @@ bool NameConstraints::is_permitted(const X509_Certificate& cert, bool reject_unk
       return false;
    };
 
-   auto is_permitted_dns_name = [&](const std::string& name) {
-      if(name.empty() || name.starts_with(".")) {
-         return false;
-      }
-
+   auto is_permitted_dns_name = [&](const DNSName& name) {
       // If no restrictions, then immediate accept
       if(!m_permitted_name_types.contains(GeneralName::NameType::DNS)) {
          return true;
@@ -47254,7 +50358,7 @@ bool NameConstraints::is_permitted(const X509_Certificate& cert, bool reject_unk
    const bool ip_form_restricted = m_permitted_name_types.contains(GeneralName::NameType::IPv4) ||
                                    m_permitted_name_types.contains(GeneralName::NameType::IPv6);
 
-   auto is_permitted_ipv4 = [&](uint32_t ipv4) {
+   auto is_permitted_ipv4 = [&](const IPv4Address& ipv4) {
       if(!ip_form_restricted) {
          return true;
       }
@@ -47288,6 +50392,66 @@ bool NameConstraints::is_permitted(const X509_Certificate& cert, bool reject_unk
       return false;
    };
 
+   auto is_permitted_uri = [&](const URI& uri) {
+      // If no URI restrictions, accept.
+      if(!m_permitted_name_types.contains(GeneralName::NameType::URI)) {
+         return true;
+      }
+      /*
+      RFC 5280 4.2.1.10:
+         If a constraint is applied to the uniformResourceIdentifier
+         name form and a subsequent certificate includes a
+         subjectAltName extension with a uniformResourceIdentifier that
+         does not include an authority component with a host name
+         specified as a fully qualified domain name (e.g., if the URI
+         either does not include an authority component or includes an
+         authority component in which the host name is specified as an
+         IP address), then the application MUST reject the certificate.
+      */
+      const auto host = uri.host();
+      if(!host.has_value() || !std::holds_alternative<DNSName>(host->get())) {
+         return false;
+      }
+      if(std::get<DNSName>(host->get()).to_string().find('.') == std::string::npos) {
+         return false;
+      }
+      for(const auto& c : m_permitted_subtrees) {
+         if(c.base().matches_uri(uri)) {
+            return true;
+         }
+      }
+      return false;
+   };
+
+   auto is_permitted_email = [&](const EmailAddress& addr) {
+      // If no email restrictions, accept.
+      if(!m_permitted_name_types.contains(GeneralName::NameType::RFC822)) {
+         return true;
+      }
+      for(const auto& c : m_permitted_subtrees) {
+         if(c.base().matches_email(addr)) {
+            return true;
+         }
+      }
+      return false;
+   };
+
+   // RFC 9598 Section 6 extends rfc822Name name constraints to SmtpUTF8Mailbox
+   // SAN entries (id-on-SmtpUTF8Mailbox otherNames). When rfc822Name
+   // constraints are in effect, every SmtpUTF8Mailbox SAN must match
+   // at least one permitted entry.
+   auto is_permitted_smtp_utf8 = [&](const SmtpUtf8Mailbox& mailbox) {
+      if(!m_permitted_name_types.contains(GeneralName::NameType::RFC822)) {
+         return true;
+      }
+      for(const auto& c : m_permitted_subtrees) {
+         if(c.base().matches_email(mailbox)) {
+            return true;
+         }
+      }
+      return false;
+   };
+
    /*
    RFC 5280 4.1.2.6:
       If subject naming information is present only in the
@@ -47311,36 +50475,74 @@ bool NameConstraints::is_permitted(const X509_Certificate& cert, bool reject_unk
       }
    }
 
-   for(const auto& alt_dns : alt_name.dns()) {
+   for(const auto& alt_dns : alt_name.dns_names()) {
       if(!is_permitted_dns_name(alt_dns)) {
          return false;
       }
    }
 
-   for(const auto& alt_ipv4 : alt_name.ipv4_address()) {
+   for(const auto& alt_ipv4 : alt_name.ipv4_addresses()) {
       if(!is_permitted_ipv4(alt_ipv4)) {
          return false;
       }
    }
 
-   for(const auto& alt_ipv6 : alt_name.ipv6_address()) {
+   for(const auto& alt_ipv6 : alt_name.ipv6_addresses()) {
       if(!is_permitted_ipv6(alt_ipv6)) {
          return false;
       }
    }
 
-   if(alt_name.count() == 0) {
-      for(const auto& cn : cert.subject_info("Name")) {
-         if(cn.find(".") != std::string::npos) {
-            if(auto ipv4 = string_to_ipv4(cn)) {
-               if(!is_permitted_ipv4(ipv4.value())) {
-                  return false;
-               }
-            } else {
-               if(!is_permitted_dns_name(canonicalize_dns_name(cn))) {
+   for(const auto& uri : alt_name.uri_names()) {
+      if(!is_permitted_uri(uri)) {
+         return false;
+      }
+   }
+
+   for(const auto& addr : alt_name.email_addresses()) {
+      if(!is_permitted_email(addr)) {
+         return false;
+      }
+   }
+
+   for(const auto& mailbox : alt_name.smtp_utf8_mailboxes()) {
+      if(!is_permitted_smtp_utf8(mailbox)) {
+         return false;
+      }
+   }
+
+   // TODO(Botan4): CN fallback is deprecated for removal in Botan4.
+   if(alt_name.is_empty()) {
+      for(const auto& cn : cert.subject_info("CN")) {
+         if(auto ipv4 = IPv4Address::from_string(cn)) {
+            if(!is_permitted_ipv4(*ipv4)) {
+               return false;
+            }
+         } else if(cn.find('.') != std::string::npos) {
+            if(auto dns_form = DNSName::from_san_string(cn)) {
+               if(!is_permitted_dns_name(*dns_form)) {
                   return false;
                }
             }
+         }
+      }
+
+      /*
+      RFC 5280 4.2.1.10:
+         When constraints are imposed on the rfc822Name name form, but the
+         certificate does not include a subject alternative name, the
+         rfc822Name constraint MUST be applied to the attribute of type
+         emailAddress in the subject distinguished name.
+      */
+      for(const auto& email_str : cert.subject_dn().get_attribute("PKCS9.EmailAddress")) {
+         if(auto addr = EmailAddress::from_string(email_str)) {
+            if(!is_permitted_email(*addr)) {
+               return false;
+            }
+         } else if(m_permitted_name_types.contains(GeneralName::NameType::RFC822)) {
+            // emailAddress is present but unparsable and an rfc822Name
+            // constraint is in effect; treat as not permitted.
+            return false;
          }
       }
    }
@@ -47363,13 +50565,12 @@ bool NameConstraints::is_excluded(const X509_Certificate& cert, bool reject_unkn
    if(reject_unknown) {
       // This is one is overly broad: we should just reject if there is a name constraint
       // with the same OID as one of the other names
-      if(m_excluded_name_types.contains(GeneralName::NameType::Other) && !alt_name.other_names().empty()) {
+      if(m_excluded_name_types.contains(GeneralName::NameType::Other) && !alt_name.other_name_values().empty()) {
          return true;
       }
-      if(m_excluded_name_types.contains(GeneralName::NameType::URI) && !alt_name.uris().empty()) {
-         return true;
-      }
-      if(m_excluded_name_types.contains(GeneralName::NameType::RFC822) && !alt_name.email().empty()) {
+      // As in is_permitted: a critical NC restricting an unrecognized
+      // GeneralName form cannot be evaluated; reject conservatively.
+      if(m_excluded_name_types.contains(GeneralName::NameType::Unknown)) {
          return true;
       }
    }
@@ -47390,17 +50591,11 @@ bool NameConstraints::is_excluded(const X509_Certificate& cert, bool reject_unkn
       return false;
    };
 
-   auto is_excluded_dns_name = [&](const std::string& name) {
-      if(name.empty() || name.starts_with(".")) {
-         return true;
-      }
-
+   auto is_excluded_dns_name = [&](const DNSName& name) {
       // If no restrictions, then immediate accept
       if(!m_excluded_name_types.contains(GeneralName::NameType::DNS)) {
          return false;
       }
-
-      const bool name_has_wildcard = (name.find('*') != std::string::npos);
 
       for(const auto& c : m_excluded_subtrees) {
          if(c.base().matches_dns(name)) {
@@ -47408,15 +50603,17 @@ bool NameConstraints::is_excluded(const X509_Certificate& cert, bool reject_unkn
          }
 
          /*
-         RFC 5280 4.2.1.10 - "any name matching a restriction in the
-         excludedSubtrees field is invalid".
+         RFC 5280 4.2.1.10:
+            Any name matching a restriction in the excludedSubtrees
+            field is invalid regardless of information appearing in
+            the permittedSubtrees.
 
          If the cert has a wildcard SAN (*.example.com), and that wildcard
          could be matched against an excluded name, it must be rejected.
          */
-         if(name_has_wildcard && c.base().m_type == GeneralName::NameType::DNS) {
-            const auto& constraint = std::get<GeneralName::DNS_IDX>(c.base().m_name);
-            if(host_wildcard_match(name, constraint)) {
+         if(c.base().m_type == GeneralName::NameType::DNS && name.is_wildcard()) {
+            const auto& constraint = std::get<GeneralName::DNSConstraint>(c.base().m_name).value();
+            if(wildcard_intersects_excluded_dns_subtree(name.to_string(), constraint)) {
                return true;
             }
          }
@@ -47426,7 +50623,7 @@ bool NameConstraints::is_excluded(const X509_Certificate& cert, bool reject_unkn
       return false;
    };
 
-   auto is_excluded_ipv4 = [&](uint32_t ipv4) {
+   auto is_excluded_ipv4 = [&](const IPv4Address& ipv4) {
       if(m_excluded_name_types.contains(GeneralName::NameType::IPv4)) {
          for(const auto& c : m_excluded_subtrees) {
             if(c.base().matches_ipv4(ipv4)) {
@@ -47464,6 +50661,97 @@ bool NameConstraints::is_excluded(const X509_Certificate& cert, bool reject_unkn
       return false;
    };
 
+   auto is_excluded_uri = [&](const URI& uri) {
+      if(!m_excluded_name_types.contains(GeneralName::NameType::URI)) {
+         return false;
+      }
+      /*
+      RFC 5280 4.2.1.10:
+         If a constraint is applied to the uniformResourceIdentifier
+         name form and a subsequent certificate includes a
+         subjectAltName extension with a uniformResourceIdentifier that
+         does not include an authority component with a host name
+         specified as a fully qualified domain name (e.g., if the URI
+         either does not include an authority component or includes an
+         authority component in which the host name is specified as an
+         IP address), then the application MUST reject the certificate.
+      */
+      const auto host = uri.host();
+      if(!host.has_value() || !std::holds_alternative<DNSName>(host->get())) {
+         return true;
+      }
+      if(std::get<DNSName>(host->get()).to_string().find('.') == std::string::npos) {
+         return true;
+      }
+      for(const auto& c : m_excluded_subtrees) {
+         if(c.base().matches_uri(uri)) {
+            return true;
+         }
+      }
+      return false;
+   };
+
+   /*
+   * The email matching logic on the exclude side is intentionally stricter
+   * (more expansive) than the permit side logic.
+   *
+   * RFC 9549 updates RFC 5280 and among other things completely removes mailbox
+   * form constraints (ones with a '@', rather than just a domain constraint)
+   * claiming "This capability was not used".
+   *
+   * This prohibition is reiterated in RFC 9598 Section 6 with "rfc822Name
+   * constraints with a Local-part SHOULD NOT be used."
+   *
+   * Here we lean very conservative in our interpretation: if there is a
+   * mailbox-form exclude constraint, we reject any mailbox at that domain. That
+   * is, if excludedSubtrees includes "user@example.com", we treat that
+   * constraint identically to an exclusion of "example.com".
+   *
+   * This might be overly cautious, but generally a rejects-valid bug gets you a
+   * prompt bug report with testcase, while an accepts-invalid eventually gets
+   * you a surprise CVE.
+   */
+   auto mailbox_form_constraint_covers_domain = [](const GeneralName& gn, const DNSName& san_domain) {
+      if(gn.type_code() != GeneralName::NameType::RFC822) {
+         return false;
+      }
+      const auto& constraint = std::get<GeneralName::EmailConstraint>(gn.m_name).value();
+      const auto at = constraint.find('@');
+      return at != std::string::npos && san_domain.to_string() == constraint.substr(at + 1);
+   };
+
+   auto is_excluded_email = [&](const EmailAddress& addr) {
+      if(m_excluded_name_types.contains(GeneralName::NameType::RFC822)) {
+         for(const auto& c : m_excluded_subtrees) {
+            if(c.base().matches_email(addr)) {
+               return true;
+            }
+            /*
+            If we were strictly following RFC 9549 we would here want to call
+            mailbox_form_constraint_covers_domain, but this breaks chains which
+            are in conformance to the specifications prior to 9549.
+            */
+         }
+      }
+      return false;
+   };
+
+   // RFC 9598 Section 6: rfc822Name name constraints also apply to
+   // SmtpUTF8Mailbox SAN entries. See is_permitted_smtp_utf8.
+   auto is_excluded_smtp_utf8 = [&](const SmtpUtf8Mailbox& mailbox) {
+      if(m_excluded_name_types.contains(GeneralName::NameType::RFC822)) {
+         for(const auto& c : m_excluded_subtrees) {
+            if(c.base().matches_email(mailbox)) {
+               return true;
+            }
+            if(mailbox_form_constraint_covers_domain(c.base(), mailbox.domain())) {
+               return true;
+            }
+         }
+      }
+      return false;
+   };
+
    if(is_excluded_dn(cert.subject_dn())) {
       return true;
    }
@@ -47474,36 +50762,66 @@ bool NameConstraints::is_excluded(const X509_Certificate& cert, bool reject_unkn
       }
    }
 
-   for(const auto& alt_dns : alt_name.dns()) {
+   for(const auto& alt_dns : alt_name.dns_names()) {
       if(is_excluded_dns_name(alt_dns)) {
          return true;
       }
    }
 
-   for(const auto& alt_ipv4 : alt_name.ipv4_address()) {
+   for(const auto& alt_ipv4 : alt_name.ipv4_addresses()) {
       if(is_excluded_ipv4(alt_ipv4)) {
          return true;
       }
    }
 
-   for(const auto& alt_ipv6 : alt_name.ipv6_address()) {
+   for(const auto& alt_ipv6 : alt_name.ipv6_addresses()) {
       if(is_excluded_ipv6(alt_ipv6)) {
          return true;
       }
    }
 
-   if(alt_name.count() == 0) {
+   for(const auto& uri : alt_name.uri_names()) {
+      if(is_excluded_uri(uri)) {
+         return true;
+      }
+   }
+
+   for(const auto& addr : alt_name.email_addresses()) {
+      if(is_excluded_email(addr)) {
+         return true;
+      }
+   }
+
+   for(const auto& mailbox : alt_name.smtp_utf8_mailboxes()) {
+      if(is_excluded_smtp_utf8(mailbox)) {
+         return true;
+      }
+   }
+
+   // TODO(Botan4): CN fallback is deprecated for removal in Botan4.
+   if(alt_name.is_empty()) {
       for(const auto& cn : cert.subject_info("Name")) {
-         if(cn.find(".") != std::string::npos) {
-            if(auto ipv4 = string_to_ipv4(cn)) {
-               if(is_excluded_ipv4(ipv4.value())) {
-                  return true;
-               }
-            } else {
-               if(is_excluded_dns_name(canonicalize_dns_name(cn))) {
+         if(auto ipv4 = IPv4Address::from_string(cn)) {
+            if(is_excluded_ipv4(*ipv4)) {
+               return true;
+            }
+         } else if(cn.find('.') != std::string::npos) {
+            if(auto dns_form = DNSName::from_san_string(cn)) {
+               if(is_excluded_dns_name(*dns_form)) {
                   return true;
                }
             }
+         }
+      }
+
+      // RFC 5280 4.2.1.10 fallback to subject DN emailAddress when the cert has no SAN
+      for(const auto& email_str : cert.subject_dn().get_attribute("PKCS9.EmailAddress")) {
+         if(auto addr = EmailAddress::from_string(email_str)) {
+            if(is_excluded_email(*addr)) {
+               return true;
+            }
+         } else if(m_excluded_name_types.contains(GeneralName::NameType::RFC822)) {
+            return true;
          }
       }
    }
@@ -47527,7 +50845,27 @@ bool NameConstraints::is_excluded(const X509_Certificate& cert, bool reject_unkn
 
 namespace Botan::OCSP {
 
-CertID::CertID(const X509_Certificate& issuer, const BigInt& subject_serial) : m_subject_serial(subject_serial) {
+namespace {
+
+/*
+* RFC 6960 requires producedAt, thisUpdate, nextUpdate, and revocationTime
+* to be encoded as GeneralizedTime. ASN1_Time also accepts UTCTime since that
+* is required for X.509 certificates and CRLs (RFC 5280), so enforce the
+* stricter OCSP requirement at the call site.
+*/
+void check_generalized_time(const ASN1_Time& time, const char* field) {
+   if(time.tagging() != ASN1_Type::GeneralizedTime) {
+      throw Decoding_Error(fmt("OCSP response {} was not encoded as GeneralizedTime", field));
+   }
+}
+
+}  // namespace
+
+CertID::CertID(const X509_Certificate& issuer, const BigInt& subject_serial) :
+      CertID(issuer, X509_Serial_Number(subject_serial)) {}
+
+CertID::CertID(const X509_Certificate& issuer, const X509_Serial_Number& subject_serial) :
+      m_subject_serial(subject_serial) {
    /*
    In practice it seems some responders, including, notably,
    ocsp.verisign.com, will reject anything but SHA-1 here
@@ -47541,29 +50879,39 @@ CertID::CertID(const X509_Certificate& issuer, const BigInt& subject_serial) : m
 
 bool CertID::is_id_for(const X509_Certificate& issuer, const X509_Certificate& subject) const {
    try {
-      if(BigInt::from_bytes(subject.serial_number()) != m_subject_serial) {
+      if(subject.serial() != m_subject_serial) {
          return false;
       }
 
-      const std::string hash_algo = m_hash_id.oid().to_formatted_string();
-
-      if(hash_algo != "SHA-1" && hash_algo != "SHA-256") {
-         return false;
-      }
-
-      auto hash = HashFunction::create_or_throw(hash_algo);
+      const auto hash_algo = m_hash_id.oid().registered_name();
 
       /*
       RFC 6960 4.1.1
          issuerNameHash is the hash of the issuer's distinguished name (DN).
          The hash shall be calculated over the DER encoding of the issuer's name
          field in the certificate being checked.
-      */
-      if(m_issuer_dn_hash != hash->process<std::vector<uint8_t>>(subject.raw_issuer_dn())) {
-         return false;
-      }
 
-      if(m_issuer_key_hash != hash->process<std::vector<uint8_t>>(issuer.subject_public_key_bitstring())) {
+         issuerKeyHash is the hash of the issuer's public key. The hash shall be
+         calculated over the value (excluding tag and length) of the subject public key
+         field in the issuer's certificate.
+      */
+
+      if(hash_algo == "SHA-1") {
+         if(!std::ranges::equal(m_issuer_dn_hash, subject.raw_issuer_dn_sha1())) {
+            return false;
+         }
+         if(!std::ranges::equal(m_issuer_key_hash, issuer.subject_public_key_bitstring_sha1())) {
+            return false;
+         }
+      } else if(hash_algo == "SHA-256") {
+         if(!std::ranges::equal(m_issuer_dn_hash, subject.raw_issuer_dn_sha256())) {
+            return false;
+         }
+         if(!std::ranges::equal(m_issuer_key_hash, issuer.subject_public_key_bitstring_sha256())) {
+            return false;
+         }
+      } else {
+         // Exotic hashes are unlikely to occur in OCSP
          return false;
       }
    } catch(...) {
@@ -47598,10 +50946,89 @@ void CertID::decode_from(BER_Decoder& from) {
       .decode(m_issuer_key_hash, ASN1_Type::OctetString)
       .decode(m_subject_serial)
       .end_cons();
+
+   if(!m_hash_id.parameters_are_null_or_empty()) {
+      throw Decoding_Error("OCSP CertID hashAlgorithm has unexpected parameters");
+   }
 }
 
-void SingleResponse::encode_into(DER_Encoder& /*to*/) const {
-   throw Not_Implemented("SingleResponse::encode_into");
+//static
+SingleResponse SingleResponse::good(CertID certid, X509_Time this_update, X509_Time next_update) {
+   return SingleResponse(
+      std::move(certid), 0, std::nullopt, std::nullopt, std::move(this_update), std::move(next_update));
+}
+
+//static
+SingleResponse SingleResponse::unknown(CertID certid, X509_Time this_update, X509_Time next_update) {
+   return SingleResponse(
+      std::move(certid), 2, std::nullopt, std::nullopt, std::move(this_update), std::move(next_update));
+}
+
+//static
+SingleResponse SingleResponse::revoked(CertID certid,
+                                       X509_Time revocation_time,
+                                       std::optional<CRL_Code> reason,
+                                       X509_Time this_update,
+                                       X509_Time next_update) {
+   return SingleResponse(
+      std::move(certid), 1, std::move(revocation_time), reason, std::move(this_update), std::move(next_update));
+}
+
+SingleResponse::SingleResponse(CertID certid,
+                               size_t cert_status,
+                               std::optional<X509_Time> revocation_time,
+                               std::optional<CRL_Code> revocation_reason,
+                               X509_Time this_update,
+                               X509_Time next_update) :
+      m_certid(std::move(certid)),
+      m_cert_status(cert_status),
+      m_thisupdate(std::move(this_update)),
+      m_nextupdate(std::move(next_update)),
+      m_revocation_time(std::move(revocation_time)),
+      m_revocation_reason(revocation_reason) {
+   const auto require_generalized_time = [](const X509_Time& t, const char* field) {
+      if(t.tagging() != ASN1_Type::GeneralizedTime) {
+         throw Invalid_Argument(fmt("OCSP SingleResponse {} must be a GeneralizedTime", field));
+      }
+   };
+
+   require_generalized_time(m_thisupdate, "thisUpdate");
+   if(m_nextupdate.time_is_set()) {
+      require_generalized_time(m_nextupdate, "nextUpdate");
+   }
+   if(m_cert_status == 1) {
+      if(!m_revocation_time.has_value()) {
+         throw Invalid_Argument("Revoked OCSP SingleResponse lacks a revocation time");
+      }
+      require_generalized_time(*m_revocation_time, "revocationTime");
+   }
+}
+
+void SingleResponse::encode_into(DER_Encoder& to) const {
+   // The SingleResponse / CertStatus / RevokedInfo ASN.1 is quoted in
+   // decode_from below
+   to.start_sequence();
+   to.encode(m_certid);
+   if(m_cert_status == 1) {
+      // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+      to.start_cons(ASN1_Type(1), ASN1_Class::ContextSpecific).encode(m_revocation_time.value());
+      if(m_revocation_reason.has_value() && *m_revocation_reason != CRL_Code::Unspecified) {
+         to.start_explicit(0)
+            .encode(static_cast<size_t>(*m_revocation_reason), ASN1_Type::Enumerated, ASN1_Class::Universal)
+            .end_explicit();
+      }
+      to.end_cons();
+   } else {
+      // good [0] / unknown [2], both IMPLICIT NULL
+      const std::span<const uint8_t> empty;
+      // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+      to.add_object(ASN1_Type(m_cert_status), ASN1_Class::ContextSpecific, empty);
+   }
+   to.encode(m_thisupdate);
+   if(m_nextupdate.time_is_set()) {
+      to.start_explicit(0).encode(m_nextupdate).end_explicit();
+   }
+   to.end_cons();
 }
 
 void SingleResponse::decode_from(BER_Decoder& from) {
@@ -47627,13 +51054,28 @@ void SingleResponse::decode_from(BER_Decoder& from) {
    BER_Object cert_status;
    Extensions extensions;
 
-   from.start_sequence()
-      .decode(m_certid)
+   auto seq = from.start_sequence();
+   seq.decode(m_certid)
       .get_next(cert_status)
       .decode(m_thisupdate)
-      .decode_optional(m_nextupdate, ASN1_Type(0), ASN1_Class::ContextSpecific | ASN1_Class::Constructed)
-      .decode_optional(extensions, ASN1_Type(1), ASN1_Class::ContextSpecific | ASN1_Class::Constructed)
-      .end_cons();
+      .decode_optional(m_nextupdate, ASN1_Type(0), ASN1_Class::ContextSpecific | ASN1_Class::Constructed);
+
+   check_generalized_time(m_thisupdate, "thisUpdate");
+   if(m_nextupdate.time_is_set()) {
+      check_generalized_time(m_nextupdate, "nextUpdate");
+   }
+
+   if(seq.more_items()) {
+      const BER_Object next = seq.get_next_object();
+      if(next.is_a(1, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
+         BER_Decoder ext_decoder(next, BER_Decoder::Limits::DER());
+         extensions.decode_from(ext_decoder, Extension_Context::OCSP_Response);
+         ext_decoder.verify_end();
+      } else {
+         throw Decoding_Error("Unexpected tag in OCSP SingleResponse");
+      }
+   }
+   seq.end_cons();
 
    const auto cert_status_class = cert_status.get_class();
    if(cert_status_class != ASN1_Class::ContextSpecific &&
@@ -47641,10 +51083,33 @@ void SingleResponse::decode_from(BER_Decoder& from) {
       throw Decoding_Error("OCSP::SingleResponse: certStatus has unexpected class tag");
    }
 
-   // TODO: should verify the cert_status body and decode RevokedInfo
    m_cert_status = static_cast<uint32_t>(cert_status.type());
    if(m_cert_status > 2) {
       throw Decoding_Error("Unknown OCSP CertStatus tag");
+   }
+
+   m_revocation_time.reset();
+   m_revocation_reason.reset();
+
+   if(m_cert_status == 1) {
+      BER_Decoder revoked_info(cert_status, BER_Decoder::Limits::DER());
+      X509_Time revocation_time;
+      revoked_info.decode(revocation_time);
+      check_generalized_time(revocation_time, "revocationTime");
+      m_revocation_time = std::move(revocation_time);
+
+      if(revoked_info.peek_next_object().is_a(0, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
+         size_t reason = 0;
+         revoked_info.start_context_specific(0).decode(reason, ASN1_Type::Enumerated, ASN1_Class::Universal).end_cons();
+         if(reason == 7 || reason > 10) {
+            throw Decoding_Error(fmt("CRLReason has unknown enumeration value {}", reason));
+         }
+         m_revocation_reason = static_cast<CRL_Code>(reason);
+      }
+      revoked_info.verify_end();
+   } else if(cert_status.length() != 0) {
+      // good [0] / unknown [2] are both IMPLICIT NULL
+      throw Decoding_Error("OCSP CertStatus has unexpected content");
    }
 
    // We don't currently recognize any extensions here so if any are critical we should reject
@@ -47672,12 +51137,13 @@ void decode_optional_list(BER_Decoder& ber, ASN1_Type tag, std::vector<X509_Cert
       }());
    }
    seq.end_cons();
+   list.verify_end();
 }
 
 }  // namespace
 
 Request::Request(const X509_Certificate& issuer_cert, const X509_Certificate& subject_cert) :
-      m_issuer(issuer_cert), m_certid(m_issuer, BigInt::from_bytes(subject_cert.serial_number())) {
+      m_issuer(issuer_cert), m_certid(m_issuer, subject_cert.serial()) {
    if(subject_cert.issuer_dn() != issuer_cert.subject_dn()) {
       throw Invalid_Argument("Invalid cert pair to OCSP::Request (mismatched issuer,subject args?)");
    }
@@ -47761,21 +51227,32 @@ Response::Response(const uint8_t response_bits[], size_t response_bits_len) :
        unauthorized          (6)   -- Request unauthorized
    }
    */
-   if(resp_status >= 7) {
+   if(resp_status == 4 || resp_status >= 7) {
       throw Decoding_Error("Unknown OCSPResponseStatus code");
    }
 
    m_status = static_cast<Response_Status_Code>(resp_status);
 
-   if(m_status != Response_Status_Code::Successful) {
-      return;
+   /*
+   * RFC 6960 4.2.1: "If the value of responseStatus is one of the error
+   * conditions, the responseBytes field is not set."
+   */
+   const bool successful = (m_status == Response_Status_Code::Successful);
+   const bool has_response_bytes = response_outer.more_items();
+
+   if(successful && !has_response_bytes) {
+      throw Decoding_Error("OCSP response with successful status is missing responseBytes");
+   }
+   if(!successful && has_response_bytes) {
+      throw Decoding_Error("OCSP response with non-successful status includes responseBytes");
    }
 
-   if(response_outer.more_items()) {
+   if(successful) {
       BER_Decoder response_bytes_ctx = response_outer.start_context_specific(0);
       BER_Decoder response_bytes = response_bytes_ctx.start_sequence();
 
-      response_bytes.decode_and_check(OID({1, 3, 6, 1, 5, 5, 7, 48, 1, 1}), "Unknown response type in OCSP response");
+      response_bytes.decode_and_check(OID::from_string("PKIX.OCSP.BasicResponse"),
+                                      "Unknown response type in OCSP response");
 
       /*
       * RFC 6960 Section 4.2.1
@@ -47793,7 +51270,7 @@ Response::Response(const uint8_t response_bits[], size_t response_bits_len) :
          .raw_bytes(m_tbs_bits)
          .end_cons()
          .decode(m_sig_algo)
-         .decode(m_signature, ASN1_Type::BitString);
+         .decode_octet_aligned_bitstring(m_signature);
       decode_optional_list(basicresponse, ASN1_Type(0), m_certs);
 
       basicresponse.verify_end();
@@ -47816,7 +51293,8 @@ Response::Response(const uint8_t response_bits[], size_t response_bits_len) :
       size_t responsedata_version = 0;
       Extensions extensions;
 
-      BER_Decoder(m_tbs_bits, BER_Decoder::Limits::DER())
+      BER_Decoder tbs_decoder(m_tbs_bits, BER_Decoder::Limits::DER());
+      tbs_decoder
          .decode_optional(responsedata_version, ASN1_Type(0), ASN1_Class::ContextSpecific | ASN1_Class::Constructed)
 
          .decode_optional(m_signer_name, ASN1_Type(1), ASN1_Class::ContextSpecific | ASN1_Class::Constructed)
@@ -47826,11 +51304,21 @@ Response::Response(const uint8_t response_bits[], size_t response_bits_len) :
 
          .decode(m_produced_at)
 
-         .decode_list(m_responses)
+         .decode_list(m_responses);
 
-         .decode_optional(extensions, ASN1_Type(1), ASN1_Class::ContextSpecific | ASN1_Class::Constructed)
+      check_generalized_time(m_produced_at, "producedAt");
 
-         .verify_end();
+      if(tbs_decoder.more_items()) {
+         const BER_Object next = tbs_decoder.get_next_object();
+         if(next.is_a(1, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
+            BER_Decoder ext_decoder(next, BER_Decoder::Limits::DER());
+            extensions.decode_from(ext_decoder, Extension_Context::OCSP_Response);
+            ext_decoder.verify_end();
+         } else {
+            throw Decoding_Error("Unexpected tag in OCSP ResponseData");
+         }
+      }
+      tbs_decoder.verify_end();
 
       const bool has_signer = !m_signer_name.empty();
       const bool has_key_hash = !m_key_hash.empty();
@@ -47903,8 +51391,9 @@ Certificate_Status_Code Response::verify_signature(const X509_Certificate& issue
       auto pub_key = issuer.subject_public_key();
 
       PK_Verifier verifier(*pub_key, m_sig_algo);
-
-      const bool valid_signature = verifier.verify_message(ASN1::put_in_sequence(m_tbs_bits), m_signature);
+      verifier.update(ASN1::der_sequence_header(m_tbs_bits.size()));
+      verifier.update(m_tbs_bits);
+      const bool valid_signature = verifier.check_signature(m_signature);
 
       if(valid_signature == false) {
          return Certificate_Status_Code::OCSP_SIGNATURE_ERROR;
@@ -48027,9 +51516,23 @@ Response online_check(const X509_Certificate& issuer,
       throw Invalid_Argument("No OCSP responder specified");
    }
 
+   if(auto uri = URI::from_string(ocsp_responder)) {
+      return online_check(issuer, subject_serial, *uri, timeout);
+   } else {
+      throw Invalid_Argument("Unparsable URI for OCSP responder");
+   }
+}
+
+Response online_check(const X509_Certificate& issuer,
+                      const BigInt& subject_serial,
+                      const URI& ocsp_responder,
+                      std::chrono::milliseconds timeout) {
    const OCSP::Request req(issuer, subject_serial);
 
-   auto http = HTTP::POST_sync(ocsp_responder, "application/ocsp-request", req.BER_encode(), 1, timeout);
+   auto http = HTTP::POST_sync(ocsp_responder,
+                               "application/ocsp-request",
+                               req.BER_encode(),
+                               HTTP::RequestLimits().set_timeout(timeout).set_max_body_size(64 * 1024));
 
    http.throw_unless_ok();
 
@@ -48045,7 +51548,23 @@ Response online_check(const X509_Certificate& issuer,
       throw Invalid_Argument("Invalid cert pair to OCSP::online_check (mismatched issuer,subject args?)");
    }
 
-   return online_check(issuer, BigInt::from_bytes(subject.serial_number()), subject.ocsp_responder(), timeout);
+   const auto responders = URI::filter_scheme("http", subject.ocsp_responder_uris());
+
+   if(responders.empty()) {
+      throw Invalid_Argument("No HTTP OCSP responder URLs available for this certificate");
+   }
+
+   const auto subject_serial = subject.serial().to_bigint();
+
+   // Try the first N - 1 responder addresses in sequence, ignoring errors
+   for(size_t i = 0; i + 1 < responders.size(); ++i) {
+      try {
+         return online_check(issuer, subject_serial, responders[i], timeout);
+      } catch(...) {}
+   }
+
+   // Now try the final responder and let any errors propagate
+   return online_check(issuer, subject_serial, responders.back(), timeout);
 }
 
 #endif
@@ -48181,7 +51700,8 @@ std::unique_ptr<PKCS10_Data> decode_pkcs10(const std::vector<uint8_t>& body) {
             value.decode(challenge_password);
             data->m_challenge = challenge_password.value();
          } else if(oid == OID::from_string("PKCS9.ExtensionRequest")) {
-            value.decode(data->m_extensions).verify_end();
+            data->m_extensions.decode_from(value, Extension_Context::Certificate);
+            value.verify_end();
          }
       }
       attributes.verify_end();
@@ -48386,7 +51906,11 @@ X509_CA::~X509_CA() = default;
 
 Extensions X509_CA::choose_extensions(const PKCS10_Request& req,
                                       const X509_Certificate& ca_cert,
-                                      std::string_view hash_fn) {
+                                      std::string_view /*hash_fn*/) {
+   return choose_extensions(req, ca_cert);
+}
+
+Extensions X509_CA::choose_extensions(const PKCS10_Request& req, const X509_Certificate& ca_cert) {
    const auto constraints = req.is_CA() ? Key_Constraints::ca_constraints() : req.constraints();
 
    auto key = req.subject_public_key();
@@ -48404,7 +51928,7 @@ Extensions X509_CA::choose_extensions(const PKCS10_Request& req,
    }
 
    extensions.replace(std::make_unique<Cert_Extension::Authority_Key_ID>(ca_cert.subject_key_id()));
-   extensions.replace(std::make_unique<Cert_Extension::Subject_Key_ID>(req.raw_public_key(), hash_fn));
+   extensions.replace(std::make_unique<Cert_Extension::Subject_Key_ID>(*key));
 
    extensions.replace(std::make_unique<Cert_Extension::Subject_Alternative_Name>(req.subject_alt_name()));
 
@@ -48418,7 +51942,7 @@ X509_Certificate X509_CA::sign_request(const PKCS10_Request& req,
                                        const BigInt& serial_number,
                                        const X509_Time& not_before,
                                        const X509_Time& not_after) const {
-   auto extensions = choose_extensions(req, m_ca_cert, m_hash_fn);
+   auto extensions = choose_extensions(req, m_ca_cert);
 
    return make_cert(*m_signer,
                     rng,
@@ -48439,7 +51963,7 @@ X509_Certificate X509_CA::sign_request(const PKCS10_Request& req,
                                        RandomNumberGenerator& rng,
                                        const X509_Time& not_before,
                                        const X509_Time& not_after) const {
-   auto extensions = choose_extensions(req, m_ca_cert, m_hash_fn);
+   auto extensions = choose_extensions(req, m_ca_cert);
 
    return make_cert(*m_signer,
                     rng,
@@ -48461,11 +51985,10 @@ X509_Certificate X509_CA::make_cert(PK_Signer& signer,
                                     const X509_DN& issuer_dn,
                                     const X509_DN& subject_dn,
                                     const Extensions& extensions) {
-   const size_t SERIAL_BITS = 128;
-   const BigInt serial_no(rng, SERIAL_BITS);
+   const auto serial_no = X509_Serial_Number::random(rng);
 
    return make_cert(
-      signer, rng, serial_no, sig_algo, pub_key, not_before, not_after, issuer_dn, subject_dn, extensions);
+      signer, rng, serial_no.to_bigint(), sig_algo, pub_key, not_before, not_after, issuer_dn, subject_dn, extensions);
 }
 
 /*
@@ -48536,7 +52059,7 @@ X509_CRL X509_CA::new_crl(RandomNumberGenerator& rng,
                           std::chrono::system_clock::time_point issue_time,
                           std::chrono::seconds next_update) const {
    const std::vector<CRL_Entry> empty;
-   return make_crl(empty, 1, rng, issue_time, next_update);
+   return make_crl(empty, BigInt::one(), rng, issue_time, next_update);
 }
 
 X509_CRL X509_CA::update_crl(const X509_CRL& last_crl,
@@ -48548,14 +52071,15 @@ X509_CRL X509_CA::update_crl(const X509_CRL& last_crl,
 
    std::copy(new_revoked.begin(), new_revoked.end(), std::back_inserter(revoked));
 
-   return make_crl(revoked, last_crl.crl_number() + 1, rng, issue_time, next_update);
+   const BigInt last_crl_number = last_crl.crl_number_bigint().value_or(BigInt::zero());
+   return make_crl(revoked, last_crl_number + 1, rng, issue_time, next_update);
 }
 
 /*
 * Create a CRL
 */
 X509_CRL X509_CA::make_crl(const std::vector<CRL_Entry>& revoked,
-                           uint32_t crl_number,
+                           const BigInt& crl_number,
                            RandomNumberGenerator& rng,
                            std::chrono::system_clock::time_point issue_time,
                            std::chrono::seconds next_update) const {
@@ -48652,7 +52176,7 @@ X509_Certificate X509_Certificate_Cache::find_or_insert(std::span<const uint8_t>
 }  // namespace Botan
 /*
 * X.509 CRL
-* (C) 1999-2007 Jack Lloyd
+* (C) 1999-2007,2026 Jack Lloyd
 *
 * Botan is released under the Simplified BSD License (see license.txt)
 */
@@ -48676,11 +52200,7 @@ class CRL_Data final {
       void update_index() {
          m_revoked_serials.clear();
          for(const auto& entry : m_entries) {
-            if(entry.reason_code() == CRL_Code::RemoveFromCrl) {
-               m_revoked_serials.erase(entry.serial_number());
-            } else {
-               m_revoked_serials.insert(entry.serial_number());
-            }
+            m_revoked_serials.insert(entry.serial());
          }
       }
 
@@ -48693,12 +52213,13 @@ class CRL_Data final {
       Extensions m_extensions;
 
       // cached values from entries
-      std::set<std::vector<uint8_t>> m_revoked_serials;
+      std::set<X509_Serial_Number> m_revoked_serials;
 
       // cached values from extensions
-      size_t m_crl_number = 0;
+      std::optional<BigInt> m_crl_number;
       std::vector<uint8_t> m_auth_key_id;
-      std::vector<std::string> m_idp_urls;
+      std::vector<URI> m_idp_urls;
+      bool m_has_unknown_critical_extension = false;
       // NOLINTEND(*non-private-member-variables-in-classes)
 };
 
@@ -48737,6 +52258,14 @@ X509_CRL::X509_CRL(const X509_DN& issuer,
 * Check if this particular certificate is listed in the CRL
 */
 bool X509_CRL::is_revoked(const X509_Certificate& cert) const {
+   const bool serial_appears = data().m_revoked_serials.contains(cert.serial());
+
+   // If the serial number does not appear in the revocation list then
+   // the later checks are not necessary anyway
+   if(!serial_appears) {
+      return false;
+   }
+
    /*
    If the cert wasn't issued by the CRL issuer, it's possible the cert
    is revoked, but not by this CRL. Maybe throw an exception instead?
@@ -48754,14 +52283,14 @@ bool X509_CRL::is_revoked(const X509_Certificate& cert) const {
       }
    }
 
-   return data().m_revoked_serials.contains(cert.serial_number());
+   return serial_appears;
 }
+
+namespace {
 
 /*
 * Decode the TBSCertList data
 */
-namespace {
-
 std::unique_ptr<CRL_Data> decode_crl_body(const std::vector<uint8_t>& body, const AlgorithmIdentifier& sig_algo) {
    auto data = std::make_unique<CRL_Data>();
 
@@ -48773,6 +52302,9 @@ std::unique_ptr<CRL_Data> decode_crl_body(const std::vector<uint8_t>& body, cons
    if(data->m_version != 1 && data->m_version != 2) {
       throw Decoding_Error("Unknown X.509 CRL version " + std::to_string(data->m_version));
    }
+
+   // Extensions are only defined for v2 CRLs
+   const bool supports_extensions = data->m_version > 1;
 
    AlgorithmIdentifier sig_algo_inner;
    tbs_crl.decode(sig_algo_inner);
@@ -48805,33 +52337,62 @@ std::unique_ptr<CRL_Data> decode_crl_body(const std::vector<uint8_t>& body, cons
       while(cert_list.more_items()) {
          CRL_Entry entry;
          cert_list.decode(entry);
-         data->m_entries.push_back(entry);
+
+         if(entry.extensions().has_unknown_critical_extension()) {
+            data->m_has_unknown_critical_extension = true;
+         }
+
+         if(!supports_extensions && entry.extensions().count() > 0) {
+            throw Decoding_Error("X509 CRL included extensions in a version that doesn't support them");
+         }
+
+         data->m_entries.push_back(std::move(entry));
       }
+
+      /*
+      RFC 5280 Section 5.1.2.6
+         When there are no revoked certificates, the revoked certificates list MUST be absent.
+
+      So strictly speaking we should be checking that m_entries is not empty. But practically,
+      it seems nearly all implementations accept a present-but-empty SEQUENCE as equivalent
+      to an absent one, and several major ones (including GnuTLS) will emit it. Considering
+      this situation, and the benign nature of the deviation, accept the non-conforming encoding.
+      */
+
       next = tbs_crl.get_next_object();
    }
 
    if(next.is_a(0, ASN1_Class::Constructed | ASN1_Class::ContextSpecific)) {
+      if(!supports_extensions) {
+         throw Decoding_Error("X509 CRL included extensions in a version that doesn't support them");
+      }
       BER_Decoder crl_options(next, tbs_crl.limits());
-      crl_options.decode(data->m_extensions).verify_end();
-      next = tbs_crl.get_next_object();
+      data->m_extensions.decode_from(crl_options, Extension_Context::CRL);
+      crl_options.verify_end();
+      if(data->m_extensions.has_unknown_critical_extension()) {
+         data->m_has_unknown_critical_extension = true;
+      }
+
+      if(tbs_crl.get_next_object().is_set()) {
+         throw Decoding_Error("Unknown tag following extensions in CRL");
+      }
    }
 
-   if(next.is_set()) {
-      throw Decoding_Error("Unknown tag following extensions in CRL");
-   }
-
-   tbs_crl.verify_end();
+   tbs_crl.verify_end("Unexpected trailing data after CRL");
 
    // Now cache some fields from the extensions
    if(const auto* ext = data->m_extensions.get_extension_object_as<Cert_Extension::CRL_Number>()) {
-      data->m_crl_number = ext->get_crl_number();
+      data->m_crl_number = ext->crl_number();
    }
    if(const auto* ext = data->m_extensions.get_extension_object_as<Cert_Extension::Authority_Key_ID>()) {
       data->m_auth_key_id = ext->get_key_id();
    }
    if(const auto* ext = data->m_extensions.get_extension_object_as<Cert_Extension::CRL_Issuing_Distribution_Point>()) {
-      for(const auto& uri : ext->get_point().uris()) {
-         data->m_idp_urls.push_back(uri);
+      const auto& dpn = ext->distribution_point_name();
+      if(dpn.has_value() && dpn->full_name().has_value()) {
+         for(const auto& uri : dpn->full_name()->uri_names()) {
+            data->m_idp_urls.push_back(uri);
+         }
       }
    }
 
@@ -48868,6 +52429,10 @@ uint32_t X509_CRL::x509_version() const {
    return static_cast<uint32_t>(data().m_version);
 }
 
+bool X509_CRL::has_unknown_critical_extension() const {
+   return data().m_has_unknown_critical_extension;
+}
+
 /*
 * Return the distinguished name of the issuer
 */
@@ -48885,8 +52450,23 @@ const std::vector<uint8_t>& X509_CRL::authority_key_id() const {
 /*
 * Return the CRL number of this CRL
 */
+const std::optional<BigInt>& X509_CRL::crl_number_bigint() const {
+   return data().m_crl_number;
+}
+
 uint32_t X509_CRL::crl_number() const {
-   return static_cast<uint32_t>(data().m_crl_number);
+   if(const auto num = this->crl_number_bigint()) {
+      // This should already be caught at decode time
+      BOTAN_ASSERT_NOMSG(num->signum() >= 0);
+
+      if(num->bits() > 32) {
+         throw Encoding_Error("CRL number is too large to fit in uint32_t");
+      }
+
+      return num->to_u32bit();
+   } else {
+      return 0;
+   }
 }
 
 /*
@@ -48908,7 +52488,7 @@ const X509_Time& X509_CRL::next_update() const {
 */
 std::string X509_CRL::crl_issuing_distribution_point() const {
    if(!data().m_idp_urls.empty()) {
-      return data().m_idp_urls[0];
+      return data().m_idp_urls[0].original_input();
    }
    return "";
 }
@@ -48917,6 +52497,15 @@ std::string X509_CRL::crl_issuing_distribution_point() const {
 * Return the CRL's issuing distribution point
 */
 std::vector<std::string> X509_CRL::issuing_distribution_points() const {
+   std::vector<std::string> out;
+   out.reserve(data().m_idp_urls.size());
+   for(const auto& uri : data().m_idp_urls) {
+      out.push_back(uri.original_input());
+   }
+   return out;
+}
+
+const std::vector<URI>& X509_CRL::issuing_distribution_point_uris() const {
    return data().m_idp_urls;
 }
 
@@ -48933,24 +52522,162 @@ bool dp_names_overlap(const AlternativeName& a, const AlternativeName& b) {
       return std::ranges::any_of(s1, [&](const auto& e) { return s2.contains(e); });
    };
 
-   return has_common(a.uris(), b.uris()) || has_common(a.directory_names(), b.directory_names());
+   return has_common(a.uri_names(), b.uri_names()) || has_common(a.directory_names(), b.directory_names());
+}
+
+bool dp_issuer_and_scope_ok(const Cert_Extension::CRL_Distribution_Points::Distribution_Point& dp,
+                            const X509_DN& crl_issuer_dn,
+                            const Cert_Extension::CRL_Issuing_Distribution_Point* idp_ext,
+                            const X509_Certificate& cert) {
+   /*
+   * RFC 5280 6.3.3 step (b)(1):
+   *    If the DP includes cRLIssuer, then verify that the issuer field in
+   *    the complete CRL matches cRLIssuer in the DP and that the complete
+   *    CRL contains an issuing distribution point extension with the
+   *    indirectCRL boolean asserted.  Otherwise, verify that the CRL
+   *    issuer matches the certificate issuer.
+   */
+
+   if(dp.crl_issuer().has_value()) {
+      // Verify that the DP cRLIssuer field matches the CRL issuer
+      if(!dp.crl_issuer()->directory_names().contains(crl_issuer_dn)) {
+         return false;
+      }
+      // Verify that the IDP with the indirectCRL boolean asserted
+      if(idp_ext == nullptr || !idp_ext->indirect_crl()) {
+         return false;
+      }
+      return true;
+   } else {
+      // Verify that the CRL issuer matches the certificate issuer
+      return crl_issuer_dn == cert.issuer_dn();
+   }
+}
+
+bool dp_idp_name_matches(const Cert_Extension::CRL_Distribution_Points::Distribution_Point& dp,
+                         const Cert_Extension::CRL_Issuing_Distribution_Point* idp_ext) {
+   /*
+   * RFC 5280 6.3.3 step (b)(2)(i):
+   *    If the distribution point name is present in the IDP CRL extension
+   *    and the distribution field is present in the DP, then verify that
+   *    one of the names in the IDP matches one of the names in the DP.
+   *    If the distribution point name is present in the IDP CRL extension
+   *    and the distribution field is omitted from the DP, then verify
+   *    that one of the names in the IDP matches one of the names in the
+   *    cRLIssuer field of the DP.
+   */
+   if(idp_ext != nullptr) {
+      const auto& idp_dpn = idp_ext->distribution_point_name();
+      if(!idp_dpn.has_value()) {
+         return true;
+      }
+      const auto& cert_dpn = dp.distribution_point_name();
+      if(cert_dpn.has_value()) {
+         // Match the cert's DistributionPoint name against the CRL's IDP DistributionPoint name.
+         if(cert_dpn->full_name().has_value() && idp_dpn->full_name().has_value()) {
+            return dp_names_overlap(*cert_dpn->full_name(), *idp_dpn->full_name());
+         } else {
+            return false;
+         }
+      }
+      // DP omits distributionPoint: match IDP name against names in dp.cRLIssuer.
+      if(dp.crl_issuer().has_value() && idp_dpn->full_name().has_value()) {
+         return dp_names_overlap(*idp_dpn->full_name(), *dp.crl_issuer());
+      }
+      return false;
+   } else {
+      return true;
+   }
+}
+
+/*
+* True if the cert has no CDP, in which case RFC 5280 6.3.3 trailing
+* paragraph applies: assume an implicit DP whose name is the certificate
+* issuer field plus the certificate issuerAltName entries, and whose
+* cRLIssuer and reasons are omitted.
+*/
+bool implicit_dp_matches(const X509_CRL& crl,
+                         const X509_Certificate& cert,
+                         const Cert_Extension::CRL_Issuing_Distribution_Point* idp_ext) {
+   if(crl.issuer_dn() != cert.issuer_dn()) {
+      return false;
+   }
+   if(idp_ext == nullptr) {
+      return true;
+   }
+   const auto& idp_dpn = idp_ext->distribution_point_name();
+   if(!idp_dpn.has_value()) {
+      return true;
+   }
+   if(!idp_dpn->full_name().has_value()) {
+      return false;
+   }
+   AlternativeName implicit_full_name = cert.issuer_alt_name();
+   implicit_full_name.add_dn(cert.issuer_dn());
+   return dp_names_overlap(*idp_dpn->full_name(), implicit_full_name);
 }
 
 }  // namespace
 
-bool X509_CRL::has_matching_distribution_point(const X509_Certificate& cert) const {
+DistributionPointMatch distribution_point_match(const X509_CRL& crl, const X509_Certificate& cert) {
+   const auto* idp_ext = crl.extensions().get_extension_object_as<Cert_Extension::CRL_Issuing_Distribution_Point>();
    const auto* cdp_ext = cert.v3_extensions().get_extension_object_as<Cert_Extension::CRL_Distribution_Points>();
+
+   /*
+   * RFC 5280 6.3.3 trailing paragraph: "If the revocation status has not
+   * been determined, repeat the process above with any available CRLs not
+   * specified in a distribution point but issued by the certificate issuer.
+   * For the processing of such a CRL, assume a DP with both the reasons and
+   * the cRLIssuer fields omitted and a distribution point name of the
+   * certificate issuer."
+   *
+   * When the cert has no CDP this implicit DP is the only DP; with no reasons
+   * field it covers all reasons by construction.
+   */
    if(cdp_ext == nullptr || cdp_ext->distribution_points().empty()) {
-      return true;
+      const bool match = implicit_dp_matches(crl, cert, idp_ext);
+      return {match, match};
    }
 
-   const auto* idp_ext = this->extensions().get_extension_object_as<Cert_Extension::CRL_Issuing_Distribution_Point>();
-   if(idp_ext == nullptr) {
-      return false;
+   /*
+   * Walk the cert's CDP once, recording both the bare name-match and whether
+   * any matching DP omits the reasons field. (b)(1) cRLIssuer + indirectCRL
+   * and (b)(2)(i) IDP-vs-DP name overlap live in the helpers; reason coverage
+   * is decided per (d)(3): a matching DP whose reasons field is set narrows
+   * the CRL's coverage to that subset, so full coverage requires a
+   * matching DP with no reasons field.
+   */
+   const auto name_matches = [&](const auto& dp) {
+      return dp_issuer_and_scope_ok(dp, crl.issuer_dn(), idp_ext, cert) && dp_idp_name_matches(dp, idp_ext);
+   };
+
+   bool any = false;
+   bool any_with_absent_reasons = false;
+   for(const auto& dp : cdp_ext->distribution_points()) {
+      if(name_matches(dp)) {
+         any = true;
+         if(!dp.reasons().has_value()) {
+            any_with_absent_reasons = true;
+         }
+      }
+   }
+   if(any) {
+      return {true, any_with_absent_reasons};
    }
 
-   return std::ranges::any_of(cdp_ext->distribution_points(),
-                              [&](const auto& dp) { return dp_names_overlap(dp.point(), idp_ext->get_point()); });
+   /*
+   * Implicit-DP fallback: a same-issuer complete CRL that matches no explicit
+   * DP is still usable, unless its own IDP scopes it to a distribution point
+   * (see crl_eligible_for_implicit_dp_fallback). The implicit DP omits
+   * reasons, so a name match here also gives full reason coverage.
+   */
+   const bool implicit_dp_fallback = (idp_ext == nullptr || !idp_ext->distribution_point_name().has_value());
+   const bool implicit = implicit_dp_fallback && implicit_dp_matches(crl, cert, idp_ext);
+   return {implicit, implicit};
+}
+
+bool X509_CRL::has_matching_distribution_point(const X509_Certificate& cert) const {
+   return distribution_point_match(*this, cert).any;
 }
 
 }  // namespace Botan
@@ -48962,6 +52689,7 @@ bool X509_CRL::has_matching_distribution_point(const X509_Certificate& cert) con
 */
 
 
+#include <optional>
 
 namespace Botan {
 
@@ -48969,6 +52697,52 @@ namespace {
 
 bool is_space(char c) {
    return c == ' ' || c == '\t';
+}
+
+std::optional<uint8_t> hex_digit_value(char c) {
+   if(c >= '0' && c <= '9') {
+      return static_cast<uint8_t>(c - '0');
+   } else if(c >= 'a' && c <= 'f') {
+      return static_cast<uint8_t>(c - 'a' + 10);
+   } else if(c >= 'A' && c <= 'F') {
+      return static_cast<uint8_t>(c - 'A' + 10);
+   } else {
+      return {};
+   }
+}
+
+/*
+* RFC 4514 Section 3 specifies which characters can be escaped
+*/
+bool is_escapable_char(char c) {
+   switch(c) {
+      case '\\':
+      case '"':
+      case '+':
+      case ',':
+      case ';':
+      case '<':
+      case '>':
+      case ' ':
+      case '#':
+      case '=':
+         return true;
+      default:
+         return false;
+   }
+}
+
+bool is_unescaped_special_value_char(char c) {
+   switch(c) {
+      case ';':
+      case '<':
+      case '>':
+      case '#':
+      case '=':
+         return true;
+      default:
+         return false;
+   }
 }
 
 /*
@@ -49028,23 +52802,6 @@ class X500_Char_Iterator final {
 
 }  // namespace
 
-bool x500_name_cmp(std::string_view name1, std::string_view name2) {
-   X500_Char_Iterator it1(name1);
-   X500_Char_Iterator it2(name2);
-
-   while(true) {
-      const auto c1 = it1.next();
-      const auto c2 = it2.next();
-
-      if(c1 != c2) {
-         return false;
-      }
-      if(!c1.has_value() && !c2.has_value()) {
-         return true;
-      }
-   }
-}
-
 /*
 * Add an attribute to a X509_DN
 */
@@ -49060,8 +52817,29 @@ void X509_DN::add_attribute(const OID& oid, const ASN1_String& str) {
       return;
    }
 
-   m_rdn.push_back(std::make_pair(oid, str));
+   // Each programmatic add appends a new single-AVA RDN.
+   m_rdn.push_back({std::make_pair(oid, str)});
    m_dn_bits.clear();
+   update_canonical_bits();
+}
+
+void X509_DN::add_rdn(std::vector<std::pair<OID, ASN1_String>> rdn) {
+   if(rdn.empty()) {
+      return;
+   }
+   m_rdn.push_back(std::move(rdn));
+   m_dn_bits.clear();
+   update_canonical_bits();
+}
+
+std::vector<std::pair<OID, ASN1_String>> X509_DN::dn_info() const {
+   std::vector<std::pair<OID, ASN1_String>> flat;
+   for(const auto& rdn : m_rdn) {
+      for(const auto& ava : rdn) {
+         flat.push_back(ava);
+      }
+   }
+   return flat;
 }
 
 /*
@@ -49070,8 +52848,10 @@ void X509_DN::add_attribute(const OID& oid, const ASN1_String& str) {
 std::multimap<OID, std::string> X509_DN::get_attributes() const {
    std::multimap<OID, std::string> retval;
 
-   for(const auto& i : m_rdn) {
-      retval.emplace(i.first, i.second.value());
+   for(const auto& rdn : m_rdn) {
+      for(const auto& ava : rdn) {
+         retval.emplace(ava.first, ava.second.value());
+      }
    }
    return retval;
 }
@@ -49082,8 +52862,10 @@ std::multimap<OID, std::string> X509_DN::get_attributes() const {
 std::multimap<std::string, std::string> X509_DN::contents() const {
    std::multimap<std::string, std::string> retval;
 
-   for(const auto& i : m_rdn) {
-      retval.emplace(i.first.to_formatted_string(), i.second.value());
+   for(const auto& rdn : m_rdn) {
+      for(const auto& ava : rdn) {
+         retval.emplace(ava.first.to_formatted_string(), ava.second.value());
+      }
    }
    return retval;
 }
@@ -49100,9 +52882,11 @@ bool X509_DN::has_field(std::string_view attr) const {
 }
 
 bool X509_DN::has_field(const OID& oid) const {
-   for(const auto& i : m_rdn) {
-      if(i.first == oid) {
-         return true;
+   for(const auto& rdn : m_rdn) {
+      for(const auto& ava : rdn) {
+         if(ava.first == oid) {
+            return true;
+         }
       }
    }
 
@@ -49115,9 +52899,11 @@ std::string X509_DN::get_first_attribute(std::string_view attr) const {
 }
 
 ASN1_String X509_DN::get_first_attribute(const OID& oid) const {
-   for(const auto& i : m_rdn) {
-      if(i.first == oid) {
-         return i.second;
+   for(const auto& rdn : m_rdn) {
+      for(const auto& ava : rdn) {
+         if(ava.first == oid) {
+            return ava.second;
+         }
       }
    }
 
@@ -49132,9 +52918,11 @@ std::vector<std::string> X509_DN::get_attribute(std::string_view attr) const {
 
    std::vector<std::string> values;
 
-   for(const auto& i : m_rdn) {
-      if(i.first == oid) {
-         values.push_back(i.second.value());
+   for(const auto& rdn : m_rdn) {
+      for(const auto& ava : rdn) {
+         if(ava.first == oid) {
+            values.push_back(ava.second.value());
+         }
       }
    }
 
@@ -49172,40 +52960,55 @@ std::string X509_DN::deref_info_field(std::string_view info) {
    return std::string(info);
 }
 
+namespace {
+
+/*
+* Canonical form of an RDN's AVAs: each value is X.500-canonicalized
+* (case-fold and whitespace collapse) and the resulting (OID, value)
+* pairs are sorted, so an RDN's SET semantics reduce to vector equality.
+*/
+std::vector<std::pair<OID, std::string>> canonicalize_rdn(const std::vector<std::pair<OID, ASN1_String>>& rdn) {
+   std::vector<std::pair<OID, std::string>> result;
+   result.reserve(rdn.size());
+   for(const auto& ava : rdn) {
+      result.emplace_back(ava.first, X500_Char_Iterator::canonicalize(ava.second.value()));
+   }
+   if(result.size() != 1) {
+      std::sort(result.begin(), result.end());
+   }
+   return result;
+}
+
+std::vector<uint8_t> canonicalize_dn(const std::vector<std::vector<std::pair<OID, ASN1_String>>>& rdns) {
+   auto append_canonical_data = []<typename T>(std::vector<uint8_t>& out, const T& data) {
+      const std::array<uint8_t, 8> data_len = store_le(static_cast<uint64_t>(data.size()));
+      out.insert(out.end(), data_len.begin(), data_len.end());
+      out.insert(out.end(), data.begin(), data.end());
+   };
+
+   std::vector<uint8_t> canonical_bits;
+
+   for(const auto& rdn : rdns) {
+      std::vector<uint8_t> rdn_bits;
+
+      for(const auto& [oid, value] : canonicalize_rdn(rdn)) {
+         append_canonical_data(rdn_bits, oid.BER_encode());
+         append_canonical_data(rdn_bits, value);
+      }
+
+      append_canonical_data(canonical_bits, rdn_bits);
+   }
+
+   return canonical_bits;
+}
+
+}  // namespace
+
 /*
 * Compare two X509_DNs for equality
 */
 bool operator==(const X509_DN& dn1, const X509_DN& dn2) {
-   auto attr1 = dn1.get_attributes();
-   auto attr2 = dn2.get_attributes();
-
-   if(attr1.size() != attr2.size()) {
-      return false;
-   }
-
-   auto p1 = attr1.begin();
-   auto p2 = attr2.begin();
-
-   while(true) {
-      if(p1 == attr1.end() && p2 == attr2.end()) {
-         break;
-      }
-      if(p1 == attr1.end()) {
-         return false;
-      }
-      if(p2 == attr2.end()) {
-         return false;
-      }
-      if(p1->first != p2->first) {
-         return false;
-      }
-      if(!x500_name_cmp(p1->second, p2->second)) {
-         return false;
-      }
-      ++p1;
-      ++p2;
-   }
-   return true;
+   return dn1._canonical_bytes() == dn2._canonical_bytes();
 }
 
 /*
@@ -49216,41 +53019,26 @@ bool operator!=(const X509_DN& dn1, const X509_DN& dn2) {
 }
 
 /*
-* Induce an arbitrary ordering on DNs
+* Induce an arbitrary ordering on DNs that respects RDN sequence order
+* and RDN set-equality.
 */
 bool operator<(const X509_DN& dn1, const X509_DN& dn2) {
-   auto attr1 = dn1.get_attributes();
-   auto attr2 = dn2.get_attributes();
+   return dn1._canonical_bytes() < dn2._canonical_bytes();
+}
 
-   // If they are not the same size, choose the smaller as the "lessor"
-   if(attr1.size() != attr2.size()) {
-      return attr1.size() < attr2.size();
+bool x509_dn_subtree_match(const X509_DN& name, const X509_DN& constraint) {
+   const auto& name_bits = name._canonical_bytes();
+   const auto& constraint_bits = constraint._canonical_bytes();
+
+   if(constraint_bits.size() > name_bits.size()) {
+      return false;
    }
 
-   // We know they are the same # of elements, now compare the OIDs:
-   auto p1 = attr1.begin();
-   auto p2 = attr2.begin();
+   return std::equal(constraint_bits.begin(), constraint_bits.end(), name_bits.begin());
+}
 
-   while(p1 != attr1.end() && p2 != attr2.end()) {
-      if(p1->first != p2->first) {
-         return (p1->first < p2->first);
-      }
-
-      // If they are not (by X.500) the same string, pick the
-      // lexicographic first as the lessor
-      const std::string c1 = X500_Char_Iterator::canonicalize(p1->second);
-      const std::string c2 = X500_Char_Iterator::canonicalize(p2->second);
-      if(c1 != c2) {
-         return c1 < c2;
-      }
-
-      ++p1;
-      ++p2;
-   }
-
-   // if we reach here, then the DNs should be identical
-   BOTAN_DEBUG_ASSERT(dn1 == dn2);
-   return false;
+void X509_DN::update_canonical_bits() {
+   m_canonical_dn_bits = canonicalize_dn(m_rdn);
 }
 
 std::vector<uint8_t> X509_DN::DER_encode() const {
@@ -49273,8 +53061,12 @@ void X509_DN::encode_into(DER_Encoder& der) const {
       */
       der.raw_bytes(m_dn_bits);
    } else {
-      for(const auto& dn : m_rdn) {
-         der.start_set().start_sequence().encode(dn.first).encode(dn.second).end_cons().end_cons();
+      for(const auto& rdn : m_rdn) {
+         der.start_set();
+         for(const auto& ava : rdn) {
+            der.start_sequence().encode(ava.first).encode(ava.second).end_cons();
+         }
+         der.end_cons();
       }
    }
 
@@ -49291,26 +53083,48 @@ void X509_DN::decode_from(BER_Decoder& source) {
 
    BER_Decoder sequence(bits, source.limits());
 
-   m_rdn.clear();
+   std::vector<std::vector<std::pair<OID, ASN1_String>>> rdns;
+
+   // Cap AVAs per RDN to bound work for downstream set-based matching.
+   // No legitimate cert has anywhere near this many AVAs in a single RDN.
+   constexpr size_t MAX_AVAS_PER_RDN = 32;
 
    while(sequence.more_items()) {
-      BER_Decoder rdn = sequence.start_set();
+      BER_Decoder rdn_decoder = sequence.start_set();
 
-      while(rdn.more_items()) {
+      std::vector<std::pair<OID, ASN1_String>> rdn;
+      while(rdn_decoder.more_items()) {
          OID oid;
          ASN1_String str;
 
-         rdn.start_sequence()
+         rdn_decoder.start_sequence()
             .decode(oid)
             .decode(str)  // TODO support Any
             .end_cons();
 
-         add_attribute(oid, str);
+         rdn.emplace_back(std::move(oid), std::move(str));
+
+         if(rdn.size() > MAX_AVAS_PER_RDN) {
+            throw Decoding_Error("X.500 RDN has too many attribute-value assertions");
+         }
       }
+
+      /*
+      RFC 5280 4.1.2.4:
+         RelativeDistinguishedName ::=
+           SET SIZE (1..MAX) OF AttributeTypeAndValue
+      */
+      if(rdn.empty()) {
+         throw Decoding_Error("X.500 RDN must contain at least one attribute-value assertion");
+      }
+      rdns.push_back(std::move(rdn));
    }
 
-   // Have to assign last as add_attribute zaps m_dn_bits
-   m_dn_bits = bits;
+   auto canonical_bits = canonicalize_dn(rdns);
+
+   m_rdn = std::move(rdns);
+   m_dn_bits = std::move(bits);
+   m_canonical_dn_bits = std::move(canonical_bits);
 }
 
 namespace {
@@ -49346,88 +53160,216 @@ std::string X509_DN::to_string() const {
 }
 
 std::ostream& operator<<(std::ostream& out, const X509_DN& dn) {
-   const auto& info = dn.dn_info();
+   const auto& rdns = dn.rdns();
 
-   for(size_t i = 0; i != info.size(); ++i) {
-      out << to_short_form(info[i].first) << "=\"";
-      for(const char c : info[i].second.value()) {
-         if(c == '\\' || c == '\"') {
-            out << "\\";
-         }
-         out << c;
-      }
-      out << "\"";
+   // Escape characters as a backslash plus two hex digits per byte
+   // See RFC 4514 Sections 2.4 and 4
+   auto hex_escape = [](std::ostream& s, char c) {
+      const auto b = static_cast<uint8_t>(c);
+      s << '\\' << nibble_to_hex(b >> 4) << nibble_to_hex(b);
+   };
 
-      if(i + 1 < info.size()) {
+   // AVAs within the same RDN are joined with '+' (per RFC 4514), so a
+   // multi-valued RDN remains distinguishable from multiple single-valued
+   // RDNs separated by ','.
+   bool first_rdn = true;
+   for(const auto& rdn : rdns) {
+      if(!first_rdn) {
          out << ",";
+      }
+      first_rdn = false;
+
+      bool first_ava = true;
+      for(const auto& ava : rdn) {
+         if(!first_ava) {
+            out << "+";
+         }
+         first_ava = false;
+         out << to_short_form(ava.first) << "=\"";
+         const std::string_view value = ava.second.value();
+         size_t pos = 0;
+         while(pos < value.size()) {
+            const size_t start = pos;
+
+            uint32_t cp = 0;
+            try {
+               cp = next_utf8_codepoint(value, pos);
+            } catch(const Decoding_Error&) {
+               // value() should always be valid UTF-8, but escape defensively otherwise
+               hex_escape(out, value[start]);
+               pos = start + 1;
+               continue;
+            }
+
+            if(cp == '\\' || cp == '"') {
+               out << '\\' << static_cast<char>(cp);
+            } else if(is_unicode_control_char(cp)) {
+               for(size_t i = start; i < pos; ++i) {
+                  hex_escape(out, value[i]);
+               }
+            } else {
+               out << value.substr(start, pos - start);
+            }
+         }
+         out << "\"";
       }
    }
    return out;
 }
 
-std::istream& operator>>(std::istream& in, X509_DN& dn) {
-   in >> std::noskipws;
-   // NOLINTNEXTLINE(*-avoid-do-while)
-   do {
-      std::string key;
-      std::string val;
-      char c = 0;
+/*
+* Parse the string representation of a distinguished name, accepting
+* the formats specified in RFC 4514 Section 3 as well as RFC 2253's
+* quoted format.
+*/
+std::optional<X509_DN> X509_DN::parse(std::string_view str) {
+   X509_DN dn;
 
-      while(in.good()) {
-         in >> c;
+   // AVAs accumulate here; a trailing '+' keeps the next AVA in the same
+   // RDN, while a ',' (or end of input) flushes them as a single RDN.
+   std::vector<std::pair<OID, ASN1_String>> pending_rdn;
 
-         if(is_space(c) && key.empty()) {
-            continue;
-         } else if(!is_space(c)) {
-            key.push_back(c);
-            break;
-         } else {
-            break;
-         }
+   // Separator that ended the previous AVA. A ',' or '+' still pending after the
+   // loop means the input ended with a separator and no AVA to follow it.
+   char terminator = '\0';
+
+   size_t pos = 0;
+   while(pos < str.size()) {
+      // Whitespace separating an attributeType from the preceding ',' or '+'
+      // is tolerated even though RFC 4514 does not produce it.
+      while(pos < str.size() && is_space(str[pos])) {
+         ++pos;
       }
-
-      while(in.good()) {
-         in >> c;
-
-         if(!is_space(c) && c != '=') {
-            key.push_back(c);
-         } else if(c == '=') {
-            break;
-         } else {
-            throw Invalid_Argument("Ill-formed X.509 DN");
-         }
-      }
-
-      bool in_quotes = false;
-      while(in.good()) {
-         in >> c;
-
-         if(is_space(c)) {
-            if(!in_quotes && !val.empty()) {
-               break;
-            } else if(in_quotes) {
-               val.push_back(' ');
-            }
-         } else if(c == '"') {
-            in_quotes = !in_quotes;
-         } else if(c == '\\') {
-            if(in.good()) {
-               in >> c;
-            }
-            val.push_back(c);
-         } else if(c == ',' && !in_quotes) {
-            break;
-         } else {
-            val.push_back(c);
-         }
-      }
-
-      if(!key.empty() && !val.empty()) {
-         dn.add_attribute(X509_DN::deref_info_field(key), val);
-      } else {
+      if(pos == str.size()) {
          break;
       }
-   } while(in.good());
+
+      // attributeType, terminated by '='
+      const size_t type_start = pos;
+      while(pos < str.size() && str[pos] != '=' && !is_space(str[pos])) {
+         ++pos;
+      }
+      const std::string_view type = str.substr(type_start, pos - type_start);
+      if(type.empty() || pos == str.size() || str[pos] != '=') {
+         return std::nullopt;
+      }
+      ++pos;  // consume '='
+
+      /*
+      attributeValue, in RFC 4514 <string> form plus the legacy quoted form.
+      value_len tracks the length up to the last significant octet: leading and
+      trailing unescaped whitespace is not significant unless it was escaped or
+      quoted, so trailing whitespace is dropped by the final resize.
+      */
+      std::string value;
+      size_t value_len = 0;
+
+      // The legacy quoted form wraps the whole value: a quote is only an opening
+      // quote at the start of the value, and nothing but trailing whitespace or a
+      // separator may follow the closing quote.
+      enum class Quote : uint8_t { None, Open, Closed };
+      Quote quote = Quote::None;
+
+      terminator = '\0';
+
+      while(pos < str.size()) {
+         const char c = str[pos];
+
+         if(c == '"') {
+            if(quote == Quote::Open) {
+               quote = Quote::Closed;
+            } else if(quote == Quote::None && value.empty()) {
+               quote = Quote::Open;
+            } else {
+               return std::nullopt;  // quote in mid-value or after the closing quote
+            }
+            ++pos;
+         } else if(c == '\\') {
+            if(quote == Quote::Closed) {
+               return std::nullopt;  // escape after the closing quote
+            }
+            // pair = ESC ( ESC / special / hexpair )
+            ++pos;
+            if(pos == str.size()) {
+               return std::nullopt;
+            }
+            if(const auto hi = hex_digit_value(str[pos])) {
+               const auto lo = (pos + 1 < str.size()) ? hex_digit_value(str[pos + 1]) : std::nullopt;
+               if(!lo) {
+                  return std::nullopt;
+               }
+               value.push_back(static_cast<char>((*hi << 4) | *lo));
+               pos += 2;
+            } else if(is_escapable_char(str[pos])) {
+               value.push_back(str[pos]);
+               ++pos;
+            } else {
+               return std::nullopt;  // not ESC / special / hexpair
+            }
+            value_len = value.size();  // an escaped octet is always significant
+         } else if((c == ',' || c == '+') && quote != Quote::Open) {
+            terminator = c;
+            ++pos;
+            break;
+         } else if(quote == Quote::Closed) {
+            if(!is_space(c)) {
+               return std::nullopt;  // content after the closing quote
+            }
+            ++pos;  // trailing whitespace after the closing quote is insignificant
+         } else if(quote != Quote::Open && is_unescaped_special_value_char(c)) {
+            return std::nullopt;
+         } else {
+            ++pos;
+            if(is_space(c) && quote != Quote::Open) {
+               // Keep interior whitespace only if more content follows; skip it
+               // entirely while leading (value is still empty)
+               if(!value.empty()) {
+                  value.push_back(c);
+               }
+            } else {
+               value.push_back(c);
+               value_len = value.size();
+            }
+         }
+      }
+
+      if(quote == Quote::Open) {
+         return std::nullopt;  // unterminated quoted value
+      }
+      value.resize(value_len);  // strip trailing unescaped whitespace
+
+      try {
+         OID oid = OID::from_string(deref_info_field(type));
+         // ASN1_String rejects values (e.g. a \FF hexpair) that are not valid
+         // for any supported string encoding.
+         pending_rdn.emplace_back(std::move(oid), ASN1_String(value));
+      } catch(const Exception&) {
+         return std::nullopt;  // unknown attributeType or invalid attributeValue
+      }
+
+      if(terminator != '+') {
+         dn.add_rdn(std::move(pending_rdn));
+         pending_rdn.clear();
+      }
+   }
+
+   // A trailing ',' or '+' leaves an RDN/AVA with nothing to follow it
+   if(terminator == ',' || terminator == '+') {
+      return std::nullopt;
+   }
+   return dn;
+}
+
+std::istream& operator>>(std::istream& in, X509_DN& dn) {
+   const std::istreambuf_iterator<char> begin(in);
+   const std::istreambuf_iterator<char> end;
+   const std::string contents(begin, end);
+
+   if(auto parsed = X509_DN::parse(contents)) {
+      dn = std::move(*parsed);
+   } else {
+      in.setstate(std::ios::failbit);
+   }
    return in;
 }
 }  // namespace Botan
@@ -49525,6 +53467,22 @@ namespace {
 
 constexpr size_t MaximumKeyIdentifierLength = 64;
 
+/*
+* Encode an AlternativeName as `GeneralNames` but with an outer IMPLICIT
+* context-specific tag rather than the universal SEQUENCE tag. Used for
+* fullName [0] / cRLIssuer [2] / similar.
+*/
+void emit_general_names_implicit(DER_Encoder& der, const AlternativeName& names, uint32_t tag) {
+   // RFC 5280 4.2.1.6: GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
+   if(!names.has_items()) {
+      throw Encoding_Error("Cannot encode empty GeneralNames");
+   }
+   if(std::ranges::any_of(names.directory_names(), [](const X509_DN& dn) { return dn.empty(); })) {
+      throw Encoding_Error("GeneralNames must not contain an empty directoryName");
+   }
+   der.encode_implicit(names, ASN1_Type(tag));
+}
+
 template <std::derived_from<Certificate_Extension> T>
 auto make_extension([[maybe_unused]] const OID& oid) {
    BOTAN_DEBUG_ASSERT(oid == T::static_oid());
@@ -49561,6 +53519,8 @@ std::unique_ptr<Certificate_Extension> extension_from_oid(const OID& oid) {
             return make_extension<Cert_Extension::Authority_Key_ID>(oid);
          case 37:
             return make_extension<Cert_Extension::Extended_Key_Usage>(oid);
+         case 56:
+            return make_extension<Cert_Extension::NoRevocationAvailable>(oid);
       }
    }
 
@@ -49621,13 +53581,18 @@ std::vector<OID> Extensions::critical_extensions() const {
 */
 std::unique_ptr<Certificate_Extension> Extensions::create_extn_obj(const OID& oid,
                                                                    bool critical,
-                                                                   const std::vector<uint8_t>& body) {
+                                                                   const std::vector<uint8_t>& body,
+                                                                   std::optional<Extension_Context> context) {
    auto extn = extension_from_oid(oid);
 
    if(!extn) {
       // some other unknown extension type
       extn = std::make_unique<Cert_Extension::Unknown_Extension>(oid, critical);
    } else {
+      if(context.has_value() && !extn->is_appropriate_context(*context)) {
+         throw Decoding_Error(fmt("Extension {} is not allowed in this context", extn->oid_name()));
+      }
+
       try {
          extn->decode_inner(body);
          return extn;
@@ -49654,7 +53619,7 @@ void Certificate_Extension::validate(const X509_Certificate& /*unused*/,
                                      const std::optional<X509_Certificate>& /*unused*/,
                                      const std::vector<X509_Certificate>& /*unused*/,
                                      std::vector<std::set<Certificate_Status_Code>>& /*unused*/,
-                                     size_t /*unused*/) {}
+                                     size_t /*unused*/) const {}
 
 /*
 * Add a new cert
@@ -49750,6 +53715,16 @@ std::vector<std::pair<std::unique_ptr<Certificate_Extension>, bool>> Extensions:
    return exts;
 }
 
+void Extensions::validate(const X509_Certificate& subject,
+                          const std::optional<X509_Certificate>& issuer,
+                          const std::vector<X509_Certificate>& cert_path,
+                          std::vector<std::set<Certificate_Status_Code>>& cert_status,
+                          size_t pos) const {
+   for(const auto& ext : m_extension_info) {
+      ext.second.obj().validate(subject, issuer, cert_path, cert_status, pos);
+   }
+}
+
 std::map<OID, std::pair<std::vector<uint8_t>, bool>> Extensions::extensions_raw() const {
    std::map<OID, std::pair<std::vector<uint8_t>, bool>> out;
    for(auto&& ext : m_extension_info) {
@@ -49782,8 +53757,13 @@ void Extensions::encode_into(DER_Encoder& to_object) const {
 * Decode a list of Extensions
 */
 void Extensions::decode_from(BER_Decoder& from_source) {
+   decode_from(from_source, std::nullopt);
+}
+
+void Extensions::decode_from(BER_Decoder& from_source, std::optional<Extension_Context> context) {
    m_extension_oids.clear();
    m_extension_info.clear();
+   m_has_unknown_critical_extension = false;
 
    BER_Decoder sequence = from_source.start_sequence();
 
@@ -49798,7 +53778,11 @@ void Extensions::decode_from(BER_Decoder& from_source) {
          .decode(bits, ASN1_Type::OctetString)
          .end_cons();
 
-      auto obj = create_extn_obj(oid, critical, bits);
+      auto obj = create_extn_obj(oid, critical, bits, context);
+      // Unknown_Extension is the only Certificate_Extension with an empty oid_name
+      if(critical && obj->oid_name().empty()) {
+         m_has_unknown_critical_extension = true;
+      }
       Extensions_Info info(critical, bits, std::move(obj));
 
       // RFC 5280 4.2: "A certificate MUST NOT include more than one
@@ -49812,6 +53796,88 @@ void Extensions::decode_from(BER_Decoder& from_source) {
 }
 
 namespace Cert_Extension {
+
+bool Basic_Constraints::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool Key_Usage::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool Subject_Key_ID::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool Authority_Key_ID::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate || context == Extension_Context::CRL;
+}
+
+bool Subject_Alternative_Name::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool Issuer_Alternative_Name::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate || context == Extension_Context::CRL;
+}
+
+bool Extended_Key_Usage::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool Name_Constraints::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool Certificate_Policies::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool Authority_Information_Access::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate || context == Extension_Context::CRL;
+}
+
+bool CRL_Number::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::CRL;
+}
+
+bool CRL_ReasonCode::is_appropriate_context(Extension_Context context) const {
+   // RFC 6960 4.4.5: "All the extensions specified as CRL entry extensions
+   // -- in Section 5.3 of [RFC5280] -- are also supported as singleExtensions."
+   return context == Extension_Context::CRL_Entry || context == Extension_Context::OCSP_Response;
+}
+
+bool CRL_Distribution_Points::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool CRL_Issuing_Distribution_Point::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::CRL;
+}
+
+bool OCSP_NoCheck::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool NoRevocationAvailable::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool TNAuthList::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool IPAddressBlocks::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool ASBlocks::is_appropriate_context(Extension_Context context) const {
+   return context == Extension_Context::Certificate;
+}
+
+bool Unknown_Extension::is_appropriate_context(Extension_Context /*context*/) const {
+   return true;
+}
 
 Basic_Constraints::Basic_Constraints(bool is_ca, size_t path_length_constraint) :
       Basic_Constraints(is_ca, is_ca ? std::optional<size_t>(path_length_constraint) : std::nullopt) {}
@@ -49885,18 +53951,8 @@ std::vector<uint8_t> Key_Usage::encode_inner() const {
       throw Encoding_Error("Cannot encode empty PKIX key constraints");
    }
 
-   const size_t constraint_bits = m_constraints.value();
-   const size_t unused_bits = ctz(static_cast<uint32_t>(constraint_bits));
-
    std::vector<uint8_t> der;
-   der.push_back(static_cast<uint8_t>(ASN1_Type::BitString));
-   der.push_back(2 + ((unused_bits < 8) ? 1 : 0));
-   der.push_back(unused_bits % 8);
-   der.push_back(static_cast<uint8_t>((constraint_bits >> 8) & 0xFF));
-   if((constraint_bits & 0xFF) != 0) {
-      der.push_back(static_cast<uint8_t>(constraint_bits & 0xFF));
-   }
-
+   DER_Encoder(der).encode_named_bitstring(m_constraints.value(), 16);
    return der;
 }
 
@@ -49905,23 +53961,10 @@ std::vector<uint8_t> Key_Usage::encode_inner() const {
 */
 void Key_Usage::decode_inner(const std::vector<uint8_t>& in) {
    /* RFC 5280 Section 4.2.1.3 - KeyUsage ::= BIT STRING */
-   std::vector<uint8_t> bits;
+   uint64_t usage = 0;
    BER_Decoder(in, BER_Decoder::Limits::DER())
-      .decode(bits, ASN1_Type::BitString, ASN1_Type::BitString, ASN1_Class::Universal)
+      .decode_named_bitstring(usage, 16, ASN1_Type::BitString, ASN1_Class::Universal)
       .verify_end();
-
-   const uint16_t usage = [&bits]() -> uint16_t {
-      switch(bits.size()) {
-         case 0:
-            return 0;
-         case 1:
-            return make_uint16(bits[0], 0);
-         case 2:
-            return make_uint16(bits[0], bits[1]);
-         default:
-            throw Decoding_Error("Invalid KeyUsage bitstring encoding");
-      }
-   }();
 
    /* RFC 5280 Section 4.2.1.3:
    *  "When the keyUsage extension appears in a certificate, at least one of
@@ -49930,7 +53973,7 @@ void Key_Usage::decode_inner(const std::vector<uint8_t>& in) {
       throw Decoding_Error("KeyUsage extension must have at least one bit set");
    }
 
-   m_constraints = Key_Constraints(usage);
+   m_constraints = Key_Constraints(static_cast<uint32_t>(usage));
 }
 
 /*
@@ -49961,6 +54004,24 @@ void Subject_Key_ID::decode_inner(const std::vector<uint8_t>& in) {
 /*
 * Subject_Key_ID Constructor
 */
+Subject_Key_ID::Subject_Key_ID(const Public_Key& pub_key) {
+   /*
+   * RFC 5280 4.2.1.2:
+   *    (1) The keyIdentifier is composed of the 160-bit SHA-1 hash of the
+   *    value of the BIT STRING subjectPublicKey (excluding the tag, length,
+   *    and number of unused bits).
+   */
+   auto hash = HashFunction::create_or_throw("SHA-1");
+
+   m_key_id.resize(hash->output_length());
+
+   hash->update(pub_key.public_key_bits());
+   hash->final(m_key_id.data());
+}
+
+/*
+* Subject_Key_ID Constructor
+*/
 Subject_Key_ID::Subject_Key_ID(const std::vector<uint8_t>& pub_key, std::string_view hash_name) {
    auto hash = HashFunction::create_or_throw(hash_name);
 
@@ -49981,10 +54042,16 @@ Subject_Key_ID::Subject_Key_ID(const std::vector<uint8_t>& pub_key, std::string_
 */
 std::vector<uint8_t> Authority_Key_ID::encode_inner() const {
    std::vector<uint8_t> output;
-   DER_Encoder(output)
-      .start_sequence()
-      .encode(m_key_id, ASN1_Type::OctetString, ASN1_Type(0), ASN1_Class::ContextSpecific)
-      .end_cons();
+   DER_Encoder der(output);
+   der.start_sequence();
+   if(!m_key_id.empty()) {
+      der.encode(m_key_id, ASN1_Type::OctetString, ASN1_Type(0), ASN1_Class::ContextSpecific);
+   }
+   if(m_authority_cert.has_value()) {
+      emit_general_names_implicit(der, m_authority_cert->issuer, 1);
+      der.encode(m_authority_cert->serial_number.to_bigint(), ASN1_Type(2), ASN1_Class::ContextSpecific);
+   }
+   der.end_cons();
    return output;
 }
 
@@ -50003,9 +54070,38 @@ void Authority_Key_ID::decode_inner(const std::vector<uint8_t>& in) {
    BER_Decoder ber(in, BER_Decoder::Limits::DER());
    BER_Decoder seq = ber.start_sequence();
 
-   const bool key_id_present = seq.peek_next_object().is_a(0, ASN1_Class::ContextSpecific);
+   m_key_id.clear();
+   m_authority_cert.reset();
 
-   seq.decode_optional_string(m_key_id, ASN1_Type::OctetString, 0).discard_remaining().end_cons();
+   bool key_id_present = false;
+   std::optional<AlternativeName> authority_cert_issuer;
+   std::optional<X509_Serial_Number> authority_cert_serial;
+
+   seq.decode_optional_field(0,
+                             ASN1_Class::ContextSpecific,
+                             [&](BER_Decoder& d) {
+                                d.decode(m_key_id, ASN1_Type::OctetString, ASN1_Type(0), ASN1_Class::ContextSpecific);
+                                key_id_present = true;
+                             })
+      .decode_optional_field(1,
+                             ASN1_Class::ContextSpecific | ASN1_Class::Constructed,
+                             [&](BER_Decoder& d) {
+                                AlternativeName names;
+                                d.decode_implicit(names,
+                                                  ASN1_Type(1),
+                                                  ASN1_Class::ContextSpecific | ASN1_Class::Constructed,
+                                                  ASN1_Type::Sequence,
+                                                  ASN1_Class::Constructed);
+                                authority_cert_issuer = std::move(names);
+                             })
+      .decode_optional_field(2, ASN1_Class::ContextSpecific, [&](BER_Decoder& d) {
+         X509_Serial_Number serial;
+         d.decode_implicit(
+            serial, ASN1_Type(2), ASN1_Class::ContextSpecific, ASN1_Type::Integer, ASN1_Class::Universal);
+         authority_cert_serial = std::move(serial);
+      });
+
+   seq.end_cons();
    ber.verify_end();
 
    if(key_id_present) {
@@ -50017,6 +54113,27 @@ void Authority_Key_ID::decode_inner(const std::vector<uint8_t>& in) {
                                   m_key_id.size(),
                                   MaximumKeyIdentifierLength));
       }
+   }
+
+   // RFC 5280 4.2.1.6: GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
+   if(authority_cert_issuer.has_value() && authority_cert_issuer->is_empty()) {
+      throw Decoding_Error("AuthorityKeyIdentifier authorityCertIssuer must contain at least one GeneralName");
+   }
+
+   /*
+   * RFC 5280 Appendix A.2:
+   *
+   *    authorityCertIssuer and authorityCertSerialNumber MUST both be
+   *    present or both be absent
+   */
+   if(authority_cert_issuer.has_value() != authority_cert_serial.has_value()) {
+      throw Decoding_Error(
+         "AuthorityKeyIdentifier authorityCertIssuer and authorityCertSerialNumber must both be present or absent");
+   }
+
+   if(authority_cert_issuer.has_value()) {
+      m_authority_cert =
+         Authority_Cert_Identifier{std::move(*authority_cert_issuer), std::move(*authority_cert_serial)};
    }
 }
 
@@ -50086,7 +54203,24 @@ void Extended_Key_Usage::decode_inner(const std::vector<uint8_t>& in) {
 * Encode the extension
 */
 std::vector<uint8_t> Name_Constraints::encode_inner() const {
-   throw Not_Implemented("Name_Constraints encoding");
+   const auto& permitted = m_name_constraints.permitted();
+   const auto& excluded = m_name_constraints.excluded();
+
+   if(permitted.empty() && excluded.empty()) {
+      throw Encoding_Error("Refusing to encode empty NameConstraints");
+   }
+
+   std::vector<uint8_t> output;
+   DER_Encoder der(output);
+   der.start_sequence();
+   if(!permitted.empty()) {
+      der.start_explicit_context_specific(0).encode_list(permitted).end_cons();
+   }
+   if(!excluded.empty()) {
+      der.start_explicit_context_specific(1).encode_list(excluded).end_cons();
+   }
+   der.end_cons();
+   return output;
 }
 
 /*
@@ -50131,7 +54265,7 @@ void Name_Constraints::validate(const X509_Certificate& subject,
                                 const std::optional<X509_Certificate>& /*issuer*/,
                                 const std::vector<X509_Certificate>& cert_path,
                                 std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                                size_t pos) {
+                                size_t pos) const {
    if(!m_name_constraints.permitted().empty() || !m_name_constraints.excluded().empty()) {
       if(!subject.is_CA_cert()) {
          cert_status.at(pos).insert(Certificate_Status_Code::NAME_CONSTRAINT_ERROR);
@@ -50186,7 +54320,20 @@ class Policy_Information final : public ASN1_Object {
       OID m_oid;
 };
 
+bool policy_oids_have_duplicate(const std::vector<OID>& oids) {
+   std::set<OID> seen;
+   for(const auto& oid : oids) {
+      if(!seen.insert(oid).second) {
+         return true;
+      }
+   }
+   return false;
+}
+
 }  // namespace
+
+Certificate_Policies::Certificate_Policies(const std::vector<OID>& oids) :
+      m_oids(oids), m_has_duplicate(policy_oids_have_duplicate(m_oids)) {}
 
 /*
 * Encode the extension
@@ -50219,17 +54366,184 @@ void Certificate_Policies::decode_inner(const std::vector<uint8_t>& in) {
    for(const auto& policy : policies) {
       m_oids.push_back(policy.oid());
    }
+   m_has_duplicate = policy_oids_have_duplicate(m_oids);
 }
 
 void Certificate_Policies::validate(const X509_Certificate& /*subject*/,
                                     const std::optional<X509_Certificate>& /*issuer*/,
                                     const std::vector<X509_Certificate>& /*cert_path*/,
                                     std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                                    size_t pos) {
-   const std::set<OID> oid_set(m_oids.begin(), m_oids.end());
-   if(oid_set.size() != m_oids.size()) {
+                                    size_t pos) const {
+   if(m_has_duplicate) {
       cert_status.at(pos).insert(Certificate_Status_Code::DUPLICATE_CERT_POLICY);
    }
+}
+
+namespace {
+
+std::vector<URI> parse_aia_uris(const std::vector<std::string>& uris, const char* context) {
+   std::vector<URI> out;
+   out.reserve(uris.size());
+   for(const auto& uri : uris) {
+      if(auto parsed = URI::from_string(uri)) {
+         out.push_back(std::move(*parsed));
+      } else {
+         throw Invalid_Argument(fmt("Invalid URI in {}", context));
+      }
+   }
+   return out;
+}
+
+// Convert the application provided URIs into AccessDescription entries
+std::vector<Authority_Information_Access::AccessDescription> uri_access_descriptions(
+   const std::vector<URI>& ocsp_responders, const std::vector<URI>& ca_issuers) {
+   std::vector<Authority_Information_Access::AccessDescription> out;
+   out.reserve(ocsp_responders.size() + ca_issuers.size());
+
+   const auto append = [&](const OID& method, const std::vector<URI>& uris) {
+      for(const auto& uri : uris) {
+         const ASN1_String value(uri.original_input(), ASN1_Type::Ia5String);
+         out.emplace_back(method,
+                          ASN1_Type(6),
+                          ASN1_Class::ContextSpecific,
+                          std::vector<uint8_t>(value.value().begin(), value.value().end()));
+      }
+   };
+
+   append(OID::from_string("PKIX.OCSP"), ocsp_responders);
+   append(OID::from_string("PKIX.CertificateAuthorityIssuers"), ca_issuers);
+   return out;
+}
+
+}  // namespace
+
+Authority_Information_Access::Authority_Information_Access(std::string_view ocsp,
+                                                           const std::vector<std::string>& ca_issuers) :
+      m_ca_issuers(parse_aia_uris(ca_issuers, "AuthorityInformationAccess CA issuers")) {
+   if(!ocsp.empty()) {
+      if(auto parsed = URI::from_string(ocsp)) {
+         m_ocsp_responders.push_back(std::move(*parsed));
+      } else {
+         throw Invalid_Argument("Invalid URI in AuthorityInformationAccess OCSP responder");
+      }
+   }
+   m_access_descriptions = uri_access_descriptions(m_ocsp_responders, m_ca_issuers);
+}
+
+Authority_Information_Access::Authority_Information_Access(const std::vector<std::string>& ocsp_responders,
+                                                           const std::vector<std::string>& ca_issuers) :
+      m_ocsp_responders(parse_aia_uris(ocsp_responders, "AuthorityInformationAccess OCSP responders")),
+      m_ca_issuers(parse_aia_uris(ca_issuers, "AuthorityInformationAccess CA issuers")),
+      m_access_descriptions(uri_access_descriptions(m_ocsp_responders, m_ca_issuers)) {}
+
+Authority_Information_Access::Authority_Information_Access(std::vector<URI> ocsp_responders,
+                                                           std::vector<URI> ca_issuers) :
+      m_ocsp_responders(std::move(ocsp_responders)),
+      m_ca_issuers(std::move(ca_issuers)),
+      m_access_descriptions(uri_access_descriptions(m_ocsp_responders, m_ca_issuers)) {}
+
+std::vector<std::string> Authority_Information_Access::ocsp_responders() const {
+   std::vector<std::string> out;
+   out.reserve(m_ocsp_responders.size());
+   for(const auto& uri : m_ocsp_responders) {
+      out.push_back(uri.original_input());
+   }
+   return out;
+}
+
+std::unique_ptr<Certificate_Extension> Authority_Information_Access::copy() const {
+   return std::make_unique<Authority_Information_Access>(*this);
+}
+
+namespace {
+
+void validate_general_name_encoding(ASN1_Type tag, ASN1_Class cls, std::span<const uint8_t> value) {
+   // AlternativeName decodes GeneralNames; AIA accessLocation is a single GeneralName.
+   std::vector<uint8_t> wrapped_name;
+   DER_Encoder(wrapped_name).start_sequence().add_object(tag, cls, value).end_cons();
+
+   AlternativeName decoded_name;
+   BER_Decoder(wrapped_name, BER_Decoder::Limits::DER()).decode(decoded_name).verify_end();
+
+   if((tag == ASN1_Type(1) || tag == ASN1_Type(2) || tag == ASN1_Type(6)) && value.empty()) {
+      throw Decoding_Error("GeneralName IA5String value must not be empty");
+   }
+   if(tag == ASN1_Type(4) &&
+      std::ranges::any_of(decoded_name.directory_names(), [](const X509_DN& dn) { return dn.empty(); })) {
+      throw Decoding_Error("GeneralName directoryName must not be empty");
+   }
+}
+
+// Construction-time validation for an AccessDescription entering
+// m_access_descriptions. encode_inner repeats this as a safety net; doing it
+// here means the throw lands where the caller is building the AIA.
+void validate_access_description(const Authority_Information_Access::AccessDescription& ad) {
+   try {
+      validate_general_name_encoding(ad.location_tag(), ad.location_class(), ad.location_value());
+   } catch(const Exception&) {
+      throw Invalid_Argument("AccessDescription accessLocation is not a valid GeneralName");
+   }
+}
+
+// Mirror the decode-time logic that populates the typed URI accessors from
+// id-ad-ocsp / id-ad-caIssuers entries. Used by the AccessDescription-based
+// constructor and add_access_description so the two views stay consistent.
+// An id-ad-ocsp / id-ad-caIssuers entry whose URI fails to parse is rejected
+// here (mirroring decode_inner) so the typed accessors and m_access_descriptions
+// cannot disagree, and so the AIA cannot re-encode bytes that its own decoder
+// would reject.
+void populate_uri_view_from_access_description(const Authority_Information_Access::AccessDescription& ad,
+                                               std::vector<URI>& ocsp_responders,
+                                               std::vector<URI>& ca_issuers) {
+   const auto oid_ocsp_responders = OID::from_string("PKIX.OCSP");
+   const auto oid_ca_issuers = OID::from_string("PKIX.CertificateAuthorityIssuers");
+   if(const auto uri_str = ad.location_as_uri_string()) {
+      if(ad.access_method() == oid_ocsp_responders) {
+         if(auto uri = URI::from_string(*uri_str)) {
+            ocsp_responders.push_back(std::move(*uri));
+         } else {
+            throw Invalid_Argument("Invalid URI in AuthorityInformationAccess OCSP responder");
+         }
+      } else if(ad.access_method() == oid_ca_issuers) {
+         if(auto uri = URI::from_string(*uri_str)) {
+            ca_issuers.push_back(std::move(*uri));
+         } else {
+            throw Invalid_Argument("Invalid URI in AuthorityInformationAccess CA issuers");
+         }
+      }
+   }
+}
+
+}  // namespace
+
+Authority_Information_Access::Authority_Information_Access(std::vector<AccessDescription> access_descriptions) :
+      m_access_descriptions(std::move(access_descriptions)) {
+   for(const auto& ad : m_access_descriptions) {
+      validate_access_description(ad);
+      populate_uri_view_from_access_description(ad, m_ocsp_responders, m_ca_issuers);
+   }
+}
+
+void Authority_Information_Access::add_access_description(AccessDescription ad) {
+   validate_access_description(ad);
+   populate_uri_view_from_access_description(ad, m_ocsp_responders, m_ca_issuers);
+   m_access_descriptions.push_back(std::move(ad));
+}
+
+std::vector<std::string> Authority_Information_Access::ca_issuers() const {
+   std::vector<std::string> out;
+   out.reserve(m_ca_issuers.size());
+   for(const auto& uri : m_ca_issuers) {
+      out.push_back(uri.original_input());
+   }
+   return out;
+}
+
+std::optional<std::string> Authority_Information_Access::AccessDescription::location_as_uri_string() const {
+   if(m_location_class == ASN1_Class::ContextSpecific && m_location_tag == ASN1_Type(6)) {
+      return std::string(m_location_value.begin(), m_location_value.end());
+   }
+   return std::nullopt;
 }
 
 std::vector<uint8_t> Authority_Information_Access::encode_inner() const {
@@ -50237,21 +54551,16 @@ std::vector<uint8_t> Authority_Information_Access::encode_inner() const {
    DER_Encoder der(output);
 
    der.start_sequence();
-   // OCSP Responders
-   for(const auto& ocsp_responder : m_ocsp_responders) {
-      const ASN1_String url(ocsp_responder, ASN1_Type::Ia5String);
-      der.start_sequence()
-         .encode(OID::from_string("PKIX.OCSP"))
-         .add_object(ASN1_Type(6), ASN1_Class::ContextSpecific, url.value())
-         .end_cons();
-   }
 
-   // CA Issuers
-   for(const auto& ca_issuer : m_ca_issuers) {
-      const ASN1_String asn1_ca_issuer(ca_issuer, ASN1_Type::Ia5String);
+   for(const auto& ad : m_access_descriptions) {
+      try {
+         validate_general_name_encoding(ad.location_tag(), ad.location_class(), ad.location_value());
+      } catch(const Exception&) {
+         throw Encoding_Error("AccessDescription accessLocation is not a valid GeneralName");
+      }
       der.start_sequence()
-         .encode(OID::from_string("PKIX.CertificateAuthorityIssuers"))
-         .add_object(ASN1_Type(6), ASN1_Class::ContextSpecific, asn1_ca_issuer.value())
+         .encode(ad.access_method())
+         .add_object(ad.location_tag(), ad.location_class(), ad.location_value())
          .end_cons();
    }
 
@@ -50274,7 +54583,10 @@ void Authority_Information_Access::decode_inner(const std::vector<uint8_t>& in) 
    const OID ocsp_responder = OID::from_string("PKIX.OCSP");
    const OID ca_issuer = OID::from_string("PKIX.CertificateAuthorityIssuers");
 
-   size_t access_descriptions_seen = 0;
+   m_access_descriptions.clear();
+   m_ocsp_responders.clear();
+   m_ca_issuers.clear();
+
    while(ber.more_items()) {
       OID oid;
 
@@ -50282,43 +54594,70 @@ void Authority_Information_Access::decode_inner(const std::vector<uint8_t>& in) 
 
       info.decode(oid);
       const BER_Object name = info.get_next_object();
+
+      /* RFC 5280 4.2.2.1:
+      *    AccessDescription  ::=  SEQUENCE {
+      *         accessMethod          OBJECT IDENTIFIER,
+      *         accessLocation        GeneralName  }
+      */
+      if(!name.is_set()) {
+         throw Decoding_Error("AuthorityInformationAccess AccessDescription missing accessLocation");
+      }
+      validate_general_name_encoding(name.type_tag(), name.get_class(), name.data());
       info.end_cons();
 
-      access_descriptions_seen += 1;
+      m_access_descriptions.emplace_back(
+         oid, name.type_tag(), name.get_class(), std::vector<uint8_t>(name.data().begin(), name.data().end()));
 
-      if(oid == ocsp_responder && name.is_a(6, ASN1_Class::ContextSpecific)) {
-         m_ocsp_responders.push_back(ASN1::to_string(name));
-      } else if(oid == ca_issuer && name.is_a(6, ASN1_Class::ContextSpecific)) {
-         m_ca_issuers.push_back(ASN1::to_string(name));
+      if(name.is_a(6, ASN1_Class::ContextSpecific)) {
+         if(oid == ocsp_responder) {
+            if(auto parsed = URI::from_string(ASN1::to_string(name))) {
+               m_ocsp_responders.push_back(std::move(*parsed));
+            } else {
+               throw Decoding_Error("Invalid URI in AuthorityInformationAccess OCSP responder");
+            }
+         } else if(oid == ca_issuer) {
+            if(auto parsed = URI::from_string(ASN1::to_string(name))) {
+               m_ca_issuers.push_back(std::move(*parsed));
+            } else {
+               throw Decoding_Error("Invalid URI in AuthorityInformationAccess CA issuers");
+            }
+         }
       }
    }
 
    ber.end_cons();
    outer.verify_end();
 
-   if(access_descriptions_seen == 0) {
+   if(m_access_descriptions.empty()) {
       throw Decoding_Error("AuthorityInformationAccess extension must contain at least one AccessDescription");
    }
+}
+
+CRL_Number::CRL_Number(BigInt n) : m_has_value(true), m_crl_number(std::move(n)) {
+   BOTAN_ARG_CHECK(m_crl_number.signum() >= 0, "CRL number cannot be negative");
+}
+
+const BigInt& CRL_Number::crl_number() const {
+   // This can only happen via a misuse of the CRL_Number default constructor
+   BOTAN_STATE_CHECK(m_has_value);
+   return m_crl_number;
 }
 
 /*
 * Checked accessor for the crl_number member
 */
 size_t CRL_Number::get_crl_number() const {
-   if(!m_has_value) {
-      throw Invalid_State("CRL_Number::get_crl_number: Not set");
-   }
-   return m_crl_number;
+   // This can only happen via a misuse of the CRL_Number default constructor
+   BOTAN_STATE_CHECK(m_has_value);
+   return m_crl_number.to_u32bit();
 }
 
 /*
 * Copy a CRL_Number extension
 */
 std::unique_ptr<Certificate_Extension> CRL_Number::copy() const {
-   if(!m_has_value) {
-      throw Invalid_State("CRL_Number::copy: Not set");
-   }
-   return std::make_unique<CRL_Number>(m_crl_number);
+   return std::make_unique<CRL_Number>(*this);
 }
 
 /*
@@ -50336,6 +54675,9 @@ std::vector<uint8_t> CRL_Number::encode_inner() const {
 void CRL_Number::decode_inner(const std::vector<uint8_t>& in) {
    /* RFC 5280 Section 5.2.3 - CRLNumber ::= INTEGER (0..MAX) */
    BER_Decoder(in, BER_Decoder::Limits::DER()).decode(m_crl_number).verify_end();
+   if(m_crl_number.signum() < 0) {
+      throw Decoding_Error("CRL number cannot be negative");
+   }
    m_has_value = true;
 }
 
@@ -50380,6 +54722,97 @@ void CRL_ReasonCode::decode_inner(const std::vector<uint8_t>& in) {
    m_reason = static_cast<CRL_Code>(reason_code);
 }
 
+namespace {
+
+constexpr size_t ReasonFlagsNamedBitWidth = 9;
+
+void emit_reason_flags_implicit(DER_Encoder& der, uint32_t tag, ReasonFlags reasons) {
+   der.encode_named_bitstring(reasons.value(), ReasonFlagsNamedBitWidth, ASN1_Type(tag), ASN1_Class::ContextSpecific);
+}
+
+ReasonFlags decode_reason_flags_implicit(BER_Decoder& decoder, uint32_t tag) {
+   uint64_t bits = 0;
+   decoder.decode_named_bitstring(bits, ReasonFlagsNamedBitWidth, ASN1_Type(tag), ASN1_Class::ContextSpecific);
+   return ReasonFlags(checked_cast_to<uint16_t>(bits));
+}
+
+/*
+* RFC 5280 4.2.1.13: "If present, the cRLIssuer MUST only contain the
+* distinguished name (DN) from the issuer field of the CRL to which the
+* DistributionPoint is pointing."
+*
+* We don't know the value of the CRL issuer at this point so we can only
+* enforce that the cRLIssuer name is exactly one non-empty DN.
+*/
+bool crl_issuer_is_well_formed(const AlternativeName& crl_issuer) {
+   const auto& dn = crl_issuer.directory_names();
+   return crl_issuer.count() == 1 && dn.size() == 1 && !dn.begin()->empty();
+}
+
+std::vector<URI> crl_distribution_point_uris_from_distribution_points(
+   const std::vector<CRL_Distribution_Points::Distribution_Point>& dps) {
+   std::vector<URI> out;
+   for(const auto& dp : dps) {
+      const auto& dpn = dp.distribution_point_name();
+      if(dpn.has_value() && dpn->full_name().has_value()) {
+         for(const auto& uri : dpn->full_name()->uri_names()) {
+            out.push_back(uri);
+         }
+      }
+   }
+   return out;
+}
+
+}  // namespace
+
+const AlternativeName& CRL_Distribution_Points::Distribution_Point::point() const {
+   BOTAN_STATE_CHECK(m_dp_name.has_value() && m_dp_name->full_name().has_value());
+   return *m_dp_name->full_name();
+}
+
+CRL_Distribution_Points::CRL_Distribution_Points(const std::vector<Distribution_Point>& points) :
+      m_distribution_points(points),
+      m_crl_distribution_urls(crl_distribution_point_uris_from_distribution_points(m_distribution_points)) {}
+
+const AlternativeName& CRL_Issuing_Distribution_Point::get_point() const {
+   BOTAN_STATE_CHECK(m_dp_name.has_value() && m_dp_name->full_name().has_value());
+   return *m_dp_name->full_name();
+}
+
+void DistributionPointName::encode_into(DER_Encoder& der) const {
+   if(!m_full_name.has_value()) {
+      throw Encoding_Error("DistributionPointName has no fullName to encode");
+   }
+   // fullName [0] IMPLICIT GeneralNames. emit_general_names_implicit rejects
+   // empty AlternativeNames per RFC 5280 4.2.1.6: GeneralNames ::= SEQUENCE
+   // SIZE (1..MAX).
+   emit_general_names_implicit(der, *m_full_name, 0);
+}
+
+void DistributionPointName::decode_from(BER_Decoder& ber) {
+   const BER_Object& obj = ber.peek_next_object();
+   if(obj.is_a(0, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
+      AlternativeName full_name;
+      ber.decode_implicit(full_name,
+                          ASN1_Type(0),
+                          ASN1_Class::ContextSpecific | ASN1_Class::Constructed,
+                          ASN1_Type::Sequence,
+                          ASN1_Class::Constructed);
+      // RFC 5280 4.2.1.6: GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
+      if(!full_name.has_items()) {
+         throw Decoding_Error("DistributionPointName fullName must contain at least one GeneralName");
+      }
+      if(std::ranges::any_of(full_name.directory_names(), [](const X509_DN& dn) { return dn.empty(); })) {
+         throw Decoding_Error("DistributionPointName fullName must not contain an empty directoryName");
+      }
+      m_full_name = std::move(full_name);
+   } else if(obj.is_a(1, ASN1_Class::ContextSpecific | ASN1_Class::Constructed)) {
+      throw Decoding_Error("nameRelativeToCrlIssuer not supported in DistributionPointName");
+   } else {
+      throw Decoding_Error("DistributionPointName CHOICE is neither fullName nor nameRelativeToCRLIssuer");
+   }
+}
+
 std::vector<uint8_t> CRL_Distribution_Points::encode_inner() const {
    std::vector<uint8_t> output;
    DER_Encoder(output).start_sequence().encode_list(m_distribution_points).end_cons();
@@ -50398,50 +54831,232 @@ void CRL_Distribution_Points::decode_inner(const std::vector<uint8_t>& buf) {
       throw Decoding_Error("CRLDistributionPoints extension must contain at least one DistributionPoint");
    }
 
-   for(const auto& distribution_point : m_distribution_points) {
-      for(const auto& uri : distribution_point.point().uris()) {
-         m_crl_distribution_urls.push_back(uri);
-      }
+   m_crl_distribution_urls = crl_distribution_point_uris_from_distribution_points(m_distribution_points);
+}
+
+std::vector<std::string> CRL_Distribution_Points::crl_distribution_urls() const {
+   std::vector<std::string> out;
+   out.reserve(m_crl_distribution_urls.size());
+   for(const auto& uri : m_crl_distribution_urls) {
+      out.push_back(uri.original_input());
    }
+   return out;
 }
 
 void CRL_Distribution_Points::Distribution_Point::encode_into(DER_Encoder& der) const {
-   const auto uris = m_point.uris();
-
-   if(uris.empty()) {
-      throw Not_Implemented("Empty CRL_Distribution_Point encoding not implemented");
+   /*
+   * DistributionPoint ::= SEQUENCE {
+   *      distributionPoint       [0]     DistributionPointName OPTIONAL,
+   *      reasons                 [1]     ReasonFlags OPTIONAL,
+   *      cRLIssuer               [2]     GeneralNames OPTIONAL }
+   *
+   * RFC 5280 4.2.1.13: "either distributionPoint or cRLIssuer MUST be present".
+   */
+   const bool has_dp_name = m_dp_name.has_value();
+   const bool has_crl_issuer = m_crl_issuer.has_value();
+   if(!has_dp_name && !has_crl_issuer) {
+      throw Encoding_Error("DistributionPoint must contain either distributionPoint or cRLIssuer");
+   }
+   if(has_crl_issuer && !crl_issuer_is_well_formed(*m_crl_issuer)) {
+      /* RFC 5280 4.2.1.13: "If present, the cRLIssuer MUST only contain the
+      * distinguished name (DN) from the issuer field of the CRL". */
+      throw Encoding_Error("cRLIssuer must contain exactly one non-empty directoryName GeneralName");
    }
 
-   for(const auto& uri : uris) {
-      der.start_sequence()
-         .start_cons(ASN1_Type(0), ASN1_Class::ContextSpecific)
-         .start_cons(ASN1_Type(0), ASN1_Class::ContextSpecific)
-         .add_object(ASN1_Type(6), ASN1_Class::ContextSpecific, uri)
-         .end_cons()
-         .end_cons()
-         .end_cons();
+   der.start_sequence();
+
+   if(has_dp_name) {
+      // distributionPoint [0] EXPLICIT DistributionPointName
+      der.start_explicit_context_specific(0).encode(*m_dp_name).end_cons();
    }
+
+   if(m_reasons) {
+      emit_reason_flags_implicit(der, 1, *m_reasons);
+   }
+
+   if(has_crl_issuer) {
+      emit_general_names_implicit(der, *m_crl_issuer, 2);
+   }
+
+   der.end_cons();
 }
 
 void CRL_Distribution_Points::Distribution_Point::decode_from(BER_Decoder& ber) {
-   ber.start_sequence()
-      .start_context_specific(0)
-      .decode_optional_implicit(m_point,
-                                ASN1_Type(0),
-                                ASN1_Class::ContextSpecific | ASN1_Class::Constructed,
-                                ASN1_Type::Sequence,
-                                ASN1_Class::Constructed)
-      .end_cons()
-      .end_cons();
+   /*
+   * DistributionPoint ::= SEQUENCE {
+   *      distributionPoint       [0]     DistributionPointName OPTIONAL,
+   *      reasons                 [1]     ReasonFlags OPTIONAL,
+   *      cRLIssuer               [2]     GeneralNames OPTIONAL }
+   */
+   BER_Decoder dp = ber.start_sequence();
+
+   m_dp_name.reset();
+   m_reasons.reset();
+   m_crl_issuer.reset();
+
+   // DER: these optional fields appear at most once and in increasing tag
+   // order. Decoding them in tag order and then rejecting anything left over
+   // (see end_cons below) catches out-of-order, duplicate, and unknown fields.
+   dp.decode_optional_field(0,
+                            ASN1_Class::ContextSpecific | ASN1_Class::Constructed,
+                            [&](BER_Decoder& d) {
+                               DistributionPointName name;
+                               d.start_context_specific(0).decode(name).verify_end();
+                               m_dp_name = std::move(name);
+                            })
+      .decode_optional_field(
+         1, ASN1_Class::ContextSpecific, [&](BER_Decoder& d) { m_reasons = decode_reason_flags_implicit(d, 1); })
+      .decode_optional_field(2, ASN1_Class::ContextSpecific | ASN1_Class::Constructed, [&](BER_Decoder& d) {
+         AlternativeName crl_issuer;
+         d.decode_implicit(crl_issuer,
+                           ASN1_Type(2),
+                           ASN1_Class::ContextSpecific | ASN1_Class::Constructed,
+                           ASN1_Type::Sequence,
+                           ASN1_Class::Constructed);
+         m_crl_issuer = std::move(crl_issuer);
+      });
+
+   dp.end_cons();
+
+   // RFC 5280 4.2.1.6: GeneralNames ::= SEQUENCE SIZE (1..MAX) OF GeneralName
+   if(m_crl_issuer.has_value() && m_crl_issuer->is_empty()) {
+      throw Decoding_Error("cRLIssuer GeneralNames must contain at least one GeneralName");
+   }
+
+   if(m_crl_issuer.has_value() && !crl_issuer_is_well_formed(*m_crl_issuer)) {
+      /* RFC 5280 4.2.1.13: "If present, the cRLIssuer MUST only contain the
+      * distinguished name (DN) from the issuer field of the CRL". */
+      throw Decoding_Error("cRLIssuer must contain exactly one non-empty directoryName GeneralName");
+   }
+
+   if(!m_dp_name.has_value() && !m_crl_issuer.has_value()) {
+      throw Decoding_Error("DistributionPoint must contain either distributionPoint or cRLIssuer");
+   }
 }
 
 std::vector<uint8_t> CRL_Issuing_Distribution_Point::encode_inner() const {
-   throw Not_Implemented("CRL_Issuing_Distribution_Point encoding");
+   /* RFC 5280 Section 5.2.5
+   *
+   *    Conforming CRL issuers MUST NOT issue CRLs where the DER encoding of the
+   *    issuing distribution point extension is an empty sequence. [...] at most one
+   *    of onlyContainsUserCerts, onlyContainsCACerts, and onlyContainsAttributeCerts
+   *    may be set to TRUE
+   */
+   if(!should_encode()) {
+      throw Encoding_Error("Refusing to encode empty IssuingDistributionPoint");
+   }
+
+   const size_t scope_set = static_cast<size_t>(m_only_contains_user_certs) +
+                            static_cast<size_t>(m_only_contains_ca_certs) +
+                            static_cast<size_t>(m_only_contains_attribute_certs);
+   if(scope_set > 1) {
+      throw Encoding_Error(
+         "At most one of onlyContainsUserCerts, onlyContainsCACerts, onlyContainsAttributeCerts may be TRUE");
+   }
+
+   auto emit_optional_boolean_implicit = [](DER_Encoder& der, uint32_t tag, bool value) {
+      // All of the values encoded here are DEFAULT FALSE so skip encoding if false
+      if(value == true) {
+         // Encode a BOOLEAN TRUE (0xFF) as [tag] IMPLICIT BOOLEAN
+         const uint8_t val = 0xFF;
+         der.add_object(ASN1_Type(tag), ASN1_Class::ContextSpecific, &val, 1);
+      }
+   };
+
+   std::vector<uint8_t> output;
+   DER_Encoder der(output);
+   der.start_sequence();
+
+   if(m_dp_name.has_value()) {
+      der.start_explicit_context_specific(0).encode(*m_dp_name).end_cons();
+   }
+
+   emit_optional_boolean_implicit(der, 1, m_only_contains_user_certs);
+   emit_optional_boolean_implicit(der, 2, m_only_contains_ca_certs);
+
+   if(m_only_some_reasons) {
+      emit_reason_flags_implicit(der, 3, *m_only_some_reasons);
+   }
+
+   emit_optional_boolean_implicit(der, 4, m_indirect_crl);
+   emit_optional_boolean_implicit(der, 5, m_only_contains_attribute_certs);
+
+   der.end_cons();
+   return output;
 }
 
 void CRL_Issuing_Distribution_Point::decode_inner(const std::vector<uint8_t>& buf) {
-   /* RFC 5280 Section 5.2.5 - IssuingDistributionPoint ::= SEQUENCE { ... } */
-   BER_Decoder(buf, BER_Decoder::Limits::DER()).decode(m_distribution_point).verify_end();
+   /*
+   * RFC 5280 Section 5.2.5
+   *
+   * IssuingDistributionPoint ::= SEQUENCE {
+   *      distributionPoint          [0] DistributionPointName OPTIONAL,
+   *      onlyContainsUserCerts      [1] BOOLEAN DEFAULT FALSE,
+   *      onlyContainsCACerts        [2] BOOLEAN DEFAULT FALSE,
+   *      onlySomeReasons            [3] ReasonFlags OPTIONAL,
+   *      indirectCRL                [4] BOOLEAN DEFAULT FALSE,
+   *      onlyContainsAttributeCerts [5] BOOLEAN DEFAULT FALSE }
+   */
+   BER_Decoder outer(buf, BER_Decoder::Limits::DER());
+   BER_Decoder seq = outer.start_sequence();
+
+   m_dp_name.reset();
+   m_only_contains_user_certs = false;
+   m_only_contains_ca_certs = false;
+   m_only_some_reasons = {};
+   m_indirect_crl = false;
+   m_only_contains_attribute_certs = false;
+
+   auto decode_implicit_bool = [&](BER_Decoder& dec, uint32_t tag) -> bool {
+      bool value = false;
+      dec.decode(value, ASN1_Type(tag), ASN1_Class::ContextSpecific);
+      return value;
+   };
+
+   // DER: these optional fields appear at most once and in increasing tag
+   // order. Decoding them in tag order and then rejecting anything left over
+   // (see end_cons below) catches out-of-order, duplicate, and unknown fields.
+   seq.decode_optional_field(0,
+                             ASN1_Class::ContextSpecific | ASN1_Class::Constructed,
+                             [&](BER_Decoder& d) {
+                                DistributionPointName name;
+                                d.start_context_specific(0).decode(name).verify_end();
+                                m_dp_name = std::move(name);
+                             })
+      .decode_optional_field(1,
+                             ASN1_Class::ContextSpecific,
+                             [&](BER_Decoder& d) { m_only_contains_user_certs = decode_implicit_bool(d, 1); })
+      .decode_optional_field(
+         2, ASN1_Class::ContextSpecific, [&](BER_Decoder& d) { m_only_contains_ca_certs = decode_implicit_bool(d, 2); })
+      .decode_optional_field(3,
+                             ASN1_Class::ContextSpecific,
+                             [&](BER_Decoder& d) { m_only_some_reasons = decode_reason_flags_implicit(d, 3); })
+      .decode_optional_field(
+         4, ASN1_Class::ContextSpecific, [&](BER_Decoder& d) { m_indirect_crl = decode_implicit_bool(d, 4); })
+      .decode_optional_field(5, ASN1_Class::ContextSpecific, [&](BER_Decoder& d) {
+         m_only_contains_attribute_certs = decode_implicit_bool(d, 5);
+      });
+
+   seq.end_cons();
+   outer.verify_end();
+
+   /* RFC 5280 5.2.5: "Conforming CRLs issuers MUST NOT issue CRLs where the
+   * DER encoding of the issuing distribution point extension is an empty
+   * sequence." Empty here means none of the fields above were present. */
+   if(!m_dp_name.has_value() && !m_only_contains_user_certs && !m_only_contains_ca_certs &&
+      !m_only_some_reasons.has_value() && !m_indirect_crl && !m_only_contains_attribute_certs) {
+      throw Decoding_Error("IssuingDistributionPoint must contain at least one field");
+   }
+
+   /* RFC 5280 5.2.5: "at most one of onlyContainsUserCerts,
+   * onlyContainsCACerts, and onlyContainsAttributeCerts may be set to TRUE." */
+   const size_t scope_set = static_cast<size_t>(m_only_contains_user_certs) +
+                            static_cast<size_t>(m_only_contains_ca_certs) +
+                            static_cast<size_t>(m_only_contains_attribute_certs);
+   if(scope_set > 1) {
+      throw Decoding_Error(
+         "IssuingDistributionPoint sets more than one of onlyContainsUserCerts/CACerts/AttributeCerts");
+   }
 }
 
 void TNAuthList::Entry::encode_into(DER_Encoder& /*to*/) const {
@@ -50460,7 +55075,7 @@ void TNAuthList::Entry::decode_from(class BER_Decoder& ber) {
    if(type_tag == ServiceProviderCode) {
       m_type = ServiceProviderCode;
       ASN1_String spc_string;
-      BER_Decoder(obj, ber.limits()).decode(spc_string);
+      BER_Decoder(obj, ber.limits()).decode(spc_string).verify_end();
       m_data = std::move(spc_string);
    } else if(type_tag == TelephoneNumberRange) {
       m_type = TelephoneNumberRange;
@@ -50484,6 +55099,7 @@ void TNAuthList::Entry::decode_from(class BER_Decoder& ber) {
          range_items.emplace_back(std::move(entry));
       }
       list.end_cons();
+      outer.verify_end();
 
       if(range_items.empty()) {
          throw Decoding_Error("TelephoneNumberRange is empty");
@@ -50491,7 +55107,7 @@ void TNAuthList::Entry::decode_from(class BER_Decoder& ber) {
    } else if(type_tag == TelephoneNumber) {
       m_type = TelephoneNumber;
       ASN1_String one_string;
-      BER_Decoder(obj, ber.limits()).decode(one_string);
+      BER_Decoder(obj, ber.limits()).decode(one_string).verify_end();
       if(!is_valid_telephone_number(one_string)) {
          throw Decoding_Error(fmt("Invalid TelephoneNumber {}", one_string.value()));
       }
@@ -50615,6 +55231,8 @@ void IPAddressBlocks::sort_and_merge() {
    }
 
    std::vector<IPAddressFamily> merged_blocks;
+   size_t v4_count = 0;
+   size_t v6_count = 0;
    for(auto& it : afam_map) {
       // fams consists of families with the same afi/safi combination
       std::vector<IPAddressFamily>& fams = it.second;
@@ -50625,11 +55243,16 @@ void IPAddressBlocks::sort_and_merge() {
       // fams[0] has to have the same choice type as the fams in the same bucket
       if(std::holds_alternative<IPAddressChoice<Version::IPv4>>(fams[0].addr_choice())) {
          merged_blocks.push_back(merge<Version::IPv4>(fams));
+         v4_count++;
       } else {
          merged_blocks.push_back(merge<Version::IPv6>(fams));
+         v6_count++;
       }
    }
+   BOTAN_ASSERT_NOMSG(v4_count + v6_count == merged_blocks.size());
    m_ip_addr_blocks = merged_blocks;
+   m_v4_count = v4_count;
+   m_v6_count = v6_count;
 }
 
 template <IPAddressBlocks::Version V>
@@ -50904,14 +55527,7 @@ void IPAddressBlocks::IPAddressOrRange<V>::encode_into(Botan::DER_Encoder& into)
    // both the full octets and the partially used one match
    if(octets_match && used_bits_match) {
       // at this point the range can be encoded as a prefix
-      std::vector<uint8_t> prefix;
-
-      prefix.push_back(unused_bits);
-      for(size_t i = 0; i < static_cast<uint8_t>(version_octets - discarded_octets); i++) {
-         prefix.push_back(min[i]);
-      }
-
-      into.add_object(ASN1_Type::BitString, ASN1_Class::Universal, prefix);
+      into.encode_bitstring(std::span{min}.first(version_octets - discarded_octets), unused_bits);
    } else {
       const uint8_t discarded_octets_min = zeros / 8;
       const uint8_t unused_bits_min = zeros % 8;
@@ -50926,23 +55542,9 @@ void IPAddressBlocks::IPAddressOrRange<V>::encode_into(Botan::DER_Encoder& into)
          max[version_octets - 1 - discarded_octets_max] <<= unused_bits_max;
       }
 
-      std::vector<uint8_t> compressed_min;
-      std::vector<uint8_t> compressed_max;
-
-      // construct the address as a byte sequence of the unused bits followed by the compressed address
-      compressed_min.push_back(unused_bits_min);
-      for(size_t i = 0; i < static_cast<uint8_t>(version_octets - discarded_octets_min); i++) {
-         compressed_min.push_back(min[i]);
-      }
-
-      compressed_max.push_back(unused_bits_max);
-      for(size_t i = 0; i < static_cast<uint8_t>(version_octets - discarded_octets_max); i++) {
-         compressed_max.push_back(max[i]);
-      }
-
       into.start_sequence()
-         .add_object(ASN1_Type::BitString, ASN1_Class::Universal, compressed_min)
-         .add_object(ASN1_Type::BitString, ASN1_Class::Universal, compressed_max)
+         .encode_bitstring(std::span{min}.first(version_octets - discarded_octets_min), unused_bits_min)
+         .encode_bitstring(std::span{max}.first(version_octets - discarded_octets_max), unused_bits_max)
          .end_cons();
    }
 }
@@ -50955,29 +55557,23 @@ void IPAddressBlocks::IPAddressOrRange<V>::decode_from(Botan::BER_Decoder& from)
    if(next_tag == ASN1_Type::BitString) {
       // construct a min and a max address from the prefix
 
-      std::vector<uint8_t> prefix_min;
-      from.decode(prefix_min, ASN1_Type::OctetString, ASN1_Type::BitString, ASN1_Class::Universal);
-
-      // copy because we modify the address in `decode_single_address`, but we need it twice for min and max
-      std::vector<uint8_t> prefix_max(prefix_min);
+      ASN1_BitString prefix;
+      from.decode_bitstring(prefix);
 
       // min address gets filled with 0's
-      m_min = decode_single_address(std::move(prefix_min), true);
+      m_min = decode_single_address(prefix, true);
       // max address with 1's
-      m_max = decode_single_address(std::move(prefix_max), false);
+      m_max = decode_single_address(prefix, false);
    } else if(next_tag == ASN1_Type::Sequence) {
       // this is a range
 
-      std::vector<uint8_t> addr_min;
-      std::vector<uint8_t> addr_max;
+      ASN1_BitString addr_min;
+      ASN1_BitString addr_max;
 
-      from.start_sequence()
-         .decode(addr_min, ASN1_Type::OctetString, ASN1_Type::BitString, ASN1_Class::Universal)
-         .decode(addr_max, ASN1_Type::OctetString, ASN1_Type::BitString, ASN1_Class::Universal)
-         .end_cons();
+      from.start_sequence().decode_bitstring(addr_min).decode_bitstring(addr_max).end_cons();
 
-      m_min = decode_single_address(std::move(addr_min), true);
-      m_max = decode_single_address(std::move(addr_max), false);
+      m_min = decode_single_address(addr_min, true);
+      m_max = decode_single_address(addr_max, false);
 
       if(m_min > m_max) {
          throw Decoding_Error("IP address ranges must be sorted.");
@@ -50988,48 +55584,42 @@ void IPAddressBlocks::IPAddressOrRange<V>::decode_from(Botan::BER_Decoder& from)
 }
 
 template <IPAddressBlocks::Version V>
-IPAddressBlocks::IPAddress<V> IPAddressBlocks::IPAddressOrRange<V>::decode_single_address(std::vector<uint8_t> decoded,
+IPAddressBlocks::IPAddress<V> IPAddressBlocks::IPAddressOrRange<V>::decode_single_address(const ASN1_BitString& decoded,
                                                                                           bool min) {
    const size_t version_octets = static_cast<size_t>(V);
 
    // decode a single address according to https://datatracker.ietf.org/doc/html/rfc3779#section-2.1.1 and following
 
-   // we have to account for the octet at the beginning that specifies how many bits are unused in the last octet
-   if(decoded.empty() || decoded.size() > version_octets + 1) {
-      throw Decoding_Error(fmt("IP address range entries must have a length between 1 and {} bytes.", version_octets));
+   if(decoded.bytes().size() > version_octets) {
+      throw Decoding_Error(fmt("IP address range entries must have a length between 0 and {} bytes.", version_octets));
    }
 
-   const uint8_t unused = decoded.front();
-   const uint8_t discarded_octets = version_octets - (static_cast<uint8_t>(decoded.size()) - 1);
+   const uint8_t unused = static_cast<uint8_t>(decoded.unused_bits());
+   const uint8_t discarded_octets = version_octets - static_cast<uint8_t>(decoded.bytes().size());
 
-   decoded.erase(decoded.begin());
+   std::vector<uint8_t> address(decoded.bytes().begin(), decoded.bytes().end());
 
-   if(decoded.empty() && unused != 0) {
+   if(address.empty() && unused != 0) {
       throw Decoding_Error("IP address range entry specified unused bits, but did not provide any octets.");
-   }
-
-   // if they were 8, the entire octet should have been discarded
-   if(unused > 7) {
-      throw Decoding_Error("IP address range entry specified invalid number of unused bits.");
    }
 
    // pad to version length with 0's for min addresses, 255's (0xff) for max addresses
    const uint8_t fill_discarded = min ? 0 : 0xff;
    for(size_t i = 0; i < discarded_octets; i++) {
-      decoded.push_back(fill_discarded);
+      address.push_back(fill_discarded);
    }
 
    // for min addresses they should already be 0, but we set them to zero regardless
    // for max addresses this turns the unused bits to 1
    for(size_t i = 0; i < unused; i++) {
       if(min) {
-         decoded[version_octets - 1 - discarded_octets] &= ~(1 << i);
+         address[version_octets - 1 - discarded_octets] &= ~(1 << i);
       } else {
-         decoded[version_octets - 1 - discarded_octets] |= (1 << i);
+         address[version_octets - 1 - discarded_octets] |= (1 << i);
       }
    }
 
-   return IPAddressBlocks::IPAddress<V>(decoded);
+   return IPAddressBlocks::IPAddress<V>(address);
 }
 
 template <IPAddressBlocks::Version V>
@@ -51047,7 +55637,7 @@ void IPAddressBlocks::validate(const X509_Certificate& /* unused */,
                                const std::optional<X509_Certificate>& /* unused */,
                                const std::vector<X509_Certificate>& cert_path,
                                std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                               size_t pos) {
+                               size_t pos) const {
    // maps in the form of (s)afi -> (needs_checking, ranges)
    auto [v4_needs_check, v6_needs_check] = create_validation_map(m_ip_addr_blocks);
 
@@ -51292,7 +55882,7 @@ void ASBlocks::validate(const X509_Certificate& /* unused */,
                         const std::optional<X509_Certificate>& /* unused */,
                         const std::vector<X509_Certificate>& cert_path,
                         std::vector<std::set<Certificate_Status_Code>>& cert_status,
-                        size_t pos) {
+                        size_t pos) const {
    // the extension may not contain asnums or rdis, but one of them is always present
    const bool asnum_present = m_as_identifiers.asnum().has_value();
    const bool rdi_present = m_as_identifiers.rdi().has_value();
@@ -51358,6 +55948,23 @@ void ASBlocks::validate(const X509_Certificate& /* unused */,
    }
 }
 
+void OCSP_NoCheck::validate(const X509_Certificate& subject,
+                            const std::optional<X509_Certificate>& /*issuer*/,
+                            const std::vector<X509_Certificate>& /*cert_path*/,
+                            std::vector<std::set<Certificate_Status_Code>>& cert_status,
+                            size_t pos) const {
+   /*
+   * RFC 6960 is not particularly explicit about when id-pkix-ocsp-nocheck can
+   * or cannot be included in a certificate, but reasonably we should require
+   * that id-pkix-ocsp-nocheck is only included for certificates that are marked
+   * as OCSP responders. This checks for compatible key usage and also the OCSP
+   * signer extended key usage.
+   */
+   if(!subject.allowed_usage(Usage_Type::OCSP_RESPONDER)) {
+      cert_status.at(pos).insert(Certificate_Status_Code::INVALID_OCSP_NOCHECK);
+   }
+}
+
 std::vector<uint8_t> OCSP_NoCheck::encode_inner() const {
    return {0x05, 0x00};  // NULL
 }
@@ -51365,6 +55972,74 @@ std::vector<uint8_t> OCSP_NoCheck::encode_inner() const {
 void OCSP_NoCheck::decode_inner(const std::vector<uint8_t>& buf) {
    /* RFC 6960 Section 4.2.2.2.1 - id-pkix-ocsp-nocheck (value SHALL be NULL) */
    BER_Decoder(buf, BER_Decoder::Limits::DER()).decode_null().verify_end();
+}
+
+std::vector<uint8_t> NoRevocationAvailable::encode_inner() const {
+   return {0x05, 0x00};  // NULL
+}
+
+void NoRevocationAvailable::decode_inner(const std::vector<uint8_t>& buf) {
+   // RFC 9608 Section 2, it's just a NULL
+   BER_Decoder(buf, BER_Decoder::Limits::DER()).decode_null().verify_end();
+}
+
+void NoRevocationAvailable::validate(const X509_Certificate& subject,
+                                     const std::optional<X509_Certificate>& /*issuer*/,
+                                     const std::vector<X509_Certificate>& /*cert_path*/,
+                                     std::vector<std::set<Certificate_Status_Code>>& cert_status,
+                                     size_t pos) const {
+   // RFC 9608 Section 2:
+   //    This extension MUST NOT be present in CA public key certificates.
+   //
+   // RFC 9608 Section 3:
+   //    Certificates that include the noRevAvail extension MUST NOT include
+   //    certificate extensions that point to CRL repositories or provide
+   //    locations of OCSP responders.
+   //
+   // Additionally (and unusually) the requirements of RFC 9608 Section 3
+   // are not just on issuing parties but also on verifiers:
+   //
+   //   If any of the above are violated in a certificate, then the relying
+   //   party MUST consider the certificate invalid.
+
+   const Extensions& exts = subject.v3_extensions();
+
+   if(const auto* bc = exts.get_extension_object_as<Basic_Constraints>(); bc != nullptr && bc->is_ca()) {
+      // RFC 9608 Section 3:
+      //    The certificate MUST NOT also include the basic constraints
+      //    certificate extension with the cA BOOLEAN set to TRUE
+      cert_status.at(pos).insert(Certificate_Status_Code::NO_REV_AVAIL_INVALID_USE);
+   }
+
+   // RFC 9608 Section 3:
+   //    The certificate MUST NOT also include the CRL Distribution Points
+   //    certificate extension
+   if(exts.extension_set(CRL_Distribution_Points::static_oid())) {
+      cert_status.at(pos).insert(Certificate_Status_Code::NO_REV_AVAIL_INVALID_USE);
+   }
+
+   // RFC 9608 Section 3:
+   //    The certificate MUST NOT also include the Freshest CRL certificate
+   //    extension
+   if(exts.extension_set(OID({2, 5, 29, 46}))) {
+      cert_status.at(pos).insert(Certificate_Status_Code::NO_REV_AVAIL_INVALID_USE);
+   }
+
+   // RFC 9608 Section 3:
+   //    The Authority Information Access certificate extension, if
+   //    present, MUST NOT include an id-ad-ocsp accessMethod
+   //
+   // Walk the raw AccessDescription list rather than the URI-only typed
+   // accessor so a non-URI OCSP accessLocation also triggers the rejection.
+   if(const auto* aia = exts.get_extension_object_as<Authority_Information_Access>(); aia != nullptr) {
+      const OID id_ad_ocsp = OID::from_string("PKIX.OCSP");
+      const bool has_ocsp = !aia->ocsp_responder_uris().empty() ||
+                            std::ranges::any_of(aia->access_descriptions(),
+                                                [&](const auto& ad) { return ad.access_method() == id_ad_ocsp; });
+      if(has_ocsp) {
+         cert_status.at(pos).insert(Certificate_Status_Code::NO_REV_AVAIL_INVALID_USE);
+      }
+   }
 }
 
 std::vector<uint8_t> Unknown_Extension::encode_inner() const {
@@ -51455,7 +56130,7 @@ void X509_Object::encode_into(DER_Encoder& to) const {
       .raw_bytes(signed_body())
       .end_cons()
       .encode(signature_algorithm())
-      .encode(signature(), ASN1_Type::BitString)
+      .encode_octet_aligned_bitstring(signature())
       .end_cons();
 }
 
@@ -51470,7 +56145,7 @@ void X509_Object::decode_from(BER_Decoder& from) {
       .raw_bytes(data->m_tbs_bits)
       .end_cons()
       .decode(data->m_sig_algo)
-      .decode(data->m_sig, ASN1_Type::BitString)
+      .decode_octet_aligned_bitstring(data->m_sig)
       .end_cons();
 
    m_signed_data = std::move(data);
@@ -51502,7 +56177,10 @@ bool X509_Object::check_signature(const Public_Key& pub_key) const {
 std::pair<Certificate_Status_Code, std::string> X509_Object::verify_signature(const Public_Key& pub_key) const {
    try {
       PK_Verifier verifier(pub_key, signature_algorithm());
-      const bool valid = verifier.verify_message(tbs_data(), signature());
+      const auto& tbs = signed_body();
+      verifier.update(ASN1::der_sequence_header(tbs.size()));
+      verifier.update(tbs);
+      const bool valid = verifier.check_signature(signature());
 
       if(valid) {
          return std::make_pair(Certificate_Status_Code::VERIFIED, verifier.hash_function());
@@ -51533,7 +56211,7 @@ std::vector<uint8_t> X509_Object::make_signed(PK_Signer& signer,
       .start_sequence()
       .raw_bytes(tbs_bits)
       .encode(algo)
-      .encode(signature, ASN1_Type::BitString)
+      .encode_octet_aligned_bitstring(signature)
       .end_cons();
 
    return output;
@@ -51639,8 +56317,146 @@ std::unique_ptr<PK_Signer> X509_Object::choose_sig_format(const Private_Key& key
 
 }  // namespace Botan
 /*
+* (C) 2026 Jack Lloyd
+*
+* Botan is released under the Simplified BSD License (see license.txt)
+*/
+
+
+
+namespace Botan {
+
+X509_Serial_Number::X509_Serial_Number(const BigInt& value) : m_contents(ASN1::integer_contents(value)) {}
+
+X509_Serial_Number X509_Serial_Number::from_bytes(std::span<const uint8_t> bytes) {
+   while(!bytes.empty() && bytes.front() == 0x00) {
+      bytes = bytes.subspan(1);
+   }
+
+   if(bytes.empty()) {
+      return X509_Serial_Number();  // zero
+   }
+
+   X509_Serial_Number sn;
+   sn.m_contents.clear();
+   if((bytes.front() & 0x80) == 0x80) {
+      sn.m_contents.push_back(0x00);
+   }
+   sn.m_contents.insert(sn.m_contents.end(), bytes.begin(), bytes.end());
+   return sn;
+}
+
+X509_Serial_Number X509_Serial_Number::from_der_contents(std::span<const uint8_t> contents) {
+   if(contents.empty()) {
+      throw Decoding_Error("Serial number INTEGER encoding has no contents octets");
+   }
+
+   // Normalize away redundant leading octets a BER encoding may carry
+   size_t offset = 0;
+   while(offset + 1 < contents.size() && ((contents[offset] == 0x00 && (contents[offset + 1] & 0x80) == 0x00) ||
+                                          (contents[offset] == 0xFF && (contents[offset + 1] & 0x80) == 0x80))) {
+      offset += 1;
+   }
+
+   X509_Serial_Number sn;
+   sn.m_contents.assign(contents.begin() + offset, contents.end());
+   return sn;
+}
+
+X509_Serial_Number X509_Serial_Number::random(RandomNumberGenerator& rng) {
+   std::array<uint8_t, 16> bytes{};
+   rng.randomize(bytes);
+   bytes[0] &= 0x7F;  // clear bit 128
+   bytes[0] |= 0x40;  // set bit 127
+   return X509_Serial_Number::from_bytes(bytes);
+}
+
+bool X509_Serial_Number::is_negative() const {
+   BOTAN_STATE_CHECK(!m_contents.empty());
+   return (m_contents[0] & 0x80) == 0x80;
+}
+
+bool X509_Serial_Number::is_zero() const {
+   return m_contents.size() == 1 && m_contents[0] == 0x00;
+}
+
+std::vector<uint8_t> X509_Serial_Number::magnitude() const {
+   BOTAN_STATE_CHECK(!m_contents.empty());
+
+   if(is_zero()) {
+      return {};
+   } else if(is_negative()) {
+      return to_bigint().serialize();
+   } else if(m_contents[0] == 0x00) {
+      // Positive value whose leading magnitude bit is set; skip the sign octet
+      return {m_contents.begin() + 1, m_contents.end()};
+   } else {
+      return m_contents;
+   }
+}
+
+BigInt X509_Serial_Number::to_bigint() const {
+   BOTAN_STATE_CHECK(!m_contents.empty());
+   return ASN1::integer_from_contents(m_contents);
+}
+
+std::string X509_Serial_Number::to_string() const {
+   BOTAN_STATE_CHECK(!m_contents.empty());
+   if(is_zero()) {
+      return "00";
+   }
+   const std::string hex = hex_encode(magnitude());
+   return is_negative() ? "-" + hex : hex;
+}
+
+void X509_Serial_Number::encode_into(DER_Encoder& to) const {
+   BOTAN_STATE_CHECK(!m_contents.empty());
+   to.add_object(ASN1_Type::Integer, ASN1_Class::Universal, m_contents);
+}
+
+void X509_Serial_Number::decode_from(BER_Decoder& from) {
+   // Decode via BigInt so the decoder's limits apply, in particular the
+   // rejection of non-minimal INTEGER encodings in DER mode
+   BigInt value;
+   from.decode(value);
+   *this = X509_Serial_Number(value);
+}
+
+std::strong_ordering X509_Serial_Number::operator<=>(const X509_Serial_Number& other) const {
+   BOTAN_STATE_CHECK(!m_contents.empty());
+
+   const bool neg = is_negative();
+
+   if(neg != other.is_negative()) {
+      return neg ? std::strong_ordering::less : std::strong_ordering::greater;
+   }
+
+   // Same sign: for positive values the longer encoding is the larger value,
+   // for negative values the longer encoding is the smaller (more negative)
+   if(m_contents.size() != other.m_contents.size()) {
+      const bool shorter = m_contents.size() < other.m_contents.size();
+      return (shorter != neg) ? std::strong_ordering::less : std::strong_ordering::greater;
+   }
+
+   /*
+   * When comparing two values of the same sign in two's complement
+   * encoding, the lexicographic ordering is correct for both signs,
+   * for instance -2 (0xFE) is less than -1 (0xFF)
+   */
+   const int cmp = std::memcmp(m_contents.data(), other.m_contents.data(), m_contents.size());
+   if(cmp < 0) {
+      return std::strong_ordering::less;
+   } else if(cmp > 0) {
+      return std::strong_ordering::greater;
+   } else {
+      return std::strong_ordering::equal;
+   }
+}
+
+}  // namespace Botan
+/*
 * X.509 Certificates
-* (C) 1999-2010,2015,2017 Jack Lloyd
+* (C) 1999-2010,2015,2017,2026 Jack Lloyd
 * (C) 2016 René Korthaus, Rohde & Schwarz Cybersecurity
 *
 * Botan is released under the Simplified BSD License (see license.txt)
@@ -51652,7 +56468,9 @@ namespace Botan {
 
 class X509_Certificate_Data final {
    public:
-      std::vector<uint8_t> m_serial;
+      X509_Serial_Number m_serial;
+      // TODO(Botan4) once negative serials are rejected this extra vector can go away
+      std::vector<uint8_t> m_serial_bits;
       AlgorithmIdentifier m_sig_algo_inner;
       X509_DN m_issuer_dn;
       X509_DN m_subject_dn;
@@ -51663,8 +56481,11 @@ class X509_Certificate_Data final {
       std::vector<uint8_t> m_subject_public_key_bits;
       std::vector<uint8_t> m_subject_public_key_bits_seq;
       std::vector<uint8_t> m_subject_public_key_bitstring;
-      std::vector<uint8_t> m_subject_public_key_bitstring_sha1;
       AlgorithmIdentifier m_subject_public_key_algid;
+
+      // TODO(Botan4) change this to std::array<uint8_t, 20> and getter to span
+      std::vector<uint8_t> m_subject_public_key_bitstring_sha1;
+      std::array<uint8_t, 32> m_subject_public_key_bitstring_sha256 = {};
 
       std::vector<uint8_t> m_v2_issuer_key_id;
       std::vector<uint8_t> m_v2_subject_key_id;
@@ -51675,12 +56496,16 @@ class X509_Certificate_Data final {
       std::vector<uint8_t> m_subject_key_id;
       std::vector<OID> m_cert_policies;
 
-      std::vector<std::string> m_crl_distribution_points;
-      std::vector<std::string> m_ocsp_responders;
-      std::vector<std::string> m_ca_issuers;
+      std::vector<URI> m_crl_distribution_points;
+      std::vector<URI> m_ocsp_responders;
+      std::vector<URI> m_ca_issuers;
 
+      // TODO(Botan4) change this to std::array<uint8_t, 32> and getter to span
       std::vector<uint8_t> m_issuer_dn_bits_sha256;
+      // TODO(Botan4) change this to std::array<uint8_t, 32> and getter to span
       std::vector<uint8_t> m_subject_dn_bits_sha256;
+      std::array<uint8_t, 20> m_issuer_dn_bits_sha1 = {};
+      std::array<uint8_t, 20> m_subject_dn_bits_sha1 = {};
 
       std::string m_fingerprint_sha1;
       std::string m_fingerprint_sha256;
@@ -51697,8 +56522,8 @@ class X509_Certificate_Data final {
       Key_Constraints m_key_constraints;
       bool m_self_signed = false;
       bool m_is_ca_certificate = false;
-      bool m_serial_negative = false;
       bool m_subject_alt_name_exists = false;
+      bool m_skip_revocation_check = false;
 };
 
 X509_Certificate::~X509_Certificate() = default;
@@ -51732,13 +56557,12 @@ namespace {
 std::unique_ptr<X509_Certificate_Data> parse_x509_cert_body(const X509_Object& obj) {
    auto data = std::make_unique<X509_Certificate_Data>();
 
-   BigInt serial_bn;
    BER_Object public_key;
    BER_Object v3_exts_data;
 
    BER_Decoder(obj.signed_body(), BER_Decoder::Limits::DER())
       .decode_optional(data->m_version, ASN1_Type(0), ASN1_Class::Constructed | ASN1_Class::ContextSpecific)
-      .decode(serial_bn)
+      .decode(data->m_serial)
       .decode(data->m_sig_algo_inner)
       .decode(data->m_issuer_dn)
       .start_sequence()
@@ -51764,9 +56588,7 @@ std::unique_ptr<X509_Certificate_Data> parse_x509_cert_body(const X509_Object& o
    // for general sanity convert wire version (0 based) to standards version (v1 .. v3)
    data->m_version += 1;
 
-   data->m_serial = serial_bn.serialize();
-   // crude method to save the serial's sign; will get lost during decoding, otherwise
-   data->m_serial_negative = serial_bn.signum() < 0;
+   data->m_serial_bits = data->m_serial.magnitude();
    data->m_subject_dn_bits = ASN1::put_in_sequence(data->m_subject_dn.get_bits());
    data->m_issuer_dn_bits = ASN1::put_in_sequence(data->m_issuer_dn.get_bits());
 
@@ -51776,12 +56598,14 @@ std::unique_ptr<X509_Certificate_Data> parse_x509_cert_body(const X509_Object& o
 
    BER_Decoder(data->m_subject_public_key_bits, BER_Decoder::Limits::DER())
       .decode(data->m_subject_public_key_algid)
-      .decode(data->m_subject_public_key_bitstring, ASN1_Type::BitString)
+      .decode_octet_aligned_bitstring(data->m_subject_public_key_bitstring)
       .verify_end();
 
    if(v3_exts_data.is_a(3, ASN1_Class::Constructed | ASN1_Class::ContextSpecific)) {
       // Path validation will reject a v1/v2 cert with v3 extensions
-      BER_Decoder(v3_exts_data, BER_Decoder::Limits::DER()).decode(data->m_v3_extensions).verify_end();
+      BER_Decoder cert_extensions(v3_exts_data, BER_Decoder::Limits::DER());
+      data->m_v3_extensions.decode_from(cert_extensions, Extension_Context::Certificate);
+      cert_extensions.verify_end();
    } else if(v3_exts_data.is_set()) {
       throw BER_Bad_Tag("Unknown tag in X.509 cert", v3_exts_data.tagging());
    }
@@ -51897,17 +56721,29 @@ std::unique_ptr<X509_Certificate_Data> parse_x509_cert_body(const X509_Object& o
    const auto san_oid = OID::from_string("X509v3.SubjectAlternativeName");
    data->m_subject_alt_name_exists = data->m_v3_extensions.extension_set(san_oid);
 
+   /*
+   * RFC 9608 Section 4:
+   *
+   *   If the noRevAvail certificate extension specified in this document is
+   *   present or the ocsp-nocheck certificate extension [RFC6960] is
+   *   present, then Step (a)(3) is skipped.  Otherwise, revocation status
+   *   determination of the certificate is performed.
+   */
+   data->m_skip_revocation_check =
+      data->m_v3_extensions.extension_set(Cert_Extension::NoRevocationAvailable::static_oid()) ||
+      data->m_v3_extensions.extension_set(Cert_Extension::OCSP_NoCheck::static_oid());
+
    if(const auto* ext = data->m_v3_extensions.get_extension_object_as<Cert_Extension::Certificate_Policies>()) {
       data->m_cert_policies = ext->get_policy_oids();
    }
 
    if(const auto* ext = data->m_v3_extensions.get_extension_object_as<Cert_Extension::Authority_Information_Access>()) {
-      data->m_ocsp_responders = ext->ocsp_responders();
-      data->m_ca_issuers = ext->ca_issuers();
+      data->m_ocsp_responders = ext->ocsp_responder_uris();
+      data->m_ca_issuers = ext->ca_issuer_uris();
    }
 
    if(const auto* ext = data->m_v3_extensions.get_extension_object_as<Cert_Extension::CRL_Distribution_Points>()) {
-      data->m_crl_distribution_points = ext->crl_distribution_urls();
+      data->m_crl_distribution_points = ext->crl_distribution_point_uris();
    }
 
    /*
@@ -51941,6 +56777,12 @@ std::unique_ptr<X509_Certificate_Data> parse_x509_cert_body(const X509_Object& o
       sha1->update(full_encoding);
       sha1->final(data->m_cert_data_sha1);
       data->m_fingerprint_sha1 = format_hex_fingerprint(data->m_cert_data_sha1);
+
+      sha1->update(data->m_issuer_dn_bits);
+      sha1->final(data->m_issuer_dn_bits_sha1);
+
+      sha1->update(data->m_subject_dn_bits);
+      sha1->final(data->m_subject_dn_bits_sha1);
    }
 
    // SHA-256 is a hard dependency of this module
@@ -51954,6 +56796,9 @@ std::unique_ptr<X509_Certificate_Data> parse_x509_cert_body(const X509_Object& o
    sha256->update(full_encoding);
    sha256->final(data->m_cert_data_sha256);
    data->m_fingerprint_sha256 = format_hex_fingerprint(data->m_cert_data_sha256);
+
+   sha256->update(data->m_subject_public_key_bitstring);
+   sha256->final(data->m_subject_public_key_bitstring_sha256);
 
    return data;
 }
@@ -52023,6 +56868,10 @@ const std::vector<uint8_t>& X509_Certificate::subject_public_key_bitstring_sha1(
    return data().m_subject_public_key_bitstring_sha1;
 }
 
+std::span<const uint8_t, 32> X509_Certificate::subject_public_key_bitstring_sha256() const {
+   return data().m_subject_public_key_bitstring_sha256;
+}
+
 const std::vector<uint8_t>& X509_Certificate::authority_key_id() const {
    return data().m_authority_key_id;
 }
@@ -52032,11 +56881,19 @@ const std::vector<uint8_t>& X509_Certificate::subject_key_id() const {
 }
 
 const std::vector<uint8_t>& X509_Certificate::serial_number() const {
+   return data().m_serial_bits;
+}
+
+const X509_Serial_Number& X509_Certificate::serial() const {
    return data().m_serial;
 }
 
 bool X509_Certificate::is_serial_negative() const {
-   return data().m_serial_negative;
+   return data().m_serial.is_negative();
+}
+
+bool X509_Certificate::skip_revocation_check() const {
+   return data().m_skip_revocation_check;
 }
 
 const X509_DN& X509_Certificate::issuer_dn() const {
@@ -52200,31 +57057,75 @@ bool X509_Certificate::is_critical(std::string_view ex_name) const {
    return v3_extensions().critical_extension_set(OID::from_string(ex_name));
 }
 
+namespace {
+
+std::vector<std::string> uris_as_strings(const std::vector<URI>& uris) {
+   std::vector<std::string> out;
+   out.reserve(uris.size());
+   for(const auto& uri : uris) {
+      out.push_back(uri.original_input());
+   }
+   return out;
+}
+
+}  // namespace
+
 std::string X509_Certificate::ocsp_responder() const {
    if(data().m_ocsp_responders.empty()) {
       return {};
    }
-   return data().m_ocsp_responders[0];
+   return data().m_ocsp_responders[0].original_input();
 }
 
-const std::vector<std::string>& X509_Certificate::ocsp_responders() const {
+std::vector<std::string> X509_Certificate::ocsp_responders() const {
+   return uris_as_strings(data().m_ocsp_responders);
+}
+
+const std::vector<URI>& X509_Certificate::ocsp_responder_uris() const {
    return data().m_ocsp_responders;
 }
 
 std::vector<std::string> X509_Certificate::ca_issuers() const {
+   return uris_as_strings(data().m_ca_issuers);
+}
+
+const std::vector<URI>& X509_Certificate::ca_issuer_uris() const {
    return data().m_ca_issuers;
 }
 
 std::vector<std::string> X509_Certificate::crl_distribution_points() const {
+   return uris_as_strings(data().m_crl_distribution_points);
+}
+
+const std::vector<URI>& X509_Certificate::crl_distribution_point_uris() const {
    return data().m_crl_distribution_points;
 }
 
 std::string X509_Certificate::crl_distribution_point() const {
    // just returns the first (arbitrarily)
    if(!data().m_crl_distribution_points.empty()) {
-      return data().m_crl_distribution_points[0];
+      return data().m_crl_distribution_points[0].original_input();
    }
    return "";
+}
+
+std::vector<EmailAddress> X509_Certificate::subject_email_addresses() const {
+   const auto& san_emails = subject_alt_name().email_addresses();
+
+   std::vector<EmailAddress> out;
+   out.reserve(san_emails.size());
+
+   for(const auto& addr : san_emails) {
+      out.push_back(addr);
+   }
+
+   for(const auto& dn_email_str : subject_dn().get_attribute("PKCS9.EmailAddress")) {
+      if(auto parsed = EmailAddress::from_string(dn_email_str)) {
+         out.push_back(std::move(*parsed));
+      }
+   }
+
+   return out;
 }
 
 const AlternativeName& X509_Certificate::subject_alt_name() const {
@@ -52238,25 +57139,38 @@ const AlternativeName& X509_Certificate::issuer_alt_name() const {
 namespace {
 
 std::vector<std::string> get_cert_user_info(std::string_view req, const X509_DN& dn, const AlternativeName& alt_name) {
-   auto set_to_vector = [](const std::set<std::string>& s) -> std::vector<std::string> { return {s.begin(), s.end()}; };
-
    if(dn.has_field(req)) {
       return dn.get_attribute(req);
    } else if(req == "RFC822" || req == "Email") {
-      return set_to_vector(alt_name.email());
+      std::vector<std::string> out;
+      out.reserve(alt_name.email_addresses().size());
+      for(const auto& addr : alt_name.email_addresses()) {
+         out.push_back(addr.to_string());
+      }
+      return out;
    } else if(req == "DNS") {
-      return set_to_vector(alt_name.dns());
+      std::vector<std::string> out;
+      out.reserve(alt_name.dns_names().size());
+      for(const auto& dns : alt_name.dns_names()) {
+         out.push_back(dns.to_string());
+      }
+      return out;
    } else if(req == "URI") {
-      return set_to_vector(alt_name.uris());
+      std::vector<std::string> out;
+      out.reserve(alt_name.uri_names().size());
+      for(const auto& uri : alt_name.uri_names()) {
+         out.push_back(uri.original_input());
+      }
+      return out;
    } else if(req == "IP") {
       std::vector<std::string> ip_str;
-      for(const uint32_t ipv4 : alt_name.ipv4_address()) {
-         ip_str.push_back(ipv4_to_string(ipv4));
+      for(const auto& ipv4 : alt_name.ipv4_addresses()) {
+         ip_str.push_back(ipv4.to_string());
       }
       return ip_str;
    } else if(req == "IPv6") {
       std::vector<std::string> ip_str;
-      for(const auto& ipv6 : alt_name.ipv6_address()) {
+      for(const auto& ipv6 : alt_name.ipv6_addresses()) {
          ip_str.push_back(ipv6.to_string());
       }
       return ip_str;
@@ -52310,6 +57224,14 @@ const std::vector<uint8_t>& X509_Certificate::raw_subject_dn_sha256() const {
    return data().m_subject_dn_bits_sha256;
 }
 
+std::span<const uint8_t, 20> X509_Certificate::raw_issuer_dn_sha1() const {
+   return data().m_issuer_dn_bits_sha1;
+}
+
+std::span<const uint8_t, 20> X509_Certificate::raw_subject_dn_sha1() const {
+   return data().m_subject_dn_bits_sha1;
+}
+
 std::string X509_Certificate::fingerprint(std::string_view hash_name) const {
    /*
    * The SHA-1 and SHA-256 fingerprints are precomputed since these
@@ -52333,32 +57255,58 @@ X509_Certificate::Tag X509_Certificate::tag() const {
    return Tag(data().m_cert_data_sha256);
 }
 
+bool X509_Certificate::matches_dns_name(const DNSName& name) const {
+   const auto& sans = subject_alt_name().dns_names();
+   if(!sans.empty()) {
+      for(const auto& san : sans) {
+         if(name.matches_wildcard(san.name())) {
+            return true;
+         }
+      }
+      return false;
+   }
+
+   /*
+   Fall back to CN for DNS name only if no SAN is included
+   We assume if the issuer knew about SAN then they would have included
+   the DNS name there if the intention was to provide such a name.
+   */
+   if(!data().m_subject_alt_name_exists) {
+      for(const auto& cn : subject_dn().get_attribute("CN")) {
+         if(auto cn_dns = DNSName::from_san_string(cn)) {
+            if(name.matches_wildcard(cn_dns->name())) {
+               return true;
+            }
+         }
+      }
+   }
+
+   return false;
+}
+
+bool X509_Certificate::matches_ip(const IPv4Address& address) const {
+   return subject_alt_name().ipv4_addresses().contains(address);
+}
+
+bool X509_Certificate::matches_ip(const IPv6Address& address) const {
+   return subject_alt_name().ipv6_addresses().contains(address);
+}
+
 bool X509_Certificate::matches_dns_name(std::string_view name) const {
    if(name.empty()) {
       return false;
    }
 
-   if(auto req_ipv4 = string_to_ipv4(name)) {
-      const auto& ipv4_names = subject_alt_name().ipv4_address();
-      return ipv4_names.contains(req_ipv4.value());
+   if(auto req_ipv4 = IPv4Address::from_string(name)) {
+      return matches_ip(*req_ipv4);
    }
 
    if(auto req_ipv6 = IPv6Address::from_string(name)) {
-      const auto& ipv6_names = subject_alt_name().ipv6_address();
-      return ipv6_names.contains(req_ipv6.value());
+      return matches_ip(*req_ipv6);
    }
 
-   auto issued_names = subject_info("DNS");
-
-   // Fall back to CN only if no SAN is included
-   if(!data().m_subject_alt_name_exists) {
-      issued_names = subject_info("Name");
-   }
-
-   for(const auto& issued_name : issued_names) {
-      if(host_wildcard_match(issued_name, name)) {
-         return true;
-      }
+   if(auto parsed = DNSName::from_string(name)) {
+      return matches_dns_name(*parsed);
    }
 
    return false;
@@ -52389,6 +57337,53 @@ bool operator!=(const X509_Certificate& cert1, const X509_Certificate& cert2) {
    return !(cert1 == cert2);
 }
 
+namespace {
+
+void format_alt_name(std::ostream& out, std::string_view label, const AlternativeName& alt_name) {
+   if(alt_name.is_empty()) {
+      return;
+   }
+
+   out << label << ":\n";
+
+   for(const auto& dns : alt_name.dns_names()) {
+      out << "   DNS: " << escape_control_chars(dns.to_string()) << "\n";
+   }
+   for(const auto& ipv4 : alt_name.ipv4_addresses()) {
+      out << "   IP: " << ipv4.to_string() << "\n";
+   }
+   for(const auto& ipv6 : alt_name.ipv6_addresses()) {
+      out << "   IP: " << ipv6.to_string() << "\n";
+   }
+   for(const auto& uri : alt_name.uri_names()) {
+      out << "   URI: " << escape_control_chars(uri.original_input()) << "\n";
+   }
+   for(const auto& email : alt_name.email_addresses()) {
+      out << "   Email: " << escape_control_chars(email.to_string()) << "\n";
+   }
+   for(const auto& mbox : alt_name.smtp_utf8_mailboxes()) {
+      out << "   SmtpUTF8: " << escape_control_chars(mbox.to_string()) << "\n";
+   }
+   for(const auto& dn : alt_name.directory_names()) {
+      out << "   DirName: " << dn << "\n";
+   }
+   for(const auto& oid : alt_name.registered_ids()) {
+      out << "   RegisteredID: " << oid.to_formatted_string() << "\n";
+   }
+
+   // SmtpUTF8Mailbox values are also retained verbatim in other_name_values;
+   // skip them here since they are already printed in decoded form above
+   const auto smtp_utf8_oid = OID::from_string("PKIX.SmtpUTF8Mailbox");
+   for(const auto& other : alt_name.other_name_values()) {
+      if(other.oid() == smtp_utf8_oid) {
+         continue;
+      }
+      out << "   OtherName " << other.oid().to_formatted_string() << ": " << hex_encode(other.value()) << "\n";
+   }
+}
+
+}  // namespace
+
 std::string X509_Certificate::to_string() const {
    std::ostringstream out;
 
@@ -52409,6 +57404,8 @@ std::string X509_Certificate::to_string() const {
           << " Error: " << ex.what() << "\n"
           << " Hex: " << hex_encode(this->subject_public_key_bitstring()) << "\n";
    }
+
+   format_alt_name(out, "Subject Alternative Name", this->subject_alt_name());
 
    out << "Constraints:\n";
    const Key_Constraints constraints = this->constraints();
@@ -52442,6 +57439,14 @@ std::string X509_Certificate::to_string() const {
       if(constraints.includes(Key_Constraints::DecipherOnly)) {
          out << "   Decipher Only\n";
       }
+   }
+
+   if(this->is_CA_cert()) {
+      out << "Basic Constraints: CA";
+      if(const auto path_len = this->path_length_constraint()) {
+         out << ", path length " << *path_len;
+      }
+      out << "\n";
    }
 
    const std::vector<OID>& policies = this->certificate_policy_oids();
@@ -52483,29 +57488,29 @@ std::string X509_Certificate::to_string() const {
       }
    }
 
-   const auto& ocsp_responders = this->ocsp_responders();
+   const auto& ocsp_responders = this->ocsp_responder_uris();
    if(!ocsp_responders.empty()) {
       out << "OCSP Responders:\n";
       for(const auto& ocsp_responder : ocsp_responders) {
-         out << "   URI: " << ocsp_responder << "\n";
+         out << "   URI: " << ocsp_responder.original_input() << "\n";
       }
    }
 
-   const std::vector<std::string> ca_issuers = this->ca_issuers();
+   const auto& ca_issuers = this->ca_issuer_uris();
    if(!ca_issuers.empty()) {
       out << "CA Issuers:\n";
       for(const auto& ca_issuer : ca_issuers) {
-         out << "   URI: " << ca_issuer << "\n";
+         out << "   URI: " << ca_issuer.original_input() << "\n";
       }
    }
 
-   for(const auto& cdp : crl_distribution_points()) {
-      out << "CRL " << cdp << "\n";
+   for(const auto& cdp : crl_distribution_point_uris()) {
+      out << "CRL " << cdp.original_input() << "\n";
    }
 
    out << "Signature algorithm: " << this->signature_algorithm().oid().to_formatted_string() << "\n";
 
-   out << "Serial number: " << hex_encode(this->serial_number()) << "\n";
+   out << "Serial number: " << this->serial().to_string() << "\n";
 
    if(!this->authority_key_id().empty()) {
       out << "Authority keyid: " << hex_encode(this->authority_key_id()) << "\n";
@@ -52513,6 +57518,12 @@ std::string X509_Certificate::to_string() const {
 
    if(!this->subject_key_id().empty()) {
       out << "Subject keyid: " << hex_encode(this->subject_key_id()) << "\n";
+   }
+
+   format_alt_name(out, "Issuer Alternative Name", this->issuer_alt_name());
+
+   if(this->skip_revocation_check()) {
+      out << "Revocation status checking is disabled for this certificate\n";
    }
 
    if(this->is_self_signed()) {
@@ -52634,6 +57645,124 @@ namespace Botan {
 
 namespace {
 
+constexpr size_t PathBuildingDfsBudget = 300;
+constexpr size_t PathBuildingMaximumChainLength = 16;
+constexpr size_t PathBuildingVerificationBudget = 200;
+constexpr size_t PathBuildingMaxPathsExamined = 50;
+
+struct CrlApplicability {
+      bool usable;         // RFC 5280 6.3.3(b) gate: can be searched for a revocation entry
+      bool full_coverage;  // can also serve as VALID_CRL_CHECKED non-revocation evidence
+};
+
+/*
+* Single-pass evaluation of how this CRL applies to this cert. Combines:
+*   - 6.3.3(b)(1)/(b)(2)(i) name match (via distribution_point_match)
+*   - 6.3.3(b)(2)(ii)-(iv) IDP scope booleans
+*   - the (currently unsupported) indirect-CRL gate from (f)-(g)
+*   - 6.3.3(d)(3) DP-reasons / IDP-onlySomeReasons full-coverage check
+* Computing the two answers together keeps their matching rules in sync and
+* avoids re-walking the cert's CDP. `full_coverage` is reported only when
+* `usable` is true; reason-mask accumulation across multiple CRLs per
+* 6.3.3(d)-(l) is not implemented, so a reason-limited CRL never alone
+* certifies full coverage.
+*/
+CrlApplicability crl_applicability_for(const X509_CRL& crl, const X509_Certificate& subject) {
+   /*
+   * RFC 5280 6.3.3
+   *
+   * (b)  Verify the issuer and scope of the complete CRL as follows:
+   *
+   *    (1)  If the DP includes cRLIssuer, then verify that the issuer
+   *         field in the complete CRL matches cRLIssuer in the DP and
+   *         that the complete CRL contains an issuing distribution
+   *         point extension with the indirectCRL boolean asserted.
+   *         Otherwise, verify that the CRL issuer matches the
+   *         certificate issuer.
+   *
+   *    (2)  If the complete CRL includes an issuing distribution point
+   *         (IDP) CRL extension, check the following:
+   *
+   *       (i) If the distribution point name is present in the IDP CRL
+   *           extension and the distribution field is present in the
+   *           DP, then verify that one of the names in the IDP matches
+   *           one of the names in the DP.  If the distribution point
+   *           name is present in the IDP CRL extension and the
+   *           distribution field is omitted from the DP, then verify
+   *           that one of the names in the IDP matches one of the names
+   *           in the cRLIssuer field of the DP.
+   *
+   *      (ii) If the onlyContainsUserCerts boolean is asserted in the
+   *           IDP CRL extension, verify that the certificate does not
+   *           include the basic constraints extension with the cA
+   *           boolean asserted.
+   *
+   *      (iii) If the onlyContainsCACerts boolean is asserted in the
+   *            IDP CRL extension, verify that the certificate
+   *            includes the basic constraints extension with the cA
+   *            boolean asserted.
+   *
+   *      (iv) Verify that the onlyContainsAttributeCerts boolean is not
+   *           asserted.
+   */
+   const auto match = distribution_point_match(crl, subject);
+   if(!match.any) {
+      return {false, false};
+   }
+
+   const auto* idp = crl.extensions().get_extension_object_as<Cert_Extension::CRL_Issuing_Distribution_Point>();
+   if(idp == nullptr) {
+      return {true, match.any_with_absent_reasons};
+   }
+
+   // X509_Certificate::is_CA_cert has additional gates (KU + EKU) besides the basicConstraints
+   const bool basicConstraints_isCa = [&]() {
+      if(const auto* ext = subject.v3_extensions().get_extension_object_as<Cert_Extension::Basic_Constraints>()) {
+         return ext->get_is_ca();
+      } else {
+         return false;
+      }
+   }();
+
+   // step (ii)
+   if(idp->only_contains_user_certs() && basicConstraints_isCa) {
+      return {false, false};
+   }
+
+   // step (iii)
+   if(idp->only_contains_ca_certs() && !basicConstraints_isCa) {
+      return {false, false};
+   }
+
+   // step (iv)
+   if(idp->only_contains_attribute_certs()) {
+      return {false, false};
+   }
+
+   /*
+   * RFC 5280 6.3.3(f)-(g) requires validating the cRLIssuer's certification
+   * path and verifying the CRL signature with that key when indirectCRL is
+   * asserted. PKIX::check_crl currently verifies the CRL signature against
+   * the cert's direct issuer key only, so an indirect CRL cannot be
+   * evaluated correctly. Reject as inapplicable rather than risk a
+   * misleading status.
+   */
+   if(idp->indirect_crl()) {
+      return {false, false};
+   }
+
+   /*
+   * Full reason coverage additionally requires the IDP to omit onlySomeReasons.
+   * RFC 5280 6.3.3(d) computes the reason mask per (DP, IDP) pair, so a CRL
+   * that is reason-limited on either side cannot alone prove non-revocation
+   * across every reason; reason-mask accumulation across multiple CRLs per
+   * 6.3.3(d)-(l) is not yet implemented.
+   */
+   const bool only_some_reasons = idp->only_some_reasons().has_value();
+   const bool full = match.any_with_absent_reasons && !only_some_reasons;
+   return {true, full};
+}
+
 /**
  * Lazy DFS iterator that yields certificate paths one at a time.
  *
@@ -52655,9 +57784,14 @@ class CertificatePathBuilder final {
    public:
       CertificatePathBuilder(const std::vector<Certificate_Store*>& trusted_certstores,
                              const X509_Certificate& end_entity,
-                             const std::vector<X509_Certificate>& end_entity_extra,
-                             bool require_self_signed = false) :
-            m_trusted_certstores(trusted_certstores), m_require_self_signed(require_self_signed) {
+                             std::span<const X509_Certificate> end_entity_extra,
+                             size_t dfs_budget,
+                             bool require_self_signed) :
+            m_trusted_certstores(trusted_certstores),
+            m_require_self_signed(require_self_signed),
+            m_dfs_budget(dfs_budget) {
+         BOTAN_ARG_CHECK(m_dfs_budget > 0, "DFS budget must be non-zero");
+
          if(std::ranges::any_of(trusted_certstores, [](auto* ptr) { return ptr == nullptr; })) {
             throw Invalid_Argument("Certificate store list must not contain nullptr");
          }
@@ -52672,18 +57806,15 @@ class CertificatePathBuilder final {
       }
 
       std::optional<std::vector<X509_Certificate>> next() {
-         size_t steps = 0;
-
          while(!m_stack.empty()) {
-            constexpr size_t MAX_DFS_STEPS = 1000;
-
-            steps++;
-
-            if(steps > MAX_DFS_STEPS) {
+            if(m_dfs_budget == 0) {
                // Intentionally overwrite any previous builder error
                m_error = Certificate_Status_Code::CERT_ISSUER_NOT_FOUND;
                return std::nullopt;
             }
+
+            BOTAN_ASSERT_NOMSG(m_dfs_budget > 0);
+            m_dfs_budget -= 1;
 
             auto [last, trusted] = std::move(m_stack.back());  // move before pop_back
             m_stack.pop_back();
@@ -52764,11 +57895,18 @@ class CertificatePathBuilder final {
          const X509_DN& issuer_dn = cert.issuer_dn();
          const std::vector<uint8_t>& auth_key_id = cert.authority_key_id();
 
-         // Search for trusted issuers
+         // Common case is a single trusted store; steal its buffer and only
+         // move-append if multiple stores return matches.
          std::vector<X509_Certificate> trusted_issuers;
          for(const Certificate_Store* store : m_trusted_certstores) {
             auto new_issuers = store->find_all_certs(issuer_dn, auth_key_id);
-            trusted_issuers.insert(trusted_issuers.end(), new_issuers.begin(), new_issuers.end());
+            if(trusted_issuers.empty()) {
+               trusted_issuers = std::move(new_issuers);
+            } else {
+               trusted_issuers.insert(trusted_issuers.end(),
+                                      std::make_move_iterator(new_issuers.begin()),
+                                      std::make_move_iterator(new_issuers.end()));
+            }
          }
 
          // Search the supplemental certs
@@ -52788,11 +57926,14 @@ class CertificatePathBuilder final {
          // Push a deletion marker on the stack for backtracking later
          m_stack.push_back({std::nullopt, false});
 
-         for(const auto& trusted_cert : trusted_issuers) {
-            m_stack.push_back({trusted_cert, true});
-         }
+         // The stack is LIFO so push trusted issuers last; preferring them
+         // keeps the DFS from wandering through cross-signed CAs when the
+         // trust anchor issued the certificate directly.
          for(const auto& misc : misc_issuers) {
             m_stack.push_back({misc, false});
+         }
+         for(const auto& trusted_cert : trusted_issuers) {
+            m_stack.push_back({trusted_cert, true});
          }
       }
 
@@ -52803,6 +57944,7 @@ class CertificatePathBuilder final {
       std::vector<X509_Certificate> m_path_so_far;
       std::unordered_set<X509_Certificate::Tag, X509_Certificate::TagHash> m_certs_seen;
       std::optional<Certificate_Status_Code> m_error;
+      size_t m_dfs_budget = 0;
 };
 
 }  // namespace
@@ -52944,17 +58086,18 @@ CertificatePathStatusCodes PKIX::check_chain(const std::vector<X509_Certificate>
       }
 
       // Check the serial number
-      if(subject.is_serial_negative()) {
+      if(subject.serial().is_negative()) {
          status.insert(Certificate_Status_Code::CERT_SERIAL_NEGATIVE);
       }
 
       // Check the subject's DN components' length
 
-      for(const auto& dn_pair : subject.subject_dn().dn_info()) {
-         const size_t dn_ub = X509_DN::lookup_ub(dn_pair.first);
-         // dn_pair = <OID,str>
-         if(dn_ub > 0 && dn_pair.second.size() > dn_ub) {
-            status.insert(Certificate_Status_Code::DN_TOO_LONG);
+      for(const auto& rdn : subject.subject_dn().rdns()) {
+         for(const auto& ava : rdn) {
+            const size_t dn_ub = X509_DN::lookup_ub(ava.first);
+            if(dn_ub > 0 && ava.second.size() > dn_ub) {
+               status.insert(Certificate_Status_Code::DN_TOO_LONG);
+            }
          }
       }
 
@@ -52992,18 +58135,11 @@ CertificatePathStatusCodes PKIX::check_chain(const std::vector<X509_Certificate>
       }
 
       const Extensions& extensions = subject.v3_extensions();
-      const auto& extensions_vec = extensions.extensions();
-      if(subject.x509_version() < 3 && !extensions_vec.empty()) {
+      if(subject.x509_version() < 3 && !extensions.get_extension_oids().empty()) {
          status.insert(Certificate_Status_Code::EXT_IN_V1_V2_CERT);
       }
 
-      for(const auto& extension : extensions_vec) {
-         extension.first->validate(subject, issuer, cert_path, cert_status, i);
-      }
-
-      if(extensions_vec.size() != extensions.get_extension_oids().size()) {
-         status.insert(Certificate_Status_Code::DUPLICATE_CERT_EXTENSION);
-      }
+      extensions.validate(subject, issuer, cert_path, cert_status, i);
    }
 
    // path len check
@@ -53051,9 +58187,10 @@ Certificate_Status_Code verify_ocsp_signing_cert(const X509_Certificate& signing
    //
    //    1. Matches a local configuration of OCSP signing authority
    //       for the certificate in question, or
-   if(restrictions.trusted_ocsp_responders() != nullptr &&
-      restrictions.trusted_ocsp_responders()->contains(signing_cert)) {
-      return Certificate_Status_Code::OK;
+   if(const auto* trusted_responders = restrictions.trusted_ocsp_responders()) {
+      if(trusted_responders->contains(signing_cert)) {
+         return Certificate_Status_Code::OK;
+      }
    }
 
    // RFC 6960 4.2.2.2
@@ -53073,6 +58210,14 @@ Certificate_Status_Code verify_ocsp_signing_cert(const X509_Certificate& signing
    // Verify the delegated responder was issued by the CA that issued
    // the certificate in question (the EKU and signature chain are
    // verified by the path validation below).
+   //
+   // RFC 6960 4.2.2.2 again
+   //
+   //    Systems relying on OCSP responses MUST recognize a delegation
+   //    certificate as being issued by the CA that issued the
+   //    certificate in question only if the delegation certificate
+   //    and the certificate being checked for revocation were signed
+   //    by the same key.
    if(signing_cert.issuer_dn() != ca.subject_dn()) {
       return Certificate_Status_Code::OCSP_ISSUER_NOT_TRUSTED;
    } else {
@@ -53086,9 +58231,27 @@ Certificate_Status_Code verify_ocsp_signing_cert(const X509_Certificate& signing
       }
    }
 
+   try {
+      const auto ca_pub_key = ca.subject_public_key();
+      if(!ca_pub_key || !signing_cert.check_signature(*ca_pub_key)) {
+         return Certificate_Status_Code::OCSP_ISSUER_NOT_TRUSTED;
+      }
+   } catch(...) {
+      return Certificate_Status_Code::OCSP_ISSUER_NOT_TRUSTED;
+   }
+
    // TODO: Implement OCSP revocation check of OCSP signer certificate
    // Note: This needs special care to prevent endless loops on specifically
    //       forged chains of OCSP responses referring to each other.
+   //
+   // RFC 6960 4.2.2.2.1 seems to imply that generally OCSP checking of OCSP
+   // signers is not realistic; it suggests either using the nocheck extension,
+   // "using CRL Distribution Points if the check should be done using CRLs",
+   // or just punts with
+   //    A CA may choose not to specify any method of revocation checking
+   //    for the responder's certificate, in which case it would be up to
+   //    the OCSP client's local security policy to decide whether that
+   //    certificate should be checked for revocation or not.
    //
    // Currently, we're disabling OCSP-based revocation checks by setting the
    // timeout to 0. Additionally, the library's API would not allow an
@@ -53101,7 +58264,12 @@ Certificate_Status_Code verify_ocsp_signing_cert(const X509_Certificate& signing
       Path_Validation_Restrictions(false /* do not enforce revocation data */,
                                    restrictions.minimum_key_strength(),
                                    false /* OCSP is not available, so don't try for intermediates */,
-                                   restrictions.trusted_hashes());
+                                   restrictions.trusted_hashes(),
+                                   /* max_ocsp_age */ std::chrono::seconds(0),
+                                   /* trusted_responders */ {},
+                                   restrictions.ignore_trusted_root_time_range(),
+                                   restrictions.require_self_signed_trust_anchors(),
+                                   restrictions.accept_ocsp_softfail());
 
    const auto validation_result = x509_path_validate(concat(std::vector{signing_cert}, extra_certs),
                                                      relaxed_restrictions,
@@ -53166,6 +58334,10 @@ CertificatePathStatusCodes PKIX::check_ocsp(const std::vector<X509_Certificate>&
       const X509_Certificate& subject = cert_path.at(i);
       const X509_Certificate& ca = cert_path.at(i + 1);
 
+      if(subject.skip_revocation_check()) {
+         continue;
+      }
+
       if(i < ocsp_responses.size() && ocsp_responses.at(i).has_value() &&
          ocsp_responses.at(i)->status() == OCSP::Response_Status_Code::Successful) {
          try {
@@ -53193,9 +58365,23 @@ CertificatePathStatusCodes PKIX::check_crl(const std::vector<X509_Certificate>& 
    for(size_t i = 0; i != cert_path.size() - 1; ++i) {
       std::set<Certificate_Status_Code>& status = cert_status.at(i);
 
+      if(cert_path.at(i).skip_revocation_check()) {
+         continue;
+      }
+
       if(i < crls.size() && crls[i].has_value()) {
          const X509_Certificate& subject = cert_path.at(i);
          const X509_Certificate& ca = cert_path.at(i + 1);
+
+         // RFC 5280 6.3.3 step (b)(2): if the CRL's IDP scope or
+         // distributionPoint name excludes this certificate, do not use it
+         // to determine revocation status. Treat as if no CRL was supplied
+         // so the caller's policy (strict revocation or soft fail) decides
+         // the outcome.
+         const auto applic = crl_applicability_for(*crls[i], subject);
+         if(!applic.usable) {
+            continue;
+         }
 
          if(!ca.allowed_usage(Key_Constraints::CrlSign)) {
             status.insert(Certificate_Status_Code::CA_CERT_NOT_FOR_CRL_ISSUER);
@@ -53213,27 +58399,34 @@ CertificatePathStatusCodes PKIX::check_crl(const std::vector<X509_Certificate>& 
          if(crls[i]->check_signature(*ca_key) == false) {
             status.insert(Certificate_Status_Code::CRL_BAD_SIGNATURE);
          } else {
-            status.insert(Certificate_Status_Code::VALID_CRL_CHECKED);
+            /*
+            RFC 5280 5.2 "If a CRL contains a critical extension that the
+            application cannot process, then the application MUST NOT use that
+            CRL to determine the status of certificates."
 
-            if(crls[i]->is_revoked(subject)) {
+            RFC 5280 5.3 "If a CRL contains a critical CRL entry extension that
+            the application cannot process, then the application MUST NOT use
+            that CRL to determine the status of any certificates."
+            */
+            const bool crl_is_not_usable = crls[i]->has_unknown_critical_extension();
+
+            if(crl_is_not_usable) {
+               status.insert(Certificate_Status_Code::CRL_HAS_UNKNOWN_CRITICAL_EXTENSION);
+            } else if(crls[i]->is_revoked(subject)) {
+               // A reason-limited CRL that lists the cert still proves the
+               // cert is revoked (the cert was revoked for whichever reason
+               // the CRL covers). Surface CERT_IS_REVOKED regardless of
+               // full-coverage status.
                status.insert(Certificate_Status_Code::CERT_IS_REVOKED);
+            } else if(applic.full_coverage) {
+               // Cert not listed AND the CRL covers every reason: positive
+               // non-revocation evidence.
+               status.insert(Certificate_Status_Code::VALID_CRL_CHECKED);
             }
-
-            if(!crls[i]->has_matching_distribution_point(subject)) {
-               status.insert(Certificate_Status_Code::NO_MATCHING_CRLDP);
-            }
-
-            for(const auto& [extension, critical] : crls[i]->extensions().extensions()) {
-               if(critical) {
-                  /* NIST Certificate Path Validation Testing document: "When an implementation does
-                  * not recognize a critical extension in the crlExtensions field, it shall assume
-                  * that identified certificates have been revoked and are no longer valid"
-                  */
-                  if(dynamic_cast<const Cert_Extension::Unknown_Extension*>(extension.get()) != nullptr) {
-                     status.insert(Certificate_Status_Code::CERT_IS_REVOKED);
-                  }
-               }
-            }
+            // else: cert not listed but CRL only covers some reasons. No
+            // positive evidence is recorded; the caller's policy (strict
+            // revocation -> NO_REVOCATION_DATA, soft fail -> validates)
+            // decides what happens next.
          }
       }
    }
@@ -53259,6 +58452,9 @@ CertificatePathStatusCodes PKIX::check_crl(const std::vector<X509_Certificate>& 
    std::vector<std::optional<X509_CRL>> crls(cert_path.size());
 
    for(size_t i = 0; i != cert_path.size(); ++i) {
+      if(cert_path[i].skip_revocation_check()) {
+         continue;
+      }
       for(auto* certstore : certstores) {
          crls[i] = certstore->find_crl_for(cert_path[i]);
          if(crls[i]) {
@@ -53296,32 +58492,49 @@ CertificatePathStatusCodes PKIX::check_ocsp_online(const std::vector<X509_Certif
       const auto& subject = cert_path.at(i);
       const auto& issuer = cert_path.at(i + 1);
 
-      if(subject.ocsp_responder().empty()) {
-         ocsp_response_futures.emplace_back(std::async(std::launch::deferred, []() -> std::optional<OCSP::Response> {
-            return OCSP::Response(Certificate_Status_Code::OCSP_NO_REVOCATION_URL);
-         }));
-      } else {
-         auto ocsp_url = subject.ocsp_responder();
-         auto ocsp_req = OCSP::Request(issuer, BigInt::from_bytes(subject.serial_number()));
+      if(subject.skip_revocation_check()) {
          ocsp_response_futures.emplace_back(
-            std::async(std::launch::async, [ocsp_url, ocsp_req, timeout]() -> std::optional<OCSP::Response> {
-               HTTP::Response http;
-               try {
-                  http = HTTP::POST_sync(ocsp_url,
-                                         "application/ocsp-request",
-                                         ocsp_req.BER_encode(),
-                                         /*redirects*/ 1,
-                                         timeout);
+            std::async(std::launch::deferred, []() -> std::optional<OCSP::Response> { return std::nullopt; }));
+      } else {
+         const auto ocsp_urls = URI::filter_scheme("http", subject.ocsp_responder_uris());
 
-                  if(http.status_code() != 200) {
-                     return OCSP::Response(Certificate_Status_Code::OCSP_SERVER_NOT_AVAILABLE);
-                  }
-
-                  return OCSP::Response(http.body());
-               } catch(std::exception&) {
-                  return OCSP::Response(Certificate_Status_Code::OCSP_SERVER_NOT_AVAILABLE);
-               }
+         if(ocsp_urls.empty()) {
+            ocsp_response_futures.emplace_back(std::async(std::launch::deferred, []() -> std::optional<OCSP::Response> {
+               return OCSP::Response::dummy_no_revocation_url_response();
             }));
+         } else {
+            auto ocsp_req = OCSP::Request(issuer, subject);
+            ocsp_response_futures.emplace_back(
+               std::async(std::launch::async, [ocsp_urls, ocsp_req, timeout]() -> std::optional<OCSP::Response> {
+                  HTTP::Response http;
+                  try {
+                     http = HTTP::POST_sync(ocsp_urls[0],
+                                            "application/ocsp-request",
+                                            ocsp_req.BER_encode(),
+                                            HTTP::RequestLimits().set_timeout(timeout).set_max_body_size(64 * 1024));
+
+                     if(http.status_code() != 200) {
+                        return OCSP::Response::dummy_server_not_available_response();
+                     }
+
+                     OCSP::Response response(http.body());
+
+                     /*
+                     * RFC 6960 2.3: "In case of errors, the OCSP responder may return an
+                     * error message. These messages are not signed." Since such responses
+                     * (eg tryLater) carry no revocation information, treat them the same
+                     * as the server being unavailable.
+                     */
+                     if(response.status() != OCSP::Response_Status_Code::Successful) {
+                        return OCSP::Response::dummy_server_not_available_response();
+                     }
+
+                     return response;
+                  } catch(std::exception&) {
+                     return OCSP::Response::dummy_server_not_available_response();
+                  }
+               }));
+         }
       }
    }
 
@@ -53352,6 +58565,13 @@ CertificatePathStatusCodes PKIX::check_crl_online(const std::vector<X509_Certifi
 
    for(size_t i = 0; i != cert_path.size(); ++i) {
       const auto& cert = cert_path.at(i);
+
+      if(cert.skip_revocation_check()) {
+         future_crls.emplace_back(
+            std::async(std::launch::deferred, []() -> std::optional<X509_CRL> { return std::nullopt; }));
+         continue;
+      }
+
       for(auto* certstore : certstores) {
          crls[i] = certstore->find_crl_for(cert);
          if(crls[i].has_value()) {
@@ -53368,22 +58588,23 @@ CertificatePathStatusCodes PKIX::check_crl_online(const std::vector<X509_Certifi
          so that indexes match up
          */
          future_crls.emplace_back(std::future<std::optional<X509_CRL>>());
-      } else if(cert.crl_distribution_point().empty()) {
-         // Avoid creating a thread for this case
-         future_crls.emplace_back(std::async(std::launch::deferred, []() -> std::optional<X509_CRL> {
-            throw Not_Implemented("No CRL distribution point for this certificate");
-         }));
       } else {
-         auto cdp = cert.crl_distribution_point();
-         future_crls.emplace_back(std::async(std::launch::async, [cdp, timeout]() -> std::optional<X509_CRL> {
-            auto http = HTTP::GET_sync(cdp,
-                                       /*redirects*/ 1,
-                                       timeout);
+         const auto cdp_uris = URI::filter_scheme("http", cert.crl_distribution_point_uris());
 
-            http.throw_unless_ok();
-            // check the mime type?
-            return X509_CRL(http.body());
-         }));
+         if(cdp_uris.empty()) {
+            future_crls.emplace_back(std::async(std::launch::deferred, []() -> std::optional<X509_CRL> {
+               throw Not_Implemented("No CRL distribution point for this certificate");
+            }));
+         } else {
+            future_crls.emplace_back(std::async(std::launch::async, [cdp_uris, timeout]() -> std::optional<X509_CRL> {
+               auto http = HTTP::GET_sync(
+                  cdp_uris[0], HTTP::RequestLimits().set_timeout(timeout).set_max_body_size(32 * 1024 * 1024));
+
+               http.throw_unless_ok();
+               // check the mime type?
+               return X509_CRL(http.body());
+            }));
+         }
       }
    }
 
@@ -53418,13 +58639,25 @@ CertificatePathStatusCodes PKIX::check_crl_online(const std::vector<X509_Certifi
 Certificate_Status_Code PKIX::build_certificate_path(std::vector<X509_Certificate>& cert_path,
                                                      const std::vector<Certificate_Store*>& trusted_certstores,
                                                      const X509_Certificate& end_entity,
-                                                     const std::vector<X509_Certificate>& end_entity_extra) {
-   CertificatePathBuilder builder(trusted_certstores, end_entity, end_entity_extra);
+                                                     const std::vector<X509_Certificate>& end_entity_extra,
+                                                     std::optional<size_t> max_paths) {
+   if(max_paths.has_value() && max_paths.value() == 0) {
+      return Certificate_Status_Code::EXCEEDED_SEARCH_LIMITS;
+   }
+
+   CertificatePathBuilder builder(
+      trusted_certstores, end_entity, end_entity_extra, PathBuildingDfsBudget, /*require_self_signed=*/false);
 
    std::vector<X509_Certificate> first_path;
+   size_t paths_examined = 0;
 
    while(auto path = builder.next()) {
       BOTAN_ASSERT_NOMSG(path->empty() == false);
+
+      if(max_paths.has_value() && paths_examined >= max_paths.value()) {
+         break;
+      }
+      paths_examined += 1;
 
       // Prefer paths ending in self-signed certificates.
       if(path->back().is_self_signed()) {
@@ -53451,14 +58684,20 @@ Certificate_Status_Code PKIX::build_certificate_path(std::vector<X509_Certificat
 Certificate_Status_Code PKIX::build_all_certificate_paths(std::vector<std::vector<X509_Certificate>>& cert_paths_out,
                                                           const std::vector<Certificate_Store*>& trusted_certstores,
                                                           const X509_Certificate& end_entity,
-                                                          const std::vector<X509_Certificate>& end_entity_extra) {
+                                                          const std::vector<X509_Certificate>& end_entity_extra,
+                                                          std::optional<size_t> max_paths) {
    if(!cert_paths_out.empty()) {
       throw Invalid_Argument("PKIX::build_all_certificate_paths: cert_paths_out must be empty");
    }
-   CertificatePathBuilder builder(trusted_certstores, end_entity, end_entity_extra);
+   CertificatePathBuilder builder(
+      trusted_certstores, end_entity, end_entity_extra, PathBuildingDfsBudget, /*require_self_signed=*/false);
 
    while(auto path = builder.next()) {
       BOTAN_ASSERT_NOMSG(path->empty() == false);
+      if(max_paths.has_value() && cert_paths_out.size() >= max_paths.value()) {
+         // More paths exist than the caller permitted us to enumerate
+         return Certificate_Status_Code::EXCEEDED_SEARCH_LIMITS;
+      }
       cert_paths_out.push_back(std::move(*path));
    }
 
@@ -53483,9 +58722,14 @@ void PKIX::merge_revocation_status(CertificatePathStatusCodes& chain_status,
       bool had_crl = false;
       bool had_ocsp = false;
 
+      // RFC 5280 6.3.3 treats revocation status as determined once cert_status
+      // is not UNREVOKED, so CERT_IS_REVOKED (whether from CRL or OCSP) is
+      // revocation evidence on a par with VALID_CRL_CHECKED / OCSP_RESPONSE_GOOD;
+      // omitting it would surface a spurious NO_REVOCATION_DATA alongside the
+      // revocation, e.g. when a reason-limited CRL lists the cert.
       if(i < crl_status.size() && !crl_status[i].empty()) {
          for(auto&& code : crl_status[i]) {
-            if(code == Certificate_Status_Code::VALID_CRL_CHECKED) {
+            if(code == Certificate_Status_Code::VALID_CRL_CHECKED || code == Certificate_Status_Code::CERT_IS_REVOKED) {
                had_crl = true;
             }
             chain_status[i].insert(code);
@@ -53494,10 +58738,16 @@ void PKIX::merge_revocation_status(CertificatePathStatusCodes& chain_status,
 
       if(i < ocsp_status.size() && !ocsp_status[i].empty()) {
          for(auto&& code : ocsp_status[i]) {
-            // NO_REVOCATION_URL and OCSP_SERVER_NOT_AVAILABLE are softfail
-            if(code == Certificate_Status_Code::OCSP_RESPONSE_GOOD ||
-               code == Certificate_Status_Code::OCSP_NO_REVOCATION_URL ||
-               code == Certificate_Status_Code::OCSP_SERVER_NOT_AVAILABLE) {
+            const bool was_definitive =
+               code == Certificate_Status_Code::OCSP_RESPONSE_GOOD || code == Certificate_Status_Code::CERT_IS_REVOKED;
+
+            const bool was_softfail = code == Certificate_Status_Code::OCSP_NO_REVOCATION_URL ||
+                                      code == Certificate_Status_Code::OCSP_SERVER_NOT_AVAILABLE ||
+                                      code == Certificate_Status_Code::OCSP_NO_HTTP;
+
+            const bool accepted_softfail = was_softfail && restrictions.accept_ocsp_softfail();
+
+            if(was_definitive || accepted_softfail) {
                had_ocsp = true;
             }
 
@@ -53547,17 +58797,12 @@ Path_Validation_Result x509_path_validate(const std::vector<X509_Certificate>& e
    }
 
    const X509_Certificate& end_entity = end_certs[0];
-   std::vector<X509_Certificate> end_entity_extra;
-   for(size_t i = 1; i < end_certs.size(); ++i) {
-      end_entity_extra.push_back(end_certs[i]);
-   }
+   const auto end_entity_extra = std::span<const X509_Certificate>(end_certs).subspan(1);
 
    const bool require_self_signed = restrictions.require_self_signed_trust_anchors();
 
-   CertificatePathBuilder builder(trusted_roots, end_entity, end_entity_extra, require_self_signed);
-
-   constexpr size_t max_paths = 50;
-   constexpr size_t max_verifications = 200;
+   CertificatePathBuilder builder(
+      trusted_roots, end_entity, end_entity_extra, PathBuildingDfsBudget, require_self_signed);
 
    std::optional<Path_Validation_Result> first_path_error;
    size_t paths_checked = 0;
@@ -53566,9 +58811,13 @@ Path_Validation_Result x509_path_validate(const std::vector<X509_Certificate>& e
    while(auto cert_path = builder.next()) {
       BOTAN_ASSERT_NOMSG(cert_path->empty() == false);
 
+      if(cert_path->size() > PathBuildingMaximumChainLength) {
+         continue;
+      }
+
       paths_checked += 1;
       certs_checked += cert_path->size();
-      if(paths_checked > max_paths || certs_checked > max_verifications) {
+      if(paths_checked > PathBuildingMaxPathsExamined || certs_checked > PathBuildingVerificationBudget) {
          first_path_error = Path_Validation_Result(Certificate_Status_Code::EXCEEDED_SEARCH_LIMITS);
          break;
       }
@@ -53589,6 +58838,9 @@ Path_Validation_Result x509_path_validate(const std::vector<X509_Certificate>& e
             const size_t to_online = restrictions.ocsp_all_intermediates() ? (cert_path->size() - 1) : 1;
             bool need_online = false;
             for(size_t i = 0; i < to_online; ++i) {
+               if((*cert_path)[i].skip_revocation_check()) {
+                  continue;
+               }
                if(i >= ocsp_status.size() || ocsp_status[i].empty()) {
                   need_online = true;
                   break;
@@ -53621,6 +58873,14 @@ Path_Validation_Result x509_path_validate(const std::vector<X509_Certificate>& e
          }
 
          PKIX::merge_revocation_status(status, crl_status, ocsp_status, restrictions);
+
+         // merge_revocation_status flags NO_REVOCATION_DATA when require_revocation
+         // is set; clear it for certs where RFC 9608 Section 4 says to skip the check.
+         for(size_t i = 0; i + 1 < cert_path->size() && i < status.size(); ++i) {
+            if((*cert_path)[i].skip_revocation_check()) {
+               status[i].erase(Certificate_Status_Code::NO_REVOCATION_DATA);
+            }
+         }
       }
 
       Path_Validation_Result pvd(status, std::move(*cert_path));
@@ -53692,14 +58952,16 @@ Path_Validation_Restrictions::Path_Validation_Restrictions(bool require_rev,
                                                            std::chrono::seconds max_ocsp_age,
                                                            std::unique_ptr<Certificate_Store> trusted_ocsp_responders,
                                                            bool ignore_trusted_root_time_range,
-                                                           bool require_self_signed_trust_anchors) :
+                                                           bool require_self_signed_trust_anchors,
+                                                           bool accept_ocsp_softfail) :
       m_require_revocation_information(require_rev),
       m_ocsp_all_intermediates(ocsp_intermediates),
       m_minimum_key_strength(key_strength),
       m_max_ocsp_age(max_ocsp_age),
       m_trusted_ocsp_responders(std::move(trusted_ocsp_responders)),
       m_ignore_trusted_root_time_range(ignore_trusted_root_time_range),
-      m_require_self_signed_trust_anchors(require_self_signed_trust_anchors) {
+      m_require_self_signed_trust_anchors(require_self_signed_trust_anchors),
+      m_accept_ocsp_softfail(accept_ocsp_softfail) {
    if(key_strength <= 80) {
       m_trusted_hashes.insert("SHA-1");
    }
@@ -53710,6 +58972,14 @@ Path_Validation_Restrictions::Path_Validation_Restrictions(bool require_rev,
    m_trusted_hashes.insert("SHA-512");
    m_trusted_hashes.insert("SHAKE-256(512)");  // Dilithium/ML-DSA
    m_trusted_hashes.insert("SHAKE-256(912)");  // Ed448
+
+   // SLH-DSA-SHAKE reports the H_msg output length, which depends on the parameter set
+   m_trusted_hashes.insert("SHAKE-256(240)");  // SLH-DSA-SHAKE-128s
+   m_trusted_hashes.insert("SHAKE-256(272)");  // SLH-DSA-SHAKE-128f
+   m_trusted_hashes.insert("SHAKE-256(312)");  // SLH-DSA-SHAKE-192s
+   m_trusted_hashes.insert("SHAKE-256(336)");  // SLH-DSA-SHAKE-192f
+   m_trusted_hashes.insert("SHAKE-256(376)");  // SLH-DSA-SHAKE-256s
+   m_trusted_hashes.insert("SHAKE-256(392)");  // SLH-DSA-SHAKE-256f
 }
 
 namespace {
@@ -53846,7 +59116,7 @@ auto create_alt_name_ext(const X509_Cert_Options& opts, const Extensions& extens
    subject_alt.add_uri(opts.uri);
    subject_alt.add_email(opts.email);
    if(!opts.ip.empty()) {
-      if(auto ipv4 = string_to_ipv4(opts.ip)) {
+      if(auto ipv4 = IPv4Address::from_string(opts.ip)) {
          subject_alt.add_ipv4_address(*ipv4);
       } else {
          throw Invalid_Argument(fmt("Invalid IPv4 address '{}'", opts.ip));
@@ -53892,7 +59162,7 @@ X509_Certificate create_self_signed_cert(const X509_Cert_Options& opts,
       extensions.add_new(std::make_unique<Cert_Extension::Key_Usage>(constraints), true);
    }
 
-   auto skid = std::make_unique<Cert_Extension::Subject_Key_ID>(pub_key, signer->hash_function());
+   auto skid = std::make_unique<Cert_Extension::Subject_Key_ID>(key);
 
    extensions.add_new(std::make_unique<Cert_Extension::Authority_Key_ID>(skid->get_key_id()));
    extensions.add_new(std::move(skid));
