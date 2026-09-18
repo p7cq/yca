@@ -15,6 +15,7 @@
 #include <botan/botan_all.h>
 
 #include "config.h"
+#include "store.h"
 
 namespace ca::detail {
 
@@ -39,8 +40,7 @@ Botan::X509_DN subject_dn(const cfg::Pki &pki, const std::string &cn,
 // (busy_timeout ≥ 5000 ms): even pure readers can hit SQLITE_BUSY
 // for a moment - e.g. the exclusive lock of the WAL checkpoint a closing
 // writer runs on exit - so every connection waits instead of failing instantly.
-std::shared_ptr<Botan::Sqlite3_Database>
-open_store(const std::filesystem::path &db);
+std::shared_ptr<store::Database> open_store(const std::filesystem::path &db);
 
 // One generation of one CA: the identity that names its artifacts
 // (<slug>.{pem,crt,crl}), its AIA/CDP URLs and its key label on the token.
@@ -63,20 +63,20 @@ struct CaGen {
 // `kind` ("root"/"signing") is kept beside `purpose` because the CRL
 // cadences, the refresh scopes and the revoke-ca refusal are all about the
 // anchor-versus-issuer distinction, not about which issuer.
-void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config);
+void ensure_ca_index(store::Database &db, const cfg::Config &config);
 
 // The active generation of the CA named by `purpose` ("root" for the
 // anchor). Until a rotation records generations, the store holds exactly
 // what the ceremony created, so the locked config answers it: generation 1.
 // Read-only.
-CaGen active_ca(Botan::SQL_Database &db, const cfg::Config &config,
+CaGen active_ca(store::Database &db, const cfg::Config &config,
                 const std::string &purpose);
 
 // The generation of `kind` carrying `cn`, whatever its status - the way
 // back from a certificate's issuer field to the CA that signed it. CNs
 // are unique across generations, so the match is exact. nullopt when the
 // store records no generations, or none by that name.
-std::optional<CaGen> gen_by_cn(Botan::SQL_Database &db, const std::string &kind,
+std::optional<CaGen> gen_by_cn(store::Database &db, const std::string &kind,
                                const std::string &cn);
 
 // Every generation of `kind` that still publishes a CRL: the active one
@@ -84,7 +84,7 @@ std::optional<CaGen> gen_by_cn(Botan::SQL_Database &db, const std::string &kind,
 // first. Revoked generations are left out - their CRL is moot. Expiry is
 // not a status here: it is read off the certificate, the way `list`
 // derives it for leaves.
-std::vector<CaGen> live_cas(Botan::SQL_Database &db, const cfg::Config &config,
+std::vector<CaGen> live_cas(store::Database &db, const cfg::Config &config,
                             const std::string &kind);
 
 // Loads a CA certificate from its published PEM (O(1)); avoids an O(N) scan
@@ -94,14 +94,14 @@ load_ca_cert(const std::filesystem::path &store_dir, const std::string &slug);
 
 // cert_index: queryable/indexed metadata table (Botan's store keeps the DER
 // blobs but is not indexed on the fields we filter/sort by).
-void ensure_cert_index(Botan::SQL_Database &db);
+void ensure_cert_index(store::Database &db);
 
 // Adds/updates a cert's metadata row. `kind` is the profile for a leaf
 // ("server"/"client") or "root"/"signing" for a CA; `purpose` is the CA's
 // own for a CA row, and the issuing CA's for a leaf, so a certificate can
 // be attributed to its issuer without walking the chain. status "active"
 // or "revoked".
-void index_cert(Botan::SQL_Database &db, const Botan::X509_Certificate &c,
+void index_cert(store::Database &db, const Botan::X509_Certificate &c,
                 const std::string &kind, const std::string &purpose,
                 const std::string &status = "active",
                 std::size_t revoked_at = 0);

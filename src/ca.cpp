@@ -29,6 +29,7 @@
 #include "log.h"
 #include "p11.h"
 #include "profile.h"
+#include "store.h"
 #include "util.h"
 #include "x509ext.h"
 
@@ -88,16 +89,14 @@ bool write_file(const std::filesystem::path &path, std::string_view bytes) {
 // waits (open_store) plus an immediate (reserved) transaction make
 // check-then-insert sequences atomic. Error paths simply return with the
 // transaction open - closing the connection rolls it back.
-void begin_write(Botan::SQL_Database &db) {
+void begin_write(store::Database &db) {
   // WAL: a long-running reader never blocks a CA write
   // and vice versa.
-  db.new_statement("PRAGMA journal_mode=WAL")->spin();
-  db.new_statement("BEGIN IMMEDIATE")->spin();
+  db.stmt("PRAGMA journal_mode=WAL")->spin();
+  db.stmt("BEGIN IMMEDIATE")->spin();
 }
 
-void commit_write(Botan::SQL_Database &db) {
-  db.new_statement("COMMIT")->spin();
-}
+void commit_write(store::Database &db) { db.stmt("COMMIT")->spin(); }
 
 } // namespace
 
@@ -108,10 +107,9 @@ std::filesystem::path store_path(const std::filesystem::path &store_dir) {
   return store_dir / app::store_file;
 }
 
-std::shared_ptr<Botan::Sqlite3_Database> open_store(const fs::path &db) {
-  auto dbh = std::make_shared<Botan::Sqlite3_Database>(db.string());
-  dbh->new_statement(
-         std::format("PRAGMA busy_timeout = {}", app::store_busy_timeout_ms))
+std::shared_ptr<store::Database> open_store(const fs::path &db) {
+  auto dbh = std::make_shared<store::Database>(db.string());
+  dbh->stmt(std::format("PRAGMA busy_timeout = {}", app::store_busy_timeout_ms))
       ->spin();
   return dbh;
 }
@@ -152,25 +150,25 @@ std::string kind_of(const std::string &purpose) {
   return purpose == "root" ? "root" : "signing";
 }
 
-bool has_table(Botan::SQL_Database &db, const std::string &name) {
-  auto s = db.new_statement(
-      "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1");
+bool has_table(store::Database &db, const std::string &name) {
+  auto s =
+      db.stmt("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1");
   s->bind(1, name);
   return s->step();
 }
 
-bool has_ca_index(Botan::SQL_Database &db) {
+bool has_ca_index(store::Database &db) {
   return has_table(db, "ca_cert_index");
 }
 
-void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config) {
+void ensure_ca_index(store::Database &db, const cfg::Config &config) {
   db.create_table("CREATE TABLE IF NOT EXISTS ca_cert_index ("
                   "kind TEXT NOT NULL, purpose TEXT NOT NULL, "
                   "gen INTEGER NOT NULL, cn TEXT NOT NULL, "
                   "slug TEXT NOT NULL, status TEXT NOT NULL, "
                   "PRIMARY KEY (kind, purpose, gen))");
-  db.new_statement("CREATE INDEX IF NOT EXISTS cai_kps ON "
-                   "ca_cert_index(kind, purpose, status)")
+  db.stmt("CREATE INDEX IF NOT EXISTS cai_kps ON "
+          "ca_cert_index(kind, purpose, status)")
       ->spin();
   // Generation 1 of every CA the ceremony created; record it so later
   // generations have a predecessor to succeed. Backfilled only for CAs
@@ -182,21 +180,21 @@ void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config) {
   for (const auto &[purpose, ca] : config.cas)
     purposes.push_back(purpose);
   for (const std::string &purpose : purposes) {
-    auto q = db.new_statement("SELECT 1 FROM ca_cert_index WHERE purpose=?1");
+    auto q = db.stmt("SELECT 1 FROM ca_cert_index WHERE purpose=?1");
     q->bind(1, purpose);
     if (q->step())
       continue;
     const CaGen g = config_gen(config, purpose);
     if (!indexed)
       continue;
-    auto issued = db.new_statement("SELECT 1 FROM cert_index WHERE cn=?1 AND "
-                                   "kind IN ('root','signing') LIMIT 1");
+    auto issued = db.stmt("SELECT 1 FROM cert_index WHERE cn=?1 AND "
+                          "kind IN ('root','signing') LIMIT 1");
     issued->bind(1, g.cn);
     if (!issued->step())
       continue;
-    auto ins = db.new_statement("INSERT INTO ca_cert_index "
-                                "(kind,purpose,gen,cn,slug,status) "
-                                "VALUES (?1,?2,?3,?4,?5,'active')");
+    auto ins = db.stmt("INSERT INTO ca_cert_index "
+                       "(kind,purpose,gen,cn,slug,status) "
+                       "VALUES (?1,?2,?3,?4,?5,'active')");
     ins->bind(1, kind_of(purpose));
     ins->bind(2, purpose);
     ins->bind(3, static_cast<std::size_t>(g.gen));
@@ -206,12 +204,12 @@ void ensure_ca_index(Botan::SQL_Database &db, const cfg::Config &config) {
   }
 }
 
-std::optional<CaGen> gen_by_cn(Botan::SQL_Database &db, const std::string &kind,
+std::optional<CaGen> gen_by_cn(store::Database &db, const std::string &kind,
                                const std::string &cn) {
   if (!has_ca_index(db))
     return std::nullopt;
-  auto q = db.new_statement("SELECT purpose,gen,cn,slug FROM ca_cert_index "
-                            "WHERE kind=?1 AND cn=?2 LIMIT 1");
+  auto q = db.stmt("SELECT purpose,gen,cn,slug FROM ca_cert_index "
+                   "WHERE kind=?1 AND cn=?2 LIMIT 1");
   q->bind(1, kind);
   q->bind(2, cn);
   if (!q->step())
@@ -220,15 +218,15 @@ std::optional<CaGen> gen_by_cn(Botan::SQL_Database &db, const std::string &kind,
                q->get_str(3)};
 }
 
-std::vector<CaGen> live_cas(Botan::SQL_Database &db, const cfg::Config &config,
+std::vector<CaGen> live_cas(store::Database &db, const cfg::Config &config,
                             const std::string &kind) {
   std::vector<CaGen> out;
   if (has_ca_index(db)) {
     // Ordered by purpose then generation: a scope covering several issuing
     // CAs walks each one's lineage oldest first.
-    auto q = db.new_statement("SELECT purpose,gen,cn,slug FROM ca_cert_index "
-                              "WHERE kind=?1 AND status IN "
-                              "('active','retiring') ORDER BY purpose, gen");
+    auto q = db.stmt("SELECT purpose,gen,cn,slug FROM ca_cert_index "
+                     "WHERE kind=?1 AND status IN "
+                     "('active','retiring') ORDER BY purpose, gen");
     q->bind(1, kind);
     while (q->step())
       out.push_back({q->get_str(0), static_cast<int>(q->get_size_t(1)),
@@ -244,13 +242,13 @@ std::vector<CaGen> live_cas(Botan::SQL_Database &db, const cfg::Config &config,
   return out;
 }
 
-CaGen active_ca(Botan::SQL_Database &db, const cfg::Config &config,
+CaGen active_ca(store::Database &db, const cfg::Config &config,
                 const std::string &purpose) {
   if (!has_ca_index(db))
     return config_gen(config, purpose);
-  auto q = db.new_statement("SELECT purpose,gen,cn,slug FROM ca_cert_index "
-                            "WHERE purpose=?1 AND status='active' "
-                            "ORDER BY gen DESC LIMIT 1");
+  auto q = db.stmt("SELECT purpose,gen,cn,slug FROM ca_cert_index "
+                   "WHERE purpose=?1 AND status='active' "
+                   "ORDER BY gen DESC LIMIT 1");
   q->bind(1, purpose);
   if (!q->step())
     return config_gen(config, purpose);
@@ -258,7 +256,7 @@ CaGen active_ca(Botan::SQL_Database &db, const cfg::Config &config,
                q->get_str(3)};
 }
 
-void ensure_cert_index(Botan::SQL_Database &db) {
+void ensure_cert_index(store::Database &db) {
   db.create_table(
       "CREATE TABLE IF NOT EXISTS cert_index ("
       "fingerprint TEXT PRIMARY KEY, cn TEXT NOT NULL, kind TEXT NOT NULL, "
@@ -283,13 +281,13 @@ void ensure_cert_index(Botan::SQL_Database &db) {
         "CREATE INDEX IF NOT EXISTS ci_sna ON cert_index(status, not_after)",
         "CREATE INDEX IF NOT EXISTS ci_knb ON cert_index(kind, not_before)",
         "CREATE INDEX IF NOT EXISTS ci_ski ON cert_index(ski)"})
-    db.new_statement(ix)->spin();
+    db.stmt(ix)->spin();
 }
 
-void index_cert(Botan::SQL_Database &db, const Botan::X509_Certificate &c,
+void index_cert(store::Database &db, const Botan::X509_Certificate &c,
                 const std::string &kind, const std::string &purpose,
                 const std::string &status, std::size_t revoked_at) {
-  auto s = db.new_statement(
+  auto s = db.stmt(
       "INSERT OR REPLACE INTO cert_index "
       "(fingerprint,cn,kind,serial,not_before,not_after,status,revoked_at,"
       "ski,aki,purpose) "
@@ -365,12 +363,12 @@ namespace detail {
 // requires. One indexed query (ci_sna) collects the prunable serials; an
 // entry whose serial is not in cert_index never lands in the set, so it is
 // kept forever, matching the rule's unknown-serial case.
-std::vector<Botan::CRL_Entry> prune_crl_entries(Botan::SQL_Database &db,
+std::vector<Botan::CRL_Entry> prune_crl_entries(store::Database &db,
                                                 const Botan::X509_CRL &prev) {
   const auto tu =
       static_cast<std::size_t>(prev.this_update().time_since_epoch());
   std::unordered_set<std::string> prunable;
-  auto q = db.new_statement(
+  auto q = db.stmt(
       "SELECT serial FROM cert_index WHERE status='revoked' AND not_after<?1");
   q->bind(1, tu);
   while (q->step())
@@ -593,10 +591,9 @@ std::string fmt_epoch(std::size_t e) {
 // Fingerprint of the NEWEST active cert for (cn, kind), via cert_index.
 // During a renewal overlap two certs are active; get/revoke operate on the
 // newest one (revoke again to clear the older).
-std::optional<std::string> active_fp(Botan::SQL_Database &db,
-                                     const std::string &cn,
+std::optional<std::string> active_fp(store::Database &db, const std::string &cn,
                                      const std::string &kind) {
-  auto q = db.new_statement(
+  auto q = db.stmt(
       "SELECT fingerprint FROM cert_index WHERE cn=?1 AND kind=?2 AND "
       "status='active' AND not_after>?3 ORDER BY not_before DESC LIMIT 1");
   q->bind(1, cn);
@@ -610,10 +607,10 @@ std::optional<std::string> active_fp(Botan::SQL_Database &db,
 // Fingerprint of the active cert with `serial` (uppercase minimal hex, the
 // store contract's format) and `kind` - the exact-certificate selector:
 // during a renewal overlap by-CN means "the newest", by-serial is precise.
-std::optional<std::string> active_fp_by_serial(Botan::SQL_Database &db,
+std::optional<std::string> active_fp_by_serial(store::Database &db,
                                                const std::string &serial,
                                                const std::string &kind) {
-  auto q = db.new_statement(
+  auto q = db.stmt(
       "SELECT fingerprint FROM cert_index WHERE serial=?1 AND kind=?2 AND "
       "status='active' AND not_after>?3 LIMIT 1");
   q->bind(1, serial);
@@ -648,12 +645,12 @@ std::string normalize_serial(const std::string &s) {
 // app::renew_window_pct of its lifetime left. The overlap is what automated
 // rotation needs; the superseded cert is left to expire, never auto-revoked
 // (it may still be serving during the rollout).
-bool blocking_duplicate(Botan::SQL_Database &db, const std::string &cn,
+bool blocking_duplicate(store::Database &db, const std::string &cn,
                         const std::string &kind) {
-  auto q = db.new_statement(
-      "SELECT COUNT(*) FROM cert_index WHERE cn=?1 AND kind=?2 AND "
-      "status='active' AND not_after>?3 AND "
-      "(not_after - ?3) * 100 > (not_after - not_before) * ?4");
+  auto q =
+      db.stmt("SELECT COUNT(*) FROM cert_index WHERE cn=?1 AND kind=?2 AND "
+              "status='active' AND not_after>?3 AND "
+              "(not_after - ?3) * 100 > (not_after - not_before) * ?4");
   q->bind(1, cn);
   q->bind(2, kind);
   q->bind(3, now_epoch());
@@ -668,10 +665,9 @@ bool blocking_duplicate(Botan::SQL_Database &db, const std::string &cn,
 }
 
 // Loads a stored certificate (DER blob) by its SHA-256 fingerprint.
-std::optional<Botan::X509_Certificate> load_cert(Botan::SQL_Database &db,
+std::optional<Botan::X509_Certificate> load_cert(store::Database &db,
                                                  const std::string &fp) {
-  auto q = db.new_statement(
-      "SELECT certificate FROM certificates WHERE fingerprint=?1");
+  auto q = db.stmt("SELECT certificate FROM certificates WHERE fingerprint=?1");
   q->bind(1, fp);
   if (!q->step())
     return std::nullopt;
@@ -696,15 +692,15 @@ std::string aki_of(const Botan::X509_Certificate &c) {
 // and the visited set is what bounds the walk; cross-certificates make the
 // issuer a graph, not a tree.
 std::vector<Botan::X509_Certificate>
-issuers_above(Botan::SQL_Database &db, Botan::X509_Certificate cert) {
+issuers_above(store::Database &db, Botan::X509_Certificate cert) {
   std::vector<Botan::X509_Certificate> out;
   std::unordered_set<std::string> seen{cert.fingerprint("SHA-256")};
   for (;;) {
     const std::string aki = aki_of(cert);
     if (aki.empty() || aki == ski_of(cert)) // self-signed: nothing above it
       return out;
-    auto q = db.new_statement("SELECT fingerprint FROM cert_index WHERE ski=?1 "
-                              "ORDER BY fingerprint LIMIT 1");
+    auto q = db.stmt("SELECT fingerprint FROM cert_index WHERE ski=?1 "
+                     "ORDER BY fingerprint LIMIT 1");
     q->bind(1, aki);
     if (!q->step())
       return out;
@@ -788,7 +784,7 @@ KeyValues locked_purpose(const cfg::SigningCa &ca) {
   };
 }
 
-void ensure_purpose_table(Botan::SQL_Database &db) {
+void ensure_purpose_table(store::Database &db) {
   db.create_table(std::format("CREATE TABLE IF NOT EXISTS {} ("
                               "purpose TEXT PRIMARY KEY, profiles TEXT NOT "
                               "NULL, cn TEXT NOT NULL, curve TEXT NOT NULL, "
@@ -806,8 +802,8 @@ void ensure_purpose_table(Botan::SQL_Database &db) {
 
 // Locks one issuing CA. Called for each CA the ceremony creates, and later
 // for each one added to an initialized store.
-void lock_purpose(Botan::SQL_Database &db, const cfg::SigningCa &ca) {
-  auto ins = db.new_statement(
+void lock_purpose(store::Database &db, const cfg::SigningCa &ca) {
+  auto ins = db.stmt(
       std::format("INSERT INTO {} (purpose,profiles,cn,curve,digest,valid_days,"
                   "slug_prefix,slug,key_backend,token_label,ee_curve,ee_digest,"
                   "ee_valid_days,simple_dn,permitted_dns,permitted_email) "
@@ -1077,7 +1073,7 @@ bool create(const cfg::Config &config, const fs::path &db_path,
   // 0600: holds the encrypted CA keys, and the store must stay writable.
   set_perms(db_path, fs::perms::owner_read | fs::perms::owner_write);
   // New stores start in WAL directly (see begin_write).
-  db->new_statement("PRAGMA journal_mode=WAL")->spin();
+  db->stmt("PRAGMA journal_mode=WAL")->spin();
   Botan::Certificate_Store_In_SQL store(db, secrets.passphrase, rng);
   store.insert_cert(root_cert);
   // pkcs11 keys never leave their token; internal keys persist encrypted.
@@ -1093,7 +1089,7 @@ bool create(const cfg::Config &config, const fs::path &db_path,
                                "key TEXT PRIMARY KEY, value TEXT NOT NULL)",
                                app::config_table));
   for (const auto &[k, v] : locked_global(config)) {
-    auto cins = db->new_statement(std::format(
+    auto cins = db->stmt(std::format(
         "INSERT INTO {} (key, value) VALUES (?1, ?2)", app::config_table));
     cins->bind(1, k);
     cins->bind(2, v);
@@ -1233,7 +1229,7 @@ mint_ca_generation(const cfg::Config &config, const fs::path &store_dir,
 // "signing-ca" keeps working while exactly one issuing CA exists; with
 // several it names nothing in particular and the aliases are listed
 // instead. Empty on failure, with the error already logged.
-std::string resolve_ca_cn(Botan::SQL_Database &db, const cfg::Config &config,
+std::string resolve_ca_cn(store::Database &db, const cfg::Config &config,
                           const std::string &selector) {
   if (selector == "root-ca")
     return active_ca(db, config, "root").cn;
@@ -1258,7 +1254,7 @@ std::string resolve_ca_cn(Botan::SQL_Database &db, const cfg::Config &config,
 
 // A CN identifies a generation in cert_index and in a CRL's issuer field,
 // so no two CAs, of any purpose or generation, may share one.
-bool cn_is_taken(Botan::SQL_Database &db, const CaGen &root,
+bool cn_is_taken(store::Database &db, const CaGen &root,
                  const std::string &cn) {
   if (cn == root.cn || gen_by_cn(db, "signing", cn) ||
       gen_by_cn(db, "root", cn)) {
@@ -1283,7 +1279,7 @@ bool is_initialized(const fs::path &store_dir) {
   try {
     auto h = open_store(db);
     auto locked = [&](const char *key) {
-      auto s = h->new_statement(
+      auto s = h->stmt(
           std::format("SELECT value FROM {} WHERE key=?1", app::config_table));
       s->bind(1, key);
       return s->step() ? s->get_str(0) : std::string();
@@ -1295,8 +1291,8 @@ bool is_initialized(const fs::path &store_dir) {
     // later became of an anchor does not unmake it. What still
     // matters is that the anchors the config names were actually issued.
     auto anchor = [&](const std::string &kind, const std::string &cn) {
-      auto s = h->new_statement(
-          "SELECT 1 FROM cert_index WHERE kind=?1 AND cn=?2 LIMIT 1");
+      auto s =
+          h->stmt("SELECT 1 FROM cert_index WHERE kind=?1 AND cn=?2 LIMIT 1");
       s->bind(1, kind);
       s->bind(2, cn);
       return s->step();
@@ -1305,8 +1301,7 @@ bool is_initialized(const fs::path &store_dir) {
       return false;
     // Every locked issuing CA must have been issued too; a store with no
     // issuing CA at all never finished a ceremony.
-    auto cas =
-        h->new_statement(std::format("SELECT cn FROM {}", app::purpose_table));
+    auto cas = h->stmt(std::format("SELECT cn FROM {}", app::purpose_table));
     bool any = false;
     while (cas->step()) {
       any = true;
@@ -1413,7 +1408,7 @@ bool add_signing_ca(const cfg::Config &config, const fs::path &store_dir,
   ensure_ca_index(*dbh, config);
   ensure_purpose_table(*dbh);
 
-  auto held = dbh->new_statement(
+  auto held = dbh->stmt(
       std::format("SELECT 1 FROM {} WHERE purpose=?1", app::purpose_table));
   held->bind(1, purpose);
   if (held->step()) {
@@ -1442,9 +1437,9 @@ bool add_signing_ca(const cfg::Config &config, const fs::path &store_dir,
   // The section is locked as it is created, which is the whole point: the
   // rest of the config stays frozen and this one joins it.
   lock_purpose(*dbh, *ca_cfg);
-  auto ins = dbh->new_statement("INSERT INTO ca_cert_index "
-                                "(kind,purpose,gen,cn,slug,status) "
-                                "VALUES ('signing',?1,1,?2,?3,'active')");
+  auto ins = dbh->stmt("INSERT INTO ca_cert_index "
+                       "(kind,purpose,gen,cn,slug,status) "
+                       "VALUES ('signing',?1,1,?2,?3,'active')");
   ins->bind(1, purpose);
   ins->bind(2, next.cn);
   ins->bind(3, next.slug);
@@ -1510,13 +1505,13 @@ bool renew_signing_ca(const cfg::Config &config, const fs::path &store_dir,
   index_cert(*dbh, cert, "signing", next.purpose);
   // Only this CA's lineage retires: a rotation of one issuing CA leaves
   // every other purpose alone.
-  auto retire = dbh->new_statement("UPDATE ca_cert_index SET status='retiring' "
-                                   "WHERE purpose=?1 AND status='active'");
+  auto retire = dbh->stmt("UPDATE ca_cert_index SET status='retiring' "
+                          "WHERE purpose=?1 AND status='active'");
   retire->bind(1, next.purpose);
   retire->spin();
-  auto ins = dbh->new_statement("INSERT INTO ca_cert_index "
-                                "(kind,purpose,gen,cn,slug,status) "
-                                "VALUES ('signing',?1,?2,?3,?4,'active')");
+  auto ins = dbh->stmt("INSERT INTO ca_cert_index "
+                       "(kind,purpose,gen,cn,slug,status) "
+                       "VALUES ('signing',?1,?2,?3,?4,'active')");
   ins->bind(1, next.purpose);
   ins->bind(2, static_cast<std::size_t>(next.gen));
   ins->bind(3, next.cn);
@@ -1537,8 +1532,8 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
     return std::nullopt;
   auto dbh = open_store(db);
   std::map<std::string, std::string> m;
-  auto sel = dbh->new_statement(
-      std::format("SELECT key, value FROM {}", app::config_table));
+  auto sel =
+      dbh->stmt(std::format("SELECT key, value FROM {}", app::config_table));
   while (sel->step())
     m.emplace(sel->get_str(0), sel->get_str(1));
   if (m.empty())
@@ -1571,7 +1566,7 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
   c.root.key_backend = S("root.key_backend");
   c.root.token_label = S("root.token_label");
 
-  auto cas = dbh->new_statement(std::format(
+  auto cas = dbh->stmt(std::format(
       "SELECT purpose,profiles,cn,curve,digest,valid_days,slug_prefix,slug,"
       "key_backend,token_label,ee_curve,ee_digest,ee_valid_days,simple_dn,"
       "permitted_dns,permitted_email FROM {}",
@@ -1846,7 +1841,7 @@ namespace {
 // The enrollment table backs identity validation for CSR signing: one row per
 // identity, holding at most one pending nonce. `consumed` defaults to true so
 // a row is in the "nothing pending" state until a `get nonce`.
-void ensure_enrollment(Botan::SQL_Database &db) {
+void ensure_enrollment(store::Database &db) {
   db.create_table("CREATE TABLE IF NOT EXISTS enrollment ("
                   "id TEXT PRIMARY KEY, role TEXT NOT NULL DEFAULT 'ee', "
                   "created INTEGER NOT NULL, nonce TEXT, "
@@ -1905,14 +1900,14 @@ bool enroll(const fs::path &store_dir, const std::string &id) {
   begin_write(*dbh);
   ensure_enrollment(*dbh);
   {
-    auto q = dbh->new_statement("SELECT 1 FROM enrollment WHERE id=?1");
+    auto q = dbh->stmt("SELECT 1 FROM enrollment WHERE id=?1");
     q->bind(1, id);
     if (q->step()) {
       log::error("identity '{}' is already enrolled", id);
       return false;
     }
   }
-  auto ins = dbh->new_statement(
+  auto ins = dbh->stmt(
       "INSERT INTO enrollment (id, role, created) VALUES (?1, 'ee', ?2)");
   ins->bind(1, id);
   ins->bind(2, now_epoch());
@@ -1933,8 +1928,8 @@ bool get_nonce(const fs::path &store_dir, const std::string &id) {
   begin_write(*dbh);
   ensure_enrollment(*dbh);
 
-  auto q = dbh->new_statement("SELECT IFNULL(nonce,''), issued, validity, "
-                              "consumed FROM enrollment WHERE id=?1");
+  auto q = dbh->stmt("SELECT IFNULL(nonce,''), issued, validity, "
+                     "consumed FROM enrollment WHERE id=?1");
   q->bind(1, id);
   if (!q->step()) {
     log::error("identity '{}' is not enrolled; run '{} enroll --id ...'", id,
@@ -1966,8 +1961,8 @@ bool get_nonce(const fs::path &store_dir, const std::string &id) {
   std::vector<uint8_t> raw(app::nonce_bytes);
   rng.randomize(raw.data(), raw.size());
   const std::string nonce = Botan::hex_encode(raw, /*uppercase=*/false);
-  auto u = dbh->new_statement("UPDATE enrollment SET nonce=?1, issued=?2, "
-                              "validity=?3, consumed=0 WHERE id=?4");
+  auto u = dbh->stmt("UPDATE enrollment SET nonce=?1, issued=?2, "
+                     "validity=?3, consumed=0 WHERE id=?4");
   u->bind(1, nonce);
   u->bind(2, now);
   u->bind(3, static_cast<std::size_t>(app::max_nonce_validity));
@@ -2148,8 +2143,8 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   ensure_cert_index(*dbh);
   ensure_enrollment(*dbh);
   auto nonce_rejected = [&] {
-    auto q = dbh->new_statement("SELECT IFNULL(nonce,''), issued, validity, "
-                                "consumed FROM enrollment WHERE id=?1");
+    auto q = dbh->stmt("SELECT IFNULL(nonce,''), issued, validity, "
+                       "consumed FROM enrollment WHERE id=?1");
     q->bind(1, id);
     if (!q->step()) {
       log::error("identity '{}' is not enrolled", id);
@@ -2211,8 +2206,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
 
   store.insert_cert(ee_cert);
   index_cert(*dbh, ee_cert, profile, sign.purpose);
-  auto consume =
-      dbh->new_statement("UPDATE enrollment SET consumed=1 WHERE id=?1");
+  auto consume = dbh->stmt("UPDATE enrollment SET consumed=1 WHERE id=?1");
   consume->bind(1, id);
   consume->spin();
   commit_write(*dbh);
@@ -2250,7 +2244,7 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   // below repeats the lookup authoritatively.
   const std::string &subject_cn = cn;
   const std::string sel = normalize_serial(serial);
-  auto lookup = [&](Botan::SQL_Database &d) {
+  auto lookup = [&](store::Database &d) {
     return sel.empty() ? active_fp(d, subject_cn, target)
                        : active_fp_by_serial(d, sel, target);
   };
@@ -2356,8 +2350,8 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   // Keep the Botan store's own revocation state in sync (its `revoked` table
   // feeds generate_crls()); cert_index stays the query path.
   store.revoke_cert(*target_cert, *reason);
-  auto u = dbh->new_statement("UPDATE cert_index SET status='revoked', "
-                              "revoked_at=?1, reason=?2 WHERE fingerprint=?3");
+  auto u = dbh->stmt("UPDATE cert_index SET status='revoked', "
+                     "revoked_at=?1, reason=?2 WHERE fingerprint=?3");
   u->bind(1, now_epoch());
   u->bind(2, static_cast<std::size_t>(*reason));
   u->bind(3, *fp);
@@ -2439,7 +2433,7 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
   const std::string victim_fp = victim_cert->fingerprint("SHA-256");
-  auto already = dbh->new_statement(
+  auto already = dbh->stmt(
       "SELECT 1 FROM cert_index WHERE fingerprint=?1 AND status='revoked'");
   already->bind(1, victim_fp);
   if (already->step()) {
@@ -2491,14 +2485,14 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
   }
 
   store.revoke_cert(*victim_cert, *reason);
-  auto u = dbh->new_statement("UPDATE cert_index SET status='revoked', "
-                              "revoked_at=?1, reason=?2 WHERE fingerprint=?3");
+  auto u = dbh->stmt("UPDATE cert_index SET status='revoked', "
+                     "revoked_at=?1, reason=?2 WHERE fingerprint=?3");
   u->bind(1, now_epoch());
   u->bind(2, static_cast<std::size_t>(*reason));
   u->bind(3, victim_fp);
   u->spin();
-  auto g = dbh->new_statement("UPDATE ca_cert_index SET status='revoked' "
-                              "WHERE kind='signing' AND gen=?1");
+  auto g = dbh->stmt("UPDATE ca_cert_index SET status='revoked' "
+                     "WHERE kind='signing' AND gen=?1");
   g->bind(1, static_cast<std::size_t>(victim->gen));
   g->spin();
   commit_write(*dbh);
@@ -2755,7 +2749,7 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
       kind = "root";
     else if (selector != cn)
       kind = "signing"; // an alias resolved to a generation of that purpose
-    auto q = dbh->new_statement(
+    auto q = dbh->stmt(
         kind.empty()
             ? "SELECT fingerprint FROM cert_index WHERE cn=?1 AND "
               "kind IN ('root','signing') LIMIT 1"
@@ -2799,44 +2793,42 @@ bool list_certs(const fs::path &store_dir, const std::string &filter, int days,
   // One row past the cap detects truncation without a COUNT(*) pass; the
   // ORDER BY of every filter rides an index, so the query stops early.
   const std::string lim = limit > 0 ? std::format(" LIMIT {}", limit + 1) : "";
-  std::shared_ptr<Botan::SQL_Database::Statement> q;
+  std::shared_ptr<store::Statement> q;
   if (filter == "expiring") {
-    q = dbh->new_statement(cols +
-                           "WHERE status='active' AND not_after>?1 AND "
-                           "not_after<=?2 ORDER BY not_after DESC" +
-                           lim);
+    q = dbh->stmt(cols +
+                  "WHERE status='active' AND not_after>?1 AND "
+                  "not_after<=?2 ORDER BY not_after DESC" +
+                  lim);
     q->bind(1, now);
     q->bind(2, now + win);
   } else if (filter == "expired") {
-    q = dbh->new_statement(cols +
-                           "WHERE status='active' AND not_after<?1 AND "
-                           "not_after>=?2 ORDER BY not_after DESC" +
-                           lim);
+    q = dbh->stmt(cols +
+                  "WHERE status='active' AND not_after<?1 AND "
+                  "not_after>=?2 ORDER BY not_after DESC" +
+                  lim);
     q->bind(1, now);
     q->bind(2, now - win);
   } else if (filter == "revoked") {
-    q = dbh->new_statement(cols +
-                           "WHERE status='revoked' AND revoked_at>=?1 "
-                           "ORDER BY revoked_at DESC" +
-                           lim);
+    q = dbh->stmt(cols +
+                  "WHERE status='revoked' AND revoked_at>=?1 "
+                  "ORDER BY revoked_at DESC" +
+                  lim);
     q->bind(1, now - win);
   } else if (filter == "last") {
-    q = dbh->new_statement(cols +
-                           "WHERE not_before<=?1 AND not_before>=?2 "
-                           "ORDER BY not_before DESC" +
-                           lim);
+    q = dbh->stmt(cols +
+                  "WHERE not_before<=?1 AND not_before>=?2 "
+                  "ORDER BY not_before DESC" +
+                  lim);
     q->bind(1, now);
     q->bind(2, now - win);
   } else { // cn
     // A CA alias selects the role, so every generation of it is listed; a
     // literal CN selects exactly that name.
     if (cn == "root-ca" || cn == "signing-ca") {
-      q = dbh->new_statement(cols + "WHERE kind=?1 ORDER BY not_before DESC" +
-                             lim);
+      q = dbh->stmt(cols + "WHERE kind=?1 ORDER BY not_before DESC" + lim);
       q->bind(1, std::string(cn == "root-ca" ? "root" : "signing"));
     } else {
-      q = dbh->new_statement(cols + "WHERE cn=?1 ORDER BY not_before DESC" +
-                             lim);
+      q = dbh->stmt(cols + "WHERE cn=?1 ORDER BY not_before DESC" + lim);
       q->bind(1, cn);
     }
   }

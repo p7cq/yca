@@ -75,13 +75,14 @@ add_executable(
   src/config.cpp
   src/ca.cpp
   src/p11.cpp
+  src/store.cpp
   src/util.cpp
   src/x509ext.cpp)
 
 # Load-test seeder is a separate binary
 add_executable(${PROJECT_NAME}-seed src/seed_main.cpp src/seed.cpp
                                     src/config.cpp src/ca.cpp src/p11.cpp
-                                    src/util.cpp src/x509ext.cpp)
+                                    src/store.cpp src/util.cpp src/x509ext.cpp)
 
 foreach(tgt IN ITEMS ${PROJECT_NAME} ${PROJECT_NAME}-seed)
   target_compile_definitions(${tgt} PRIVATE APP_VERSION="${PROJECT_VERSION}")
@@ -118,7 +119,7 @@ add_custom_target(
 # build in the main target). doctest.h is on -isystem via third_party.
 add_executable(${PROJECT_NAME}_tests tests/unit_test.cpp src/config.cpp
                                      src/util.cpp src/ca.cpp src/p11.cpp
-                                     src/x509ext.cpp)
+                                     src/store.cpp src/x509ext.cpp)
 target_include_directories(${PROJECT_NAME}_tests
                            PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_include_directories(${PROJECT_NAME}_tests SYSTEM

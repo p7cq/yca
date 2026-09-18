@@ -115,7 +115,7 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
     }
   };
 
-  dbh->new_statement("BEGIN")->spin();
+  dbh->stmt("BEGIN")->spin();
   for (int i = 0; i < count; ++i) {
     const bool server = (i % 10) < 6; // 60% server, 40% client
     const int b = i % 20;
@@ -124,14 +124,14 @@ bool seed(const cfg::Config &config, const fs::path &store_dir,
     emit_cert((server ? "s" : "c") + std::to_string(i) + ".test.ca", server,
               status);
     if ((i + 1) % 10000 == 0) {
-      dbh->new_statement("COMMIT")->spin();
-      dbh->new_statement("BEGIN")->spin();
+      dbh->stmt("COMMIT")->spin();
+      dbh->stmt("BEGIN")->spin();
       log::to_stdout("seeded {} / {}", i + 1, count); // progress, not audit
     }
   }
   for (int j = 0; j < same_cn; ++j) // all but the last revoked
     emit_cert("same.test.ca", true, (j == same_cn - 1) ? 'a' : 'r');
-  dbh->new_statement("COMMIT")->spin();
+  dbh->stmt("COMMIT")->spin();
 
   const fs::path crl_path = store_dir / "ca" / (sign.slug + ".crl");
   Botan::X509_CRL prev(crl_path.string());

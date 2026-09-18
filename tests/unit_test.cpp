@@ -14,6 +14,7 @@
 #include "ca_detail.h"
 #include "config.h"
 #include "log.h"
+#include "store.h"
 #include "util.h"
 #include "x509ext.h"
 
@@ -113,6 +114,94 @@ TEST_CASE("parse_duration") {
   CHECK_FALSE(util::parse_duration("-5m"));   // negative
   CHECK_FALSE(util::parse_duration("0s"));    // zero
   CHECK_FALSE(util::parse_duration("1h30m")); // single unit only
+}
+
+// --- store (SQLite wrapper) ---
+
+TEST_CASE("store::Database: create_table, insert, select round-trip") {
+  const auto path = std::filesystem::temp_directory_path() / "yca_store_ut.db";
+  std::filesystem::remove(path);
+  store::Database db(path.string());
+  db.create_table(
+      "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL)");
+
+  auto ins = db.stmt("INSERT INTO t (id, name) VALUES (?1, ?2)");
+  ins->bind(1, static_cast<std::size_t>(1));
+  ins->bind(2, std::string_view("alice"));
+  ins->spin();
+
+  auto sel = db.stmt("SELECT id, name FROM t WHERE id=?1");
+  sel->bind(1, static_cast<std::size_t>(1));
+  REQUIRE(sel->step());
+  CHECK(sel->get_size_t(0) == 1u);
+  CHECK(sel->get_str(1) == "alice");
+  CHECK_FALSE(sel->step()); // exhausted after the one row
+
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("store::Statement::get_blob round-trips binary data") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "yca_store_blob_ut.db";
+  std::filesystem::remove(path);
+  store::Database db(path.string());
+  db.create_table("CREATE TABLE b (id INTEGER PRIMARY KEY, data BLOB)");
+
+  // No blob bind overload on store::Statement (yca's own tables never write
+  // one directly - Botan::Certificate_Store_In_SQL does, through
+  // Database::new_statement() below); insert the blob literal instead.
+  db.stmt("INSERT INTO b (id, data) VALUES (1, x'00ff10')")->spin();
+  db.stmt("INSERT INTO b (id, data) VALUES (2, NULL)")->spin();
+
+  auto sel = db.stmt("SELECT data FROM b WHERE id=1");
+  REQUIRE(sel->step());
+  const auto [data, len] = sel->get_blob(0);
+  REQUIRE(len == 3u);
+  CHECK(data[0] == 0x00);
+  CHECK(data[1] == 0xff);
+  CHECK(data[2] == 0x10);
+
+  auto null_sel = db.stmt("SELECT data FROM b WHERE id=2");
+  REQUIRE(null_sel->step());
+  const auto [null_data, null_len] = null_sel->get_blob(0);
+  CHECK(null_data == nullptr);
+  CHECK(null_len == 0u);
+
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("store::Database: malformed SQL throws") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "yca_store_err_ut.db";
+  std::filesystem::remove(path);
+  store::Database db(path.string());
+  CHECK_THROWS_AS(db.create_table("NOT VALID SQL"), store::Error);
+  CHECK_THROWS_AS(db.stmt("SELECT * FROM nonexistent_table"), store::Error);
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("store::Database: new_statement backs a Botan certificate store "
+          "over the same connection") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "yca_store_botan_ut.db";
+  std::filesystem::remove(path);
+  auto db = std::make_shared<store::Database>(path.string());
+  Botan::AutoSeeded_RNG rng;
+  Botan::Certificate_Store_In_SQL botan_store(db, "unit-test-pass", rng);
+
+  // The custom tables (via store::Database::stmt) and Botan's own tables
+  // (via Certificate_Store_In_SQL, through new_statement) share one
+  // connection/file - both must be visible.
+  db->create_table("CREATE TABLE IF NOT EXISTS marker (k TEXT PRIMARY KEY)");
+  db->stmt("INSERT INTO marker (k) VALUES ('present')")->spin();
+  auto q = db->stmt("SELECT k FROM marker");
+  REQUIRE(q->step());
+  CHECK(q->get_str(0) == "present");
+
+  auto found = botan_store.find_all_certs(Botan::X509_DN(), {});
+  CHECK(found.empty());
+
+  std::filesystem::remove(path);
 }
 
 // --- hand-encoded X.509 extensions (x509ext) ---
@@ -582,13 +671,13 @@ TEST_CASE("ca::detail::active_ca resolves the generation from the store") {
   }
   {
     // A later generation wins over the config: the store is the answer.
-    Botan::Sqlite3_Database h(db.string());
-    h.new_statement("UPDATE ca_cert_index SET status='retiring' "
-                    "WHERE kind='signing' AND gen=1")
+    store::Database h(db.string());
+    h.stmt("UPDATE ca_cert_index SET status='retiring' "
+           "WHERE kind='signing' AND gen=1")
         ->spin();
-    h.new_statement("INSERT INTO ca_cert_index "
-                    "(kind,purpose,gen,cn,slug,status) "
-                    "VALUES ('signing','tls',2,'UT CA E2','ut-ca-e2','active')")
+    h.stmt("INSERT INTO ca_cert_index "
+           "(kind,purpose,gen,cn,slug,status) "
+           "VALUES ('signing','tls',2,'UT CA E2','ut-ca-e2','active')")
         ->spin();
     const auto sign =
         ca::detail::active_ca(h, *eff, eff->cas.at("tls").purpose);
@@ -600,8 +689,8 @@ TEST_CASE("ca::detail::active_ca resolves the generation from the store") {
   }
   {
     // Without the index the ceremony's own generation is the answer.
-    Botan::Sqlite3_Database h(db.string());
-    h.new_statement("DROP TABLE ca_cert_index")->spin();
+    store::Database h(db.string());
+    h.stmt("DROP TABLE ca_cert_index")->spin();
     const auto sign =
         ca::detail::active_ca(h, *eff, eff->cas.at("tls").purpose);
     CHECK(sign.gen == 1);
@@ -615,10 +704,10 @@ TEST_CASE("ca: every indexed row carries the purpose of its CA") {
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
   REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "p.ut.ca", {}));
-  Botan::Sqlite3_Database h((t.dir / "ca-store.db").string());
+  store::Database h((t.dir / "ca-store.db").string());
 
   auto one = [&](const std::string &sql) {
-    auto q = h.new_statement(sql);
+    auto q = h.stmt(sql);
     REQUIRE(q->step());
     return q->get_str(0);
   };
@@ -630,8 +719,8 @@ TEST_CASE("ca: every indexed row carries the purpose of its CA") {
   CHECK(one("SELECT purpose FROM cert_index WHERE kind='root'") == "root");
   CHECK(one("SELECT purpose FROM cert_index WHERE kind='signing'") == "tls");
   CHECK(one("SELECT purpose FROM cert_index WHERE cn='p.ut.ca'") == "tls");
-  auto blanks = h.new_statement("SELECT COUNT(*) FROM cert_index "
-                                "WHERE purpose=''");
+  auto blanks = h.stmt("SELECT COUNT(*) FROM cert_index "
+                       "WHERE purpose=''");
   REQUIRE(blanks->step());
   CHECK(blanks->get_size_t(0) == 0);
 }
@@ -642,7 +731,7 @@ TEST_CASE("ca::detail::live_cas selects the generations that publish CRLs") {
   auto eff = ca::load_config(t.dir);
   REQUIRE(eff.has_value());
   const auto db = t.dir / "ca-store.db";
-  Botan::Sqlite3_Database h(db.string());
+  store::Database h(db.string());
 
   auto slugs = [&](const char *kind) {
     std::vector<std::string> v;
@@ -653,19 +742,19 @@ TEST_CASE("ca::detail::live_cas selects the generations that publish CRLs") {
   CHECK(slugs("signing") == std::vector<std::string>{eff->cas.at("tls").slug});
 
   // A retiring predecessor keeps publishing: both generations, oldest first.
-  h.new_statement("UPDATE ca_cert_index SET status='retiring' "
-                  "WHERE kind='signing' AND gen=1")
+  h.stmt("UPDATE ca_cert_index SET status='retiring' "
+         "WHERE kind='signing' AND gen=1")
       ->spin();
-  h.new_statement("INSERT INTO ca_cert_index "
-                  "(kind,purpose,gen,cn,slug,status) "
-                  "VALUES ('signing','tls',2,'UT CA E2','ut-ca-e2','active')")
+  h.stmt("INSERT INTO ca_cert_index "
+         "(kind,purpose,gen,cn,slug,status) "
+         "VALUES ('signing','tls',2,'UT CA E2','ut-ca-e2','active')")
       ->spin();
   CHECK(slugs("signing") ==
         std::vector<std::string>{eff->cas.at("tls").slug, "ut-ca-e2"});
 
   // A revoked generation drops out: its CRL is moot.
-  h.new_statement("UPDATE ca_cert_index SET status='revoked' "
-                  "WHERE kind='signing' AND gen=1")
+  h.stmt("UPDATE ca_cert_index SET status='revoked' "
+         "WHERE kind='signing' AND gen=1")
       ->spin();
   CHECK(slugs("signing") == std::vector<std::string>{"ut-ca-e2"});
   // The root is untouched by any of it.
@@ -794,9 +883,9 @@ TEST_CASE("ca::is_initialized: active anchors must match the locked config") {
   const auto db = t.dir / "ca-store.db";
   {
     // Locked-config drift: cert_index anchors no longer match ca_config.
-    Botan::Sqlite3_Database h(db.string());
-    h.new_statement("UPDATE ca_config SET value='Other CN' "
-                    "WHERE key='root.cn'")
+    store::Database h(db.string());
+    h.stmt("UPDATE ca_config SET value='Other CN' "
+           "WHERE key='root.cn'")
         ->spin();
   }
   CHECK_FALSE(ca::is_initialized(t.dir));
@@ -1006,10 +1095,10 @@ TEST_CASE("cert_index records the key identifiers a chain walk follows") {
   REQUIRE(eff.has_value());
   REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "ski.ut.ca", {}));
 
-  Botan::Sqlite3_Database h((t.dir / "ca-store.db").string());
+  store::Database h((t.dir / "ca-store.db").string());
   auto id = [&](const std::string &kind, int col) {
-    auto q = h.new_statement("SELECT ski,aki FROM cert_index WHERE kind=?1 "
-                             "AND status='active' LIMIT 1");
+    auto q = h.stmt("SELECT ski,aki FROM cert_index WHERE kind=?1 "
+                    "AND status='active' LIMIT 1");
     q->bind(1, kind);
     REQUIRE(q->step());
     return q->get_str(col);
@@ -1037,10 +1126,10 @@ TEST_CASE("renewal window: a near-expiry active cert may be superseded") {
   // pretend a 90-day cert with `left` days remaining.
   const auto db = (t.dir / "ca-store.db").string();
   auto age = [&](int left) {
-    Botan::Sqlite3_Database h(db);
-    auto u = h.new_statement("UPDATE cert_index SET not_before=?1, "
-                             "not_after=?2 WHERE cn='rw.ut.ca' AND "
-                             "status='active'");
+    store::Database h(db);
+    auto u = h.stmt("UPDATE cert_index SET not_before=?1, "
+                    "not_after=?2 WHERE cn='rw.ut.ca' AND "
+                    "status='active'");
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(
                          std::chrono::system_clock::now().time_since_epoch())
                          .count();
@@ -1057,8 +1146,8 @@ TEST_CASE("renewal window: a near-expiry active cert may be superseded") {
 
   // --serial picks the EXACT cert: revoke the old one, the successor stays.
   auto serial_of = [&](bool oldest) {
-    Botan::Sqlite3_Database h(db);
-    auto q = h.new_statement(
+    store::Database h(db);
+    auto q = h.stmt(
         std::string("SELECT serial FROM cert_index WHERE cn='rw.ut.ca' AND "
                     "status='active' ORDER BY not_before ") +
         (oldest ? "ASC" : "DESC") + " LIMIT 1");
@@ -1158,14 +1247,13 @@ TEST_CASE("CRL pruning: an expired entry leaves after its final appearance") {
 
   auto dbh = ca::detail::open_store(ca::detail::store_path(t.dir));
   auto serial_of = [&](const std::string &cn) {
-    auto q = dbh->new_statement("SELECT serial FROM cert_index WHERE cn=?1");
+    auto q = dbh->stmt("SELECT serial FROM cert_index WHERE cn=?1");
     q->bind(1, cn);
     REQUIRE(q->step());
     return q->get_str(0);
   };
   auto backdate = [&](const std::string &cn, std::size_t not_after) {
-    auto u =
-        dbh->new_statement("UPDATE cert_index SET not_after=?1 WHERE cn=?2");
+    auto u = dbh->stmt("UPDATE cert_index SET not_after=?1 WHERE cn=?2");
     u->bind(1, not_after);
     u->bind(2, cn);
     u->spin();
