@@ -99,6 +99,6 @@ inline constexpr int store_busy_timeout_ms = 5000;
 inline constexpr std::size_t p11_token_label_max = 32;
 
 // `list` serial column truncation, in hex chars.
-inline constexpr std::size_t list_serial_hex = 16;
+inline constexpr std::size_t list_serial_hex = 32;
 
 } // namespace app
