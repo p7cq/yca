@@ -1,0 +1,16 @@
+# Renews the TLS certificate yca-acme's own endpoint (nginx) uses, via
+# acme.sh against the CA it fronts.
+#
+# acme.sh --cron walks every domain under --home/--config-home and
+# reissues+reinstalls only the ones inside their renewal window, using
+# the install-cert location (key/fullchain paths, reloadcmd) and --days
+# saved by the initial --issue ceremony - no separate install step.
+
+[Unit]
+Description=Renew the yca-acme endpoint TLS certificate
+After=network.target yca-acme.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/acme.sh --cron --home /etc/yca/acme/pki --config-home /etc/yca/acme/pki

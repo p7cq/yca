@@ -1,0 +1,12 @@
+# systemd timer driving yca-acme-renew.service.
+
+[Unit]
+Description=Periodic renewal of the yca-acme endpoint TLS certificate
+
+[Timer]
+OnCalendar=*-*-* 04:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

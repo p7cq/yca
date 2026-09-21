@@ -21,7 +21,7 @@ ExecStart=/usr/local/bin/yca-acme \
   --listen 127.0.0.1:8555 \
   --url https://pki.example.ca \
   --yca /usr/local/bin/yca \
-  --config /var/lib/yca/yca.toml \
+  --config /etc/yca/yca.toml \
   --store /var/lib/yca/store
 Restart=on-failure
 
