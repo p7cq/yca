@@ -174,6 +174,16 @@ func (s *server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 	_ = s.db.SetOrderStatus(order.ID, "processing", "", "")
 	chain, cn, err := s.yca.issue(der)
 	if err != nil {
+		if strings.Contains(err.Error(), "renewal window") {
+			log.Printf("order %s: issuance blocked: %v", order.ID, err)
+			p := problem(http.StatusForbidden, "rejectedIdentifier",
+				"an active certificate already exists for this identifier; "+
+					"a successor may only be issued once it is within the CA's renewal window")
+			perr, _ := json.Marshal(p)
+			_ = s.db.SetOrderStatus(order.ID, "invalid", "", string(perr))
+			s.writeProblem(w, p)
+			return
+		}
 		log.Printf("order %s: issuance failed: %v", order.ID, err)
 		perr, _ := json.Marshal(problem(http.StatusInternalServerError,
 			"serverInternal", "issuance failed"))

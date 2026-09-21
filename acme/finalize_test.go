@@ -123,7 +123,8 @@ exit 1
 // stubYca keeps the old shape used by the finalize tests.
 func stubYca(t *testing.T) string { return newStub(t, "localhost").bin }
 
-// failingYca refuses to sign (e.g. renewal window not reached).
+// failingYca refuses to sign because the CA's renewal window has not
+// opened yet - the message matches ca.cpp's blocking_duplicate exactly.
 func failingYca(t *testing.T) string {
 	t.Helper()
 	script := `#!/bin/sh
@@ -131,10 +132,30 @@ case "$1" in
   --version) echo "yca version 0.0.0-stub"; exit 0;;
   get) [ "$2" = nonce ] && { echo "deadbeef"; exit 0; };;
 esac
-echo "an active server certificate for CN 'localhost' already exists" >&2
+echo "an active server certificate for CN 'localhost' already exists (not yet within the 33% renewal window)" >&2
 exit 1
 `
 	path := filepath.Join(t.TempDir(), "yca-fail")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// otherFailingYca refuses to sign for an unrelated reason, exercising the
+// generic serverInternal fallback (as opposed to failingYca's specific,
+// renewal-window case).
+func otherFailingYca(t *testing.T) string {
+	t.Helper()
+	script := `#!/bin/sh
+case "$1" in
+  --version) echo "yca version 0.0.0-stub"; exit 0;;
+  get) [ "$2" = nonce ] && { echo "deadbeef"; exit 0; };;
+esac
+echo "signing key missing from store" >&2
+exit 1
+`
+	path := filepath.Join(t.TempDir(), "yca-fail-other")
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -301,10 +322,28 @@ func TestFinalizeBeforeReady(t *testing.T) {
 	}
 }
 
-func TestFinalizeIssuanceFailure(t *testing.T) {
+func TestFinalizeRenewalWindowBlocked(t *testing.T) {
 	e := newTestEnv(t)
 	e.register()
 	e.s.yca = newYcaRunner(failingYca(t), "", "", "acme", "")
+	orderPath := runChallenge(t, e, false)
+	_, order := e.post(orderPath, nil, e.kid, "")
+	fin := e.path(order["finalize"].(string))
+	resp, v := e.post(fin, finalizeBody(t, csrFor(t, "", []string{"localhost"})),
+		e.kid, "")
+	if resp.StatusCode != http.StatusForbidden || problemType(v) != "rejectedIdentifier" {
+		t.Fatalf("renewal-window-blocked issuance: %d %v", resp.StatusCode, v)
+	}
+	_, o := e.post(orderPath, nil, e.kid, "")
+	if o["status"] != "invalid" {
+		t.Fatalf("order after blocked issuance: %v", o)
+	}
+}
+
+func TestFinalizeIssuanceFailure(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	e.s.yca = newYcaRunner(otherFailingYca(t), "", "", "acme", "")
 	orderPath := runChallenge(t, e, false)
 	_, order := e.post(orderPath, nil, e.kid, "")
 	fin := e.path(order["finalize"].(string))
