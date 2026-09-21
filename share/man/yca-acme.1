@@ -22,6 +22,10 @@ yca\-acme \- ACME (RFC 8555) issuance frontend for a yca certificate authority
 .br
 .B yca\-acme ari clear
 [\fB\-\-state\fR \fIdb\fR] \fB\-\-issuer\fR \fIcn\fR
+.PP
+\fBeab\fR and \fBari\fR must be the first argument; flags placed before
+them start the daemon instead (refused with a usage error, since it
+would otherwise try to bind the listen address a second time).
 .SH DESCRIPTION
 .B yca\-acme
 exposes RFC 8555 (ACME) issuance for the server profile of a
@@ -40,8 +44,10 @@ mirrors the CA's renewal\-window policy.
 .SH OPTIONS
 .TP
 .BI \-\-state " db"
-Protocol state database (default: \fB./acme.db\fR). Accounts, EAB
-credentials, orders and issued chains.
+Protocol state database. Accounts, EAB credentials, orders and issued
+chains. An explicit \fIdb\fR creates the file if missing; without
+\fB\-\-state\fR, only the conventional \fB./acme.db\fR is opened, and
+only if it already exists.
 .TP
 .BI \-\-listen " addr"
 Listen address (default: \fB127.0.0.1:8555\fR).

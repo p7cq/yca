@@ -50,6 +50,21 @@ type server struct {
 	dns01   *dns01Validator
 }
 
+const defaultStateDB = "./acme.db"
+
+// Open the protocol state database. An explicit --state always creates
+// the file if missing. The default opens ./acme.db if it already exists.
+func openStateDB(state string) (*DB, error) {
+	if state == "" {
+		if _, err := os.Stat(defaultStateDB); err != nil {
+			return nil, fmt.Errorf("no state db at %s; pass --state explicitly "+
+				"to create one here (e.g. --state %s)", defaultStateDB, defaultStateDB)
+		}
+		state = defaultStateDB
+	}
+	return OpenDB(state)
+}
+
 func main() {
 	log.SetFlags(0)
 	log.SetOutput(tsWriter{os.Stderr})
@@ -64,7 +79,7 @@ func main() {
 	}
 
 	var (
-		state   = flag.String("state", "./acme.db", "protocol state database")
+		state   = flag.String("state", "", "protocol state database (default ./acme.db, must already exist)")
 		listen  = flag.String("listen", "127.0.0.1:8555", "listen address")
 		baseURL = flag.String("url", "http://127.0.0.1:8555",
 			"external base URL (what clients see, e.g. https://pki.example.ca)")
@@ -83,14 +98,18 @@ func main() {
 		showVer = flag.Bool("version", false, "print version and exit")
 	)
 	flag.Parse()
+	if args := flag.Args(); len(args) > 0 && (args[0] == "eab" || args[0] == "ari") {
+		fmt.Fprintln(os.Stderr, "usage: yca-acme <subcommand> [flags], e.g. yca-acme eab list --state /var/lib/yca/acme.db")
+		os.Exit(2)
+	}
 	if *showVer {
 		fmt.Printf("yca-acme version %s\n", version)
 		return
 	}
 
-	db, err := OpenDB(*state)
+	db, err := openStateDB(*state)
 	if err != nil {
-		log.Fatalf("open state %s: %v", *state, err)
+		log.Fatal(err)
 	}
 	defer db.Close()
 
@@ -232,7 +251,7 @@ func splitDeleteKid(verb string, args []string) (string, []string) {
 
 func eabMain(args []string) {
 	fs := flag.NewFlagSet("eab", flag.ExitOnError)
-	state := fs.String("state", "./acme.db", "protocol state database")
+	state := fs.String("state", "", "protocol state database (default ./acme.db, must already exist)")
 	allow := fs.String("allow", "",
 		"comma-separated identifier patterns this credential may order "+
 			"(e.g. '*.example.ca,host.example.ca'; empty = any)")
@@ -244,9 +263,9 @@ func eabMain(args []string) {
 	kid, rest := splitDeleteKid(verb, args[1:])
 	_ = fs.Parse(rest)
 
-	db, err := OpenDB(*state)
+	db, err := openStateDB(*state)
 	if err != nil {
-		log.Fatalf("open state %s: %v", *state, err)
+		log.Fatal(err)
 	}
 	defer db.Close()
 
@@ -320,7 +339,7 @@ func orAny(s string) string {
 // successor, so it stops matching.
 func ariMain(args []string) {
 	fs := flag.NewFlagSet("ari", flag.ExitOnError)
-	state := fs.String("state", "./acme.db", "protocol state database")
+	state := fs.String("state", "", "protocol state database (default ./acme.db, must already exist)")
 	issuer := fs.String("issuer", "",
 		"common name of the issuing CA generation (e.g. 'CA E1')")
 	window := fs.Duration("window", 2*time.Hour,
@@ -336,9 +355,9 @@ func ariMain(args []string) {
 	verb := args[0]
 	_ = fs.Parse(args[1:])
 
-	db, err := OpenDB(*state)
+	db, err := openStateDB(*state)
 	if err != nil {
-		log.Fatalf("open state %s: %v", *state, err)
+		log.Fatal(err)
 	}
 	defer db.Close()
 

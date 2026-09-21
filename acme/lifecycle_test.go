@@ -3,6 +3,8 @@ package main
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -168,4 +170,44 @@ func TestSplitDeleteKid(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestOpenStateDB(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	// No --state and no ./acme.db yet: must fail rather than create one.
+	if _, err := openStateDB(""); err == nil {
+		t.Fatal("openStateDB(\"\") succeeded with no ./acme.db present")
+	}
+
+	// An explicit --state always creates the file, wherever it points.
+	explicit := filepath.Join(dir, "explicit.db")
+	db, err := openStateDB(explicit)
+	if err != nil {
+		t.Fatalf("openStateDB(explicit): %v", err)
+	}
+	db.Close()
+	if _, err := os.Stat(explicit); err != nil {
+		t.Fatalf("explicit state db was not created: %v", err)
+	}
+
+	// Once ./acme.db exists, the bare default opens it.
+	db, err = openStateDB("acme.db")
+	if err != nil {
+		t.Fatalf("create ./acme.db: %v", err)
+	}
+	db.Close()
+	db, err = openStateDB("")
+	if err != nil {
+		t.Fatalf("openStateDB(\"\") with existing ./acme.db: %v", err)
+	}
+	db.Close()
 }

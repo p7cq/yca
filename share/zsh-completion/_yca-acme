@@ -9,10 +9,12 @@ _yca-acme() {
   local curcontext="$curcontext" state line
   typeset -A opt_args
 
+  # eab/ari must be the first argument (yca-acme enforces this); the two
+  # checks below only match when $words[2] is literally eab or ari.
   if [[ $words[2] == ari ]]; then
     _arguments \
       '2:verb:(accelerate list clear)' \
-      '--state[protocol state database (default ./acme.db)]:state db:_files' \
+      '--state[protocol state database (default ./acme.db, must already exist)]:state db:_files' \
       '--issuer[CA generation common name (e.g. CA E1)]:issuer cn:' \
       '--window[replacement window, clients randomize inside it]:duration (e.g. 2h):'
     return
@@ -21,7 +23,7 @@ _yca-acme() {
   if [[ $words[2] == eab ]]; then
     _arguments \
       '2:verb:(new list delete)' \
-      '--state[protocol state database (default ./acme.db)]:state db:_files' \
+      '--state[protocol state database (default ./acme.db, must already exist)]:state db:_files' \
       '--allow[identifier patterns, comma-separated (exact or *.suffix; empty = any)]:patterns:' \
       '*:kid (for delete):'
     return
@@ -29,7 +31,7 @@ _yca-acme() {
 
   _arguments \
     '1:command:(eab ari)' \
-    '--state[protocol state database (default ./acme.db)]:state db:_files' \
+    '--state[protocol state database (default ./acme.db, must already exist)]:state db:_files' \
     '--listen[listen address (default 127.0.0.1:8555)]:address:' \
     '--url[external base URL clients use (JWS url binding)]:url:' \
     '--yca[path to the yca binary]:yca binary:_files' \
