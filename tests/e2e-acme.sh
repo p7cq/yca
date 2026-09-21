@@ -145,8 +145,8 @@ curl -s --cacert "$WORK/root.pem" "$DIR_URL" | grep -q '"keyChange"' &&
 # --- EAB provisioning ---
 "$WORK/yca-acme" eab new --state "$WORK/acme.db" --allow "localhost" \
   >"$WORK/eab.txt" 2>&1 && ok "eab new" || bad "eab new"
-EAB_KID="$(awk '$1 == "kid" {print $3}' "$WORK/eab.txt")"
-EAB_HMAC="$(awk '$1 == "hmac:" {print $2}' "$WORK/eab.txt")"
+EAB_KID="$(awk '$1 == "KID:" {print $2}' "$WORK/eab.txt")"
+EAB_HMAC="$(awk '$1 == "HMAC:" {print $2}' "$WORK/eab.txt")"
 [ -n "$EAB_KID" ] && [ -n "$EAB_HMAC" ] &&
   ok "eab credential parsed" || bad "eab output: $(cat "$WORK/eab.txt")"
 # -F --: the kid is generated data whose alphabet this test does not own,
@@ -232,8 +232,8 @@ a --issue -d forbidden.example.org --webroot "$WORK/webroot" \
 # --- eab delete: bound accounts can no longer order ---
 "$WORK/yca-acme" eab new --state "$WORK/acme.db" --allow "localhost" \
   >"$WORK/eab3.txt" 2>&1
-EAB3_KID="$(awk '$1 == "kid" {print $3}' "$WORK/eab3.txt")"
-EAB3_HMAC="$(awk '$1 == "hmac:" {print $2}' "$WORK/eab3.txt")"
+EAB3_KID="$(awk '$1 == "KID:" {print $2}' "$WORK/eab3.txt")"
+EAB3_HMAC="$(awk '$1 == "HMAC:" {print $2}' "$WORK/eab3.txt")"
 a3() {
   acme.sh --home "$WORK/acmesh3" --config-home "$WORK/acmesh3" \
     --server "$DIR_URL" --ca-bundle "$WORK/root.pem" "$@"

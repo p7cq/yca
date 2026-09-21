@@ -282,11 +282,16 @@ func eabMain(args []string) {
 		// Shown once, like the CA passphrase banner: the HMAC key is not
 		// recoverable from the (hashed-nothing, but private) state db by
 		// design of the workflow - hand it to the client operator now.
-		fmt.Printf("\n=== EAB CREDENTIAL (shown once) ===\n"+
-			"kid : %s\nhmac: %s\nallow: %s\n"+
-			"(e.g. acme.sh --register-account --eab-kid <kid> --eab-hmac-key <hmac>)\n"+
-			"===================================\n\n",
-			kid, base64.RawURLEncoding.EncodeToString(hmac), orAny(*allow))
+		fmt.Printf("\n┌ EAB credential (shown once) %s┐\n"+
+			"%8s %s\n"+
+			"%8s %s\n"+
+			"%8s %s\n"+
+			"└%s┘\n\n",
+			strings.Repeat("─", 24),
+			"KID:", kid,
+			"HMAC:", base64.RawURLEncoding.EncodeToString(hmac),
+			"Allow:", orAny(*allow),
+			strings.Repeat("─", 53))
 	case "list":
 		creds, err := db.ListEAB()
 		if err != nil {

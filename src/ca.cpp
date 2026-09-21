@@ -1360,14 +1360,14 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
     generated = Botan::hex_encode(raw);
     eff.passphrase = generated;
     log::to_stdout(
-        "\n┌──────────────────────────────────────────────────────────────────┐"
         "\n"
-        "│                 {} (shown once)                 │\n"
-        "├──────────────────────────────────────────────────────────────────┤\n"
-        "│ {} │\n"
+        "┌ CA_STORE_PASSPHRASE (shown once) ────────────────────────────────┐\n"
+        "\n"
+        "  {}\n"
+        "\n"
         "└──────────────────────────────────────────────────────────────────┘"
         "\n",
-        app::passphrase_env, generated);
+        generated);
   }
 
   fs::create_directories(store_dir);

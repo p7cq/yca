@@ -75,7 +75,7 @@ w --version | grep -Eq '^yca version [0-9]+\.[0-9]+\.[0-9]+$' &&
 
 # --- init ---
 OUT="$(w init 2>&1)" && ok "init exits 0" || bad "init exit code"
-PHRASE="$(printf '%s\n' "$OUT" | awk 'NR==5{ print $2 }' | grep -E '[[:xdigit:]]+')"
+PHRASE="$(printf '%s\n' "$OUT" | awk 'NR==4{ print $1 }' | grep -E '[[:xdigit:]]+')"
 [ -n "$PHRASE" ] && ok "passphrase generated once" || bad "no passphrase shown"
 export CA_STORE_PASSPHRASE="$PHRASE"
 [ -f "$PKI/ca-store.db" ] && ok "store ca-store.db created" || bad "store missing"
