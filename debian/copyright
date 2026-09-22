@@ -1,0 +1,10 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: yca
+Source: https://github.com/p7cq/yca
+
+Files: *
+Copyright: 2025 p7cq
+License: Apache-2.0
+
+License: Apache-2.0
+ See /usr/share/doc/yca/LICENSE for the full license text.

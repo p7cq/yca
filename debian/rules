@@ -1,0 +1,42 @@
+#!/usr/bin/make -f
+#
+# Bypasses debhelper's cmake buildsystem auto-detection (it defaults to the
+# Unix Makefiles generator) and mirrors build.sh / install.sh instead: cmake
+# + Ninja for the yca target, plus the Go ACME frontend and the extra files
+# CMake's install() rules do not cover.
+
+export CC = clang
+export CXX = clang++
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	cmake -B build -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_CXX_COMPILER=clang++ \
+		-Wno-dev
+
+override_dh_auto_build:
+	cmake --build build --target yca -j $(shell nproc)
+	cd acme && go build -ldflags "-X main.version=$$(cat ../VERSION) -linkmode=external" \
+		-o ../bin/yca-acme .
+
+override_dh_auto_test:
+	# unit/e2e/hsm suites already run in CI; skip during packaging
+
+override_dh_auto_install:
+	DESTDIR=debian/yca cmake --install build
+	install -Dm755 bin/yca-acme debian/yca/usr/bin/yca-acme
+	install -Dm644 share/man/yca-acme.1 debian/yca/usr/share/man/man1/yca-acme.1
+	install -Dm644 share/zsh-completion/_yca-acme \
+		debian/yca/usr/share/zsh/site-functions/_yca-acme
+	install -Dm644 yca.toml debian/yca/etc/yca/yca.toml
+	install -dm755 debian/yca/lib/systemd/system
+	install -m644 share/systemd/*.service share/systemd/*.timer \
+		debian/yca/lib/systemd/system/
+	install -Dm644 share/nginx/yca.conf \
+		debian/yca/usr/share/doc/yca/examples/nginx-yca.conf
+
+override_dh_shlibdeps:
+	dh_shlibdeps -- --ignore-missing-info

@@ -1,0 +1,21 @@
+Source: yca
+Section: utils
+Priority: optional
+Maintainer: p7cq <12068007+p7cq@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), cmake, ninja-build, clang,
+ libc++-dev, libc++abi-dev, libsqlite3-dev, pkg-config, golang-go
+Standards-Version: 4.6.2
+Homepage: https://github.com/p7cq/yca
+
+Package: yca
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Suggests: bind9-dnsutils
+Description: Two-tier ECDSA certificate authority CLI with an ACME frontend
+ yca is a command-line certificate authority tool (ECDSA, two-tier
+ root/intermediate hierarchy) with yca-acme, an ACME frontend for
+ automated certificate issuance.
+ .
+ bind9-dnsutils (nsupdate) is needed only if the ACME client used against
+ repository_host validates via DNS-01 through dynamic DNS (e.g. acme.sh's
+ dns_nsupdate hook).
