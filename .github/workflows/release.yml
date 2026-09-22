@@ -238,7 +238,8 @@ jobs:
 
             mkdir -p dist
             pkg create -v -m pkgmeta -r stage -p packaging/freebsd/pkg-plist -o dist
-            mv "dist/yca-${version}.pkg" "dist/yca-${version}-freebsd-15.1-amd64.pkg"
+            os_major="$(echo "$abi" | cut -d: -f2)"
+            mv "dist/yca-${version}.pkg" "dist/yca-${version}-freebsd-${os_major}-amd64.pkg"
 
       # vmactions/freebsd-vm shares GITHUB_WORKSPACE into the VM, so dist/
       # written inside `run:` should be visible here too - unconfirmed by
