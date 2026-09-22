@@ -55,7 +55,7 @@ package() {
     "$pkgdir/usr/share/zsh/site-functions/_yca-acme"
 
   # Default config, marked backup so pacman preserves operator edits.
-  install -Dm644 yca.toml "$pkgdir/etc/yca/yca.toml"
+  install -Dm600 yca.toml "$pkgdir/etc/yca/yca.toml"
 
   # Packaged systemd units live under /usr/lib; they are installed but NOT
   # enabled: a CA rollout is a manual ceremony (see docs/acme-operation.md).

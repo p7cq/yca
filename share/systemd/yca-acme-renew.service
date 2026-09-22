@@ -13,4 +13,4 @@ After=network.target yca-acme.service
 [Service]
 Type=oneshot
 User=root
-ExecStart=/usr/bin/acme.sh --cron --home /etc/yca/acme/pki --config-home /etc/yca/acme/pki
+ExecStart=/usr/bin/acme.sh --cron --home /etc/yca/acme --config-home /etc/yca/acme

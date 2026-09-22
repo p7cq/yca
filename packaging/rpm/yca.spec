@@ -52,7 +52,7 @@ DESTDIR=%{buildroot} cmake --install build
 install -Dm755 bin/yca-acme %{buildroot}%{_bindir}/yca-acme
 install -Dm644 share/man/yca-acme.1 %{buildroot}%{_mandir}/man1/yca-acme.1
 install -Dm644 share/zsh-completion/_yca-acme %{buildroot}%{_datadir}/zsh/site-functions/_yca-acme
-install -Dm644 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
+install -Dm600 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
 install -dm755 %{buildroot}%{_unitdir}
 install -m644 share/systemd/*.service share/systemd/*.timer %{buildroot}%{_unitdir}/
 install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/nginx-yca.conf
