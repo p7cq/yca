@@ -14,6 +14,7 @@ export CXX = clang++
 override_dh_auto_configure:
 	cmake -B build -G Ninja \
 		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
 		-DCMAKE_CXX_COMPILER=clang++ \
 		-Wno-dev
 
@@ -40,3 +41,10 @@ override_dh_auto_install:
 
 override_dh_shlibdeps:
 	dh_shlibdeps -- --ignore-missing-info
+
+# yca ships stripped (Release build, no .debug_info); dh_dwz can't combine
+# that with yca-acme's Go debug sections ("Too few files for multifile
+# optimization"), and there's no debug package worth shipping here anyway.
+# DEB_BUILD_OPTIONS=noautodbgsym does not stop dh_dwz itself from running,
+# so skip it outright.
+override_dh_dwz:

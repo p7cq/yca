@@ -62,8 +62,8 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates git build-essential debhelper \
-            clang libclang-rt-dev cmake ninja-build libc++-dev libc++abi-dev \
-            libsqlite3-dev pkg-config golang-go
+            clang clang-tools libclang-rt-dev cmake ninja-build \
+            libc++-dev libc++abi-dev libsqlite3-dev pkg-config golang-go
 
       - uses: actions/checkout@v5
 
