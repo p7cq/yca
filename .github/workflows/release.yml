@@ -178,9 +178,71 @@ jobs:
           name: arch-package
           path: dist/*.pkg.tar.zst
 
+  build-freebsd:
+    name: build .pkg (FreeBSD)
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # No native FreeBSD runner on GH Actions: this runs a real FreeBSD VM
+      # (via QEMU) on the Linux runner.
+      - name: Build and package on FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "15.1"
+          usesh: true
+          prepare: |
+            pkg install -y cmake ninja go sqlite3 git
+          run: |
+            set -e
+            version="${{ needs.check-version.outputs.version }}"
+
+            cmake -B build -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=/usr/local \
+              -Wno-dev
+            cmake --build build --target yca -j "$(sysctl -n hw.ncpu)"
+
+            ( cd acme && go build -ldflags "-X main.version=${version}" -o ../bin/yca-acme . )
+
+            rm -rf stage
+            DESTDIR=stage cmake --install build
+            mkdir -p stage/usr/local/share/man/man1 \
+                     stage/usr/local/share/zsh/site-functions \
+                     stage/usr/local/etc/yca
+            install -m755 bin/yca-acme stage/usr/local/bin/yca-acme
+            install -m644 share/man/yca-acme.1 stage/usr/local/share/man/man1/yca-acme.1
+            install -m644 share/zsh-completion/_yca-acme \
+              stage/usr/local/share/zsh/site-functions/_yca-acme
+            install -m644 yca.toml stage/usr/local/etc/yca/yca.toml
+
+            abi="$(pkg config ABI)"
+            sqlite_version="$(pkg query '%v' sqlite3)"
+            mkdir -p pkgmeta
+            sed -e "s/%VERSION%/${version}/" \
+                -e "s/%ABI%/${abi}/" \
+                -e "s/%SQLITE_VERSION%/${sqlite_version}/" \
+                packaging/freebsd/+MANIFEST > pkgmeta/+MANIFEST
+
+            mkdir -p dist
+            pkg create -v -m pkgmeta -r stage -p packaging/freebsd/pkg-plist -o dist
+
+      # vmactions/freebsd-vm shares GITHUB_WORKSPACE into the VM, so dist/
+      # written inside `run:` should be visible here too - unconfirmed by
+      # an actual run yet, unlike the rest of this job's commands.
+      - name: Check artifact
+        run: ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-package
+          path: dist/*.pkg
+
   release:
     name: tag + publish release
-    needs: [check-version, build-deb, build-rpm, build-arch]
+    needs: [check-version, build-deb, build-rpm, build-arch, build-freebsd]
     if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
     steps:

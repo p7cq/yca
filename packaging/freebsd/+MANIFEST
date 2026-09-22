@@ -1,0 +1,14 @@
+name: yca
+version: "%VERSION%"
+origin: "sysutils/yca"
+comment: "Two-tier ECDSA certificate authority CLI with an ACME frontend"
+www: "https://github.com/p7cq/yca"
+maintainer: "12068007+p7cq@users.noreply.github.com"
+prefix: "/usr/local"
+arch: "%ABI%"
+licenselogic: "single"
+licenses: ["APACHE20"]
+desc: "yca is a command-line certificate authority tool (ECDSA, two-tier root/intermediate hierarchy) with yca-acme, an ACME frontend for automated certificate issuance."
+deps: {
+  sqlite3: {origin: "databases/sqlite3", version: "%SQLITE_VERSION%"}
+}
