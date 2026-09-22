@@ -79,13 +79,14 @@ jobs:
       - name: Build package
         run: dpkg-buildpackage -b -us -uc
 
-      # Show compiler errors
+      # CMake 3.26+ logs try_compile checks (like the pthread probes) to
+      # CMakeConfigureLog.yaml, not the old CMakeError.log.
       - name: CMake configure log
         if: failure()
         run: |
-          echo ":: CMake Error Log ::"
-          cat build/CMakeFiles/CMakeError.log 2>/dev/null || echo "(no CMakeError.log)"
-          echo ":: End CMake Error Log ::"
+          echo ":: CMake Diagnostic Log ::"
+          cat build/CMakeFiles/CMakeConfigureLog.yaml 2>/dev/null || echo "(no CMakeConfigureLog.yaml)"
+          echo ":: End CMake Diagnostic Log ::"
 
       - name: Collect artifact
         run: |
