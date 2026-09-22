@@ -70,10 +70,11 @@ jobs:
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # Follow Debian's own idiom for a suite-specific build.
       - name: Sync changelog with VERSION
         run: |
           version="${{ needs.check-version.outputs.version }}"
-          printf 'yca (%s-1) unstable; urgency=medium\n\n  * Release %s.\n\n -- p7cq <12068007+p7cq@users.noreply.github.com>  %s\n' \
+          printf 'yca (%s-1~trixie) unstable; urgency=medium\n\n  * Release %s.\n\n -- p7cq <12068007+p7cq@users.noreply.github.com>  %s\n' \
             "$version" "$version" "$(date -R)" > debian/changelog
 
       - name: Build package
@@ -129,6 +130,8 @@ jobs:
           rpmbuild --define "version ${{ needs.check-version.outputs.version }}" \
             -bb "$HOME/rpmbuild/SPECS/yca.spec"
 
+      # Native rpmbuild filename encodes the Fedora version and arch
+      # no need to rename it.
       - name: Collect artifact
         run: |
           mkdir -p dist
@@ -168,6 +171,8 @@ jobs:
           chown -R builder:builder "$GITHUB_WORKSPACE"
           su builder -c "cd '$GITHUB_WORKSPACE' && makepkg -f --noconfirm"
 
+      # Native makepkg filename (pkgname-pkgver-pkgrel-arch.pkg.tar.zst) is
+      # unambiguous and standard Arch convention.
       - name: Collect artifact
         run: |
           mkdir -p dist
@@ -233,6 +238,7 @@ jobs:
 
             mkdir -p dist
             pkg create -v -m pkgmeta -r stage -p packaging/freebsd/pkg-plist -o dist
+            mv "dist/yca-${version}.pkg" "dist/yca-${version}-freebsd-15.1-amd64.pkg"
 
       # vmactions/freebsd-vm shares GITHUB_WORKSPACE into the VM, so dist/
       # written inside `run:` should be visible here too - unconfirmed by

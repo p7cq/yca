@@ -48,3 +48,6 @@ override_dh_shlibdeps:
 # DEB_BUILD_OPTIONS=noautodbgsym does not stop dh_dwz itself from running,
 # so skip it outright.
 override_dh_dwz:
+
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym

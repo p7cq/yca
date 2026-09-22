@@ -19,9 +19,7 @@ depends=('sqlite' 'libc++' 'libc++abi')
 optdepends=('bind-tools: acme.sh dns_nsupdate hook for repository_host DNS-01')
 makedepends=('clang' 'cmake' 'ninja' 'go')
 backup=('etc/yca/yca.toml')
-# The C++ targets build with clang/libc++; makepkg's GCC LTO flags
-# (-ffat-lto-objects) are not understood by clang.
-options=('!lto')
+options=('!lto' '!debug')
 source=()
 
 build() {

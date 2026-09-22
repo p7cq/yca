@@ -1,5 +1,9 @@
 # Version is passed on the command line (rpmbuild --define "version X"), not
 # hardcoded here, so the spec never needs a manual edit on a VERSION bump.
+# yca ships stripped (Release build, no .debug_info; see CMakeLists.txt) and
+# yca-acme's Go debug info isn't meaningful packaged alone, so skip the
+# auto-generated debuginfo/debugsource subpackages entirely.
+%global debug_package %{nil}
 Name:           yca
 Version:        %{version}
 Release:        1%{?dist}
