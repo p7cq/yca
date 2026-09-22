@@ -66,7 +66,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates git build-essential debhelper devscripts \
+            ca-certificates git build-essential debhelper \
             clang cmake ninja-build libc++-dev libc++abi-dev \
             libsqlite3-dev pkg-config golang-go
 
@@ -78,8 +78,8 @@ jobs:
       - name: Sync changelog with VERSION
         run: |
           version="${{ needs.check-version.outputs.version }}"
-          dch --create --package yca --newversion "${version}-1" \
-            --distribution unstable "Release ${version}."
+          printf 'yca (%s-1) unstable; urgency=medium\n\n  * Release %s.\n\n -- p7cq <12068007+p7cq@users.noreply.github.com>  %s\n' \
+            "$version" "$version" "$(date -R)" > debian/changelog
 
       - name: Build package
         run: dpkg-buildpackage -b -us -uc
@@ -143,7 +143,9 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Install build dependencies
-        run: pacman -Syu --noconfirm base-devel clang cmake ninja go sqlite git
+        run: |
+          pacman -Syu --noconfirm base-devel clang cmake ninja go sqlite git \
+            libc++ libc++abi
 
       - uses: actions/checkout@v5
 

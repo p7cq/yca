@@ -25,6 +25,12 @@ automated certificate issuance.
 
 %build
 export CC=clang CXX=clang++
+# Fedora's rpmbuild auto-exports CFLAGS/CXXFLAGS carrying gcc-only
+# -specs=.../redhat-hardened-cc1 (annobin) flags, which CMake would pick up
+# from the environment; clang rejects them as unused arguments, which
+# CMakeLists.txt's -Werror then turns into a build failure. The project sets
+# its own flags explicitly, so nothing from rpm's default optflags is wanted.
+unset CFLAGS CXXFLAGS FFLAGS FCFLAGS LDFLAGS
 cmake -B build -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX=%{_prefix} \
