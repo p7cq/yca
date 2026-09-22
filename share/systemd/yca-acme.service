@@ -16,11 +16,11 @@ After=network.target
 User=yca
 Group=yca
 EnvironmentFile=/etc/yca/yca.env
-ExecStart=/usr/local/bin/yca-acme \
+ExecStart=/usr/bin/yca-acme \
   --state /var/lib/yca/acme.db \
   --listen 127.0.0.1:8555 \
   --url https://pki.example.ca \
-  --yca /usr/local/bin/yca \
+  --yca /usr/bin/yca \
   --config /etc/yca/yca.toml \
   --store /var/lib/yca/store
 Restart=on-failure

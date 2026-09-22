@@ -17,7 +17,7 @@ Type=oneshot
 User=yca
 Group=yca
 EnvironmentFile=/etc/yca/yca.env
-ExecStart=/usr/local/bin/yca --config /etc/yca/yca.toml --store /var/lib/yca/store refresh crl signing
+ExecStart=/usr/bin/yca --config /etc/yca/yca.toml --store /var/lib/yca/store refresh crl signing
 
 # State dir: rw; pkcs11 backend: AF_UNIX (pcscd); no network.
 UMask=0077
