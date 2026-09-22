@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     branches: [master]
+  # Manual retry (e.g. after a packaging fix) without a throwaway VERSION
+  # bump. github.event.before is then empty, which check-version already
+  # treats as changed=true (see the git cat-file fallback below); the
+  # "tag already exists" guard still blocks a duplicate release.
+  workflow_dispatch:
 
 concurrency:
   group: release
@@ -55,18 +60,20 @@ jobs:
     runs-on: ubuntu-latest
     container: debian:trixie
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Trust the workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
+      # git must be present before checkout/safe.directory; the base image
+      # ships without it.
       - name: Install build dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates build-essential debhelper devscripts \
+            ca-certificates git build-essential debhelper devscripts \
             clang cmake ninja-build libc++-dev libc++abi-dev \
             libsqlite3-dev pkg-config golang-go
+
+      - uses: actions/checkout@v5
+
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Sync changelog with VERSION
         run: |
@@ -94,16 +101,16 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Trust the workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
       - name: Install build dependencies
         run: |
           dnf install -y clang cmake ninja-build sqlite-devel \
             libcxx-devel libcxxabi-devel golang pkgconf-pkg-config \
             rpm-build git
+
+      - uses: actions/checkout@v5
+
+      - name: Trust the workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Build source tarball
         run: |
@@ -135,13 +142,13 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
+      - name: Install build dependencies
+        run: pacman -Syu --noconfirm base-devel clang cmake ninja go sqlite git
+
       - uses: actions/checkout@v5
 
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Install build dependencies
-        run: pacman -Syu --noconfirm base-devel clang cmake ninja go sqlite git
 
       - name: Sync pkgver with VERSION
         run: |
