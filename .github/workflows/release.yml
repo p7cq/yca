@@ -205,7 +205,12 @@ jobs:
               -Wno-dev
             cmake --build build --target yca -j "$(sysctl -n hw.ncpu)"
 
-            ( cd acme && go build -ldflags "-X main.version=${version}" -o ../bin/yca-acme . )
+            # -buildvcs=false: go's automatic VCS stamping runs git inside
+            # acme/, which fails here (the VM's shared workspace mount
+            # trips git's ownership check); the version is already
+            # embedded via -ldflags, so VCS info isn't needed.
+            ( cd acme && go build -buildvcs=false \
+                -ldflags "-X main.version=${version}" -o ../bin/yca-acme . )
 
             rm -rf stage
             DESTDIR=stage cmake --install build
