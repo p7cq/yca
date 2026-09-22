@@ -9,7 +9,7 @@ License:        Apache-2.0
 URL:            https://github.com/p7cq/yca
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  clang cmake ninja-build sqlite-devel libcxx-devel libcxxabi-devel golang pkgconf-pkg-config
+BuildRequires:  clang cmake ninja-build sqlite-devel libcxx-devel libcxxabi-devel golang pkgconf-pkg-config systemd-rpm-macros
 Requires:       sqlite-libs libcxx libcxxabi
 # Only needed if the ACME client used against repository_host validates via
 # DNS-01 through dynamic DNS (e.g. acme.sh's dns_nsupdate hook).

@@ -3,10 +3,7 @@ name: Release
 on:
   push:
     branches: [master]
-  # Manual retry (e.g. after a packaging fix) without a throwaway VERSION
-  # bump. github.event.before is then empty, which check-version already
-  # treats as changed=true (see the git cat-file fallback below); the
-  # "tag already exists" guard still blocks a duplicate release.
+  # Manual retry
   workflow_dispatch:
 
 concurrency:
@@ -60,14 +57,12 @@ jobs:
     runs-on: ubuntu-latest
     container: debian:trixie
     steps:
-      # git must be present before checkout/safe.directory; the base image
-      # ships without it.
       - name: Install build dependencies
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates git build-essential debhelper \
-            clang cmake ninja-build libc++-dev libc++abi-dev \
+            clang libclang-rt-dev cmake ninja-build libc++-dev libc++abi-dev \
             libsqlite3-dev pkg-config golang-go
 
       - uses: actions/checkout@v5
@@ -83,6 +78,14 @@ jobs:
 
       - name: Build package
         run: dpkg-buildpackage -b -us -uc
+
+      # Show compiler errors
+      - name: CMake configure log
+        if: failure()
+        run: |
+          echo ":: CMake Error Log ::"
+          cat build/CMakeFiles/CMakeError.log 2>/dev/null || echo "(no CMakeError.log)"
+          echo ":: End CMake Error Log ::"
 
       - name: Collect artifact
         run: |
@@ -105,7 +108,7 @@ jobs:
         run: |
           dnf install -y clang cmake ninja-build sqlite-devel \
             libcxx-devel libcxxabi-devel golang pkgconf-pkg-config \
-            rpm-build git
+            rpm-build systemd-rpm-macros git
 
       - uses: actions/checkout@v5
 
