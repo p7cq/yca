@@ -184,7 +184,10 @@ jobs:
       - name: shellcheck
         run: |
           shellcheck --version
-          shellcheck --severity=warning tests/*.sh
+          shellcheck --severity=warning tests/*.sh \
+            packaging/freebsd/rc.d/yca_acme \
+            packaging/freebsd/periodic/500.yca-crl-refresh \
+            packaging/freebsd/periodic/510.yca-acme-renew
 
       - name: clang-format
         run: |
