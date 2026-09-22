@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# Renew the TLS certificate yca-acme's own endpoint (nginx) uses, via
+# acme.sh against the CA it fronts (Linux equivalent:
+# yca-acme-renew.timer). acme.sh --cron walks every domain under
+# --home/--config-home and reissues+reinstalls only the ones inside their
+# renewal window, using the install-cert location (key/fullchain paths,
+# reloadcmd) saved by the initial --issue ceremony - no separate install
+# step here. Disabled by default: set
+# daily_yca_acme_renew_enable="YES" in /etc/periodic.conf.local to run it.
+
+if [ -r /etc/defaults/periodic.conf ]; then
+    . /etc/defaults/periodic.conf
+    source_periodic_confs
+fi
+
+: "${daily_yca_acme_renew_enable:="NO"}"
+: "${daily_yca_acme_renew_home:="/etc/yca/acme"}"
+
+rc=0
+
+case "$daily_yca_acme_renew_enable" in
+[Yy][Ee][Ss])
+    echo ""
+    echo "Renewing the yca-acme endpoint certificate:"
+    /usr/local/sbin/acme.sh --cron \
+        --home "$daily_yca_acme_renew_home" \
+        --config-home "$daily_yca_acme_renew_home"
+    rc=$?
+    ;;
+esac
+
+exit "$rc"

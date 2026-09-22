@@ -221,12 +221,25 @@ jobs:
             DESTDIR=stage cmake --install build
             mkdir -p stage/usr/local/share/man/man1 \
                      stage/usr/local/share/zsh/site-functions \
-                     stage/usr/local/etc/yca
+                     stage/usr/local/etc/yca \
+                     stage/usr/local/etc/rc.d \
+                     stage/usr/local/etc/periodic/daily \
+                     stage/usr/local/share/examples/yca
             install -m755 bin/yca-acme stage/usr/local/bin/yca-acme
             install -m644 share/man/yca-acme.1 stage/usr/local/share/man/man1/yca-acme.1
             install -m644 share/zsh-completion/_yca-acme \
               stage/usr/local/share/zsh/site-functions/_yca-acme
             install -m600 yca.toml stage/usr/local/etc/yca/yca.toml
+            install -m755 packaging/freebsd/rc.d/yca_acme \
+              stage/usr/local/etc/rc.d/yca_acme
+            install -m755 packaging/freebsd/periodic/500.yca-crl-refresh \
+              stage/usr/local/etc/periodic/daily/500.yca-crl-refresh
+            install -m755 packaging/freebsd/periodic/510.yca-acme-renew \
+              stage/usr/local/etc/periodic/daily/510.yca-acme-renew
+            install -m644 packaging/freebsd/crontab.sample \
+              stage/usr/local/share/examples/yca/crontab.sample
+            install -m644 share/nginx/yca.conf \
+              stage/usr/local/share/examples/yca/nginx-yca.conf
 
             abi="$(pkg config ABI)"
             sqlite_version="$(pkg query '%v' sqlite3)"

@@ -1,6 +1,11 @@
 bin/yca
 bin/yca-acme
+etc/rc.d/yca_acme
+etc/periodic/daily/500.yca-crl-refresh
+etc/periodic/daily/510.yca-acme-renew
 etc/yca/yca.toml
+share/examples/yca/crontab.sample
+share/examples/yca/nginx-yca.conf
 share/man/man1/yca-acme.1
 share/man/man1/yca.1
 share/zsh/site-functions/_yca

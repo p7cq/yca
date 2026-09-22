@@ -1,0 +1,40 @@
+#!/bin/sh
+#
+# Re-sign the published yca signing CRL (Linux equivalent:
+# yca-crl-refresh.timer). Cadence vs nextUpdate: the signing CRL promises
+# re-publication within crl_next_update_days (7); daily leaves 6 days of
+# margin - keep this comfortably below the horizon if either changes.
+# Disabled by default: set daily_yca_crl_refresh_enable="YES" in
+# /etc/periodic.conf.local to run it.
+
+if [ -r /etc/defaults/periodic.conf ]; then
+    . /etc/defaults/periodic.conf
+    source_periodic_confs
+fi
+
+: "${daily_yca_crl_refresh_enable:="NO"}"
+: "${daily_yca_crl_refresh_user:="ca"}"
+: "${daily_yca_crl_refresh_envfile:="/etc/yca/yca.env"}"
+: "${daily_yca_crl_refresh_config:="/etc/yca/yca.toml"}"
+: "${daily_yca_crl_refresh_store:="/var/db/yca/store"}"
+
+rc=0
+
+case "$daily_yca_crl_refresh_enable" in
+[Yy][Ee][Ss])
+    echo ""
+    echo "Re-signing the yca signing CRL:"
+    if [ -r "$daily_yca_crl_refresh_envfile" ]; then
+        su -m "$daily_yca_crl_refresh_user" -c \
+            "set -a; . '$daily_yca_crl_refresh_envfile'; set +a; \
+             exec /usr/local/bin/yca --config '$daily_yca_crl_refresh_config' \
+             --store '$daily_yca_crl_refresh_store' refresh crl signing"
+        rc=$?
+    else
+        echo "yca: $daily_yca_crl_refresh_envfile not readable, skipping" 1>&2
+        rc=2
+    fi
+    ;;
+esac
+
+exit "$rc"
