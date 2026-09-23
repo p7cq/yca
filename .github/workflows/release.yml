@@ -60,6 +60,28 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
+  tag:
+    name: tag release
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # A manual re-run adding arm64 to an already-released version hits
+      # an existing tag.
+      - name: Create and push tag
+        run: |
+          tag="${{ needs.check-version.outputs.tag }}"
+          if git ls-remote --tags origin "refs/tags/${tag}" | grep -q "refs/tags/${tag}$"; then
+            echo "tag ${tag} already exists, not recreating"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$tag"
+            git push origin "$tag"
+          fi
+
   build-deb:
     name: build .deb (${{ matrix.arch }})
     needs: check-version
@@ -320,28 +342,65 @@ jobs:
           name: freebsd-package-${{ matrix.arch }}
           path: dist/*.pkg
 
-  release:
-    name: tag + publish release
-    needs: [check-version, build-deb, build-rpm, build-arch, build-freebsd]
+  build-gentoo:
+    name: update Gentoo ebuild + Manifest
+    needs: [check-version, tag]
     if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
 
-      # Idempotent: a manual re-run adding arm64 to an already-released
-      # version hits an existing tag - don't fail trying to recreate it.
-      - name: Create and push tag
+      # The ebuild's SRC_URI is the tag's GitHub-generated tarball, so
+      # digests can only be computed once the tag from the `tag` job
+      # exists.
+      - name: Update ebuild filename and Manifest
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
         run: |
-          tag="${{ needs.check-version.outputs.tag }}"
-          if git ls-remote --tags origin "refs/tags/${tag}" | grep -q "refs/tags/${tag}$"; then
-            echo "tag ${tag} already exists, not recreating"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git tag "$tag"
-            git push origin "$tag"
+          set -eu
+          dir=packaging/gentoo/app-crypt/yca
+          ebuild_new="${dir}/yca-${VERSION}.ebuild"
+
+          old="$(ls "${dir}"/*.ebuild)"
+          if [ "$old" != "$ebuild_new" ]; then
+            git mv "$old" "$ebuild_new"
           fi
 
+          tarball="$(mktemp)"
+          curl -fsSL -o "$tarball" \
+            "https://github.com/p7cq/yca/archive/refs/tags/v${VERSION}.tar.gz"
+
+          {
+            printf 'DIST yca-%s.tar.gz %s BLAKE2B %s SHA512 %s\n' \
+              "$VERSION" \
+              "$(stat -c%s "$tarball")" \
+              "$(b2sum "$tarball" | cut -d' ' -f1)" \
+              "$(sha512sum "$tarball" | cut -d' ' -f1)"
+            printf 'EBUILD yca-%s.ebuild %s BLAKE2B %s SHA512 %s\n' \
+              "$VERSION" \
+              "$(stat -c%s "$ebuild_new")" \
+              "$(b2sum "$ebuild_new" | cut -d' ' -f1)" \
+              "$(sha512sum "$ebuild_new" | cut -d' ' -f1)"
+          } > "${dir}/Manifest"
+          rm -f "$tarball"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$dir"
+          if git diff --cached --quiet; then
+            echo "no Gentoo packaging changes"
+          else
+            git commit -m "chore(gentoo): update ebuild/Manifest for v${VERSION}"
+            git pull --rebase origin master
+            git push origin HEAD:master
+          fi
+
+  release:
+    name: publish release
+    needs: [check-version, tag, build-deb, build-rpm, build-arch, build-freebsd, build-gentoo]
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
       - uses: actions/download-artifact@v8
         with:
           path: dist
