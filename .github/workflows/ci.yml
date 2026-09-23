@@ -12,17 +12,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Build and test in a debian:trixie container: the stock ubuntu-24.04
-  # runner ships cmake 3.28, below the 3.31 required by CMakeLists.txt.
   build-test:
     name: build + ctest (${{ matrix.build_type }})
     runs-on: ubuntu-latest
-    container: debian:trixie
+    container: debian:trixie # for cmake 3.31+
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        # Debug adds ASan and coverage instrumentation, Release strips.
         build_type: [Debug, Release]
     env:
       CCACHE_DIR: /github/home/.cache/ccache

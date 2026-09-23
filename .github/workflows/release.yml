@@ -3,8 +3,6 @@ name: Release
 on:
   push:
     branches: [master]
-  # Manual retry, and/or adding arm64 assets to an already-released version
-  # (push builds amd64 only).
   workflow_dispatch:
     inputs:
       include_arm64:
@@ -99,8 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Job-level `container:` starts before any step runs; plain on the host
-      # and drives an explicit `docker run --platform`.
+      # Job-level `container:` starts before any step runs.
       - name: Set up QEMU
         if: matrix.arch == 'arm64' && github.event.inputs.include_arm64 == 'true'
         uses: docker/setup-qemu-action@v4
@@ -198,8 +195,7 @@ jobs:
             fedora:latest /work/ci-build-rpm.sh
           rm -f ci-build-rpm.sh
 
-      # Native rpmbuild filename encodes the Fedora version and arch -
-      # no need to rename it.
+      # Native rpmbuild filename encodes the Fedora version and arch.
       - uses: actions/upload-artifact@v7
         if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         with:
@@ -223,16 +219,12 @@ jobs:
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      # makepkg refuses to run as root. pkgver() in PKGBUILD reads VERSION
-      # itself now, no sed step needed here.
       - name: Build package
         run: |
           useradd -m builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
           su builder -c "cd '$GITHUB_WORKSPACE' && makepkg -f --noconfirm"
 
-      # Native makepkg filename (pkgname-pkgver-pkgrel-arch.pkg.tar.zst) is
-      # unambiguous and standard Arch convention.
       - name: Collect artifact
         run: |
           mkdir -p dist
@@ -248,9 +240,7 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    # aarch64 is full-system QEMU emulation (not just CPU-instruction, like
-    # the Linux container jobs) - vmactions' own docs say to keep
-    # runs-on: ubuntu-latest even for aarch64, not an ARM runner.
+    # vmactions' docs: keep runs-on: ubuntu-latest even for aarch64.
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -263,8 +253,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # No native FreeBSD runner on GH Actions: this runs a real FreeBSD VM
-      # (via QEMU) on the Linux runner.
       - name: Build and package on FreeBSD
         if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         uses: vmactions/freebsd-vm@v1
@@ -284,10 +272,8 @@ jobs:
               -Wno-dev
             cmake --build build --target yca -j "$(sysctl -n hw.ncpu)"
 
-            # -buildvcs=false: go's automatic VCS stamping runs git inside
-            # acme/, which fails here (the VM's shared workspace mount
-            # trips git's ownership check); the version is already
-            # embedded via -ldflags, so VCS info isn't needed.
+            # The version is already embedded via -ldflags, VCS info
+            # isn't needed.
             ( cd acme && go build -buildvcs=false \
                 -ldflags "-X main.version=${version}" -o ../bin/yca-acme . )
 
@@ -329,9 +315,6 @@ jobs:
             cpu_arch="$(echo "$abi" | cut -d: -f3)"
             mv "dist/yca-${version}.pkg" "dist/yca-${version}-freebsd-${os_major}-${cpu_arch}.pkg"
 
-      # vmactions/freebsd-vm shares GITHUB_WORKSPACE into the VM, so dist/
-      # written inside `run:` should be visible here too - unconfirmed by
-      # an actual run yet, unlike the rest of this job's commands.
       - name: Check artifact
         if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         run: ls -la dist/
