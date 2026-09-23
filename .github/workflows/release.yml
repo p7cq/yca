@@ -51,11 +51,22 @@ jobs:
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
   build-deb:
-    name: build .deb
+    name: build .deb (${{ matrix.arch }})
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    container: debian:trixie
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+    container:
+      image: debian:trixie
+      options: --platform=${{ matrix.platform }}
     steps:
       - name: Install build dependencies
         run: |
@@ -96,15 +107,26 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: deb-package
+          name: deb-package-${{ matrix.arch }}
           path: dist/*.deb
 
   build-rpm:
-    name: build .rpm
+    name: build .rpm (${{ matrix.arch }})
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
-    container: fedora:latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: arm64
+            platform: linux/arm64
+    container:
+      image: fedora:latest
+      options: --platform=${{ matrix.platform }}
     steps:
       - name: Install build dependencies
         run: |
@@ -139,7 +161,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: rpm-package
+          name: rpm-package-${{ matrix.arch }}
           path: dist/*.rpm
 
   build-arch:
@@ -184,10 +206,22 @@ jobs:
           path: dist/*.pkg.tar.zst
 
   build-freebsd:
-    name: build .pkg (FreeBSD)
+    name: build .pkg (FreeBSD ${{ matrix.arch }})
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
+    # aarch64 is full-system QEMU emulation (not just CPU-instruction, like
+    # the Linux container jobs) - vmactions' own docs say to keep
+    # runs-on: ubuntu-latest even for aarch64, not an ARM runner.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            vm_arch: x86_64
+          - arch: arm64
+            vm_arch: aarch64
     steps:
       - uses: actions/checkout@v5
 
@@ -197,6 +231,7 @@ jobs:
         uses: vmactions/freebsd-vm@v1
         with:
           release: "15.1"
+          arch: ${{ matrix.vm_arch }}
           usesh: true
           prepare: |
             pkg install -y cmake ninja go sqlite3 git
@@ -252,7 +287,8 @@ jobs:
             mkdir -p dist
             pkg create -v -m pkgmeta -r stage -p packaging/freebsd/pkg-plist -o dist
             os_major="$(echo "$abi" | cut -d: -f2)"
-            mv "dist/yca-${version}.pkg" "dist/yca-${version}-freebsd-${os_major}-amd64.pkg"
+            cpu_arch="$(echo "$abi" | cut -d: -f3)"
+            mv "dist/yca-${version}.pkg" "dist/yca-${version}-freebsd-${os_major}-${cpu_arch}.pkg"
 
       # vmactions/freebsd-vm shares GITHUB_WORKSPACE into the VM, so dist/
       # written inside `run:` should be visible here too - unconfirmed by
@@ -262,7 +298,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: freebsd-package
+          name: freebsd-package-${{ matrix.arch }}
           path: dist/*.pkg
 
   release:

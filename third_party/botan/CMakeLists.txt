@@ -13,6 +13,9 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux"
 elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD"
        AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64)$")
   set(BOTAN_AMALGAMATION freebsd-x86_64/botan_all.cpp)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD"
+       AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+  set(BOTAN_AMALGAMATION freebsd-aarch64/botan_all.cpp)
 else()
   message(FATAL_ERROR "No vendored Botan amalgamation for "
                       "${CMAKE_SYSTEM_NAME}/${CMAKE_SYSTEM_PROCESSOR}; "

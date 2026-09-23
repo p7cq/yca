@@ -6,7 +6,9 @@ pkgname=yca
 pkgver=0.7.10
 pkgrel=1
 pkgdesc='Two-tier ECDSA certificate authority CLI with an ACME frontend'
-arch=('x86_64' 'aarch64')
+# aarch64 not built here: Arch Linux itself has no aarch64 repos (that's
+# Arch Linux ARM, a separate project/toolchain) - CI only builds x86_64.
+arch=('x86_64')
 url='https://github.com/p7cq/yca'
 license=('Apache-2.0')
 # yca (C++) links libsqlite3 + libc++/libc++abi dynamically; Botan is vendored
