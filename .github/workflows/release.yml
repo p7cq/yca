@@ -64,46 +64,50 @@ jobs:
             platform: linux/amd64
           - arch: arm64
             platform: linux/arm64
-    container:
-      image: debian:trixie
-      options: --platform=${{ matrix.platform }}
     steps:
-      - name: Install build dependencies
+      - uses: actions/checkout@v5
+
+      # Job-level `container:` starts before any step runs; plain on the host
+      # and drives an explicit `docker run --platform`.
+      - name: Set up QEMU
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build .deb in container
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
         run: |
+          cat > ci-build-deb.sh <<'SCRIPT'
+          #!/bin/sh
+          set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
             ca-certificates git build-essential debhelper \
             clang clang-tools libclang-rt-dev cmake ninja-build \
             libc++-dev libc++abi-dev libsqlite3-dev pkg-config golang-go
-
-      - uses: actions/checkout@v5
-
-      - name: Trust the workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      # Follow Debian's own idiom for a suite-specific build.
-      - name: Sync changelog with VERSION
-        run: |
-          version="${{ needs.check-version.outputs.version }}"
+          git config --global --add safe.directory /work
+          cd /work
           printf 'yca (%s-1~trixie) unstable; urgency=medium\n\n  * Release %s.\n\n -- p7cq <12068007+p7cq@users.noreply.github.com>  %s\n' \
-            "$version" "$version" "$(date -R)" > debian/changelog
-
-      - name: Build package
-        run: dpkg-buildpackage -b -us -uc
+            "$VERSION" "$VERSION" "$(date -R)" > debian/changelog
+          dpkg-buildpackage -b -us -uc
+          mkdir -p /work/dist
+          mv /yca_*.deb /work/dist/
+          SCRIPT
+          chmod +x ci-build-deb.sh
+          docker run --rm --platform=${{ matrix.platform }} \
+            -e VERSION -v "${{ github.workspace }}:/work" -w /work \
+            debian:trixie /work/ci-build-deb.sh
+          rm -f ci-build-deb.sh
 
       # CMake 3.26+ logs try_compile checks (like the pthread probes) to
-      # CMakeConfigureLog.yaml, not the old CMakeError.log.
+      # CMakeConfigureLog.yaml, not the old CMakeError.log. build/ is
+      # inside the bind-mounted workspace, so it's visible here too.
       - name: CMake configure log
         if: failure()
         run: |
           echo ":: CMake Diagnostic Log ::"
           cat build/CMakeFiles/CMakeConfigureLog.yaml 2>/dev/null || echo "(no CMakeConfigureLog.yaml)"
           echo ":: End CMake Diagnostic Log ::"
-
-      - name: Collect artifact
-        run: |
-          mkdir -p dist
-          mv ../yca_*.deb dist/
 
       - uses: actions/upload-artifact@v4
         with:
@@ -124,41 +128,43 @@ jobs:
             platform: linux/amd64
           - arch: arm64
             platform: linux/arm64
-    container:
-      image: fedora:latest
-      options: --platform=${{ matrix.platform }}
     steps:
-      - name: Install build dependencies
+      - uses: actions/checkout@v5
+
+      # See build-deb: job-level `container:` starts before any step, so
+      # QEMU can't be registered in time for a foreign platform.
+      - name: Set up QEMU
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build .rpm in container
+        env:
+          VERSION: ${{ needs.check-version.outputs.version }}
         run: |
+          cat > ci-build-rpm.sh <<'SCRIPT'
+          #!/bin/sh
+          set -eux
           dnf install -y clang cmake ninja-build sqlite-devel \
             libcxx-devel libcxxabi-devel golang pkgconf-pkg-config \
             rpm-build systemd-rpm-macros git
-
-      - uses: actions/checkout@v5
-
-      - name: Trust the workspace
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
-      - name: Build source tarball
-        run: |
-          version="${{ needs.check-version.outputs.version }}"
+          git config --global --add safe.directory /work
+          cd /work
           mkdir -p "$HOME/rpmbuild/SOURCES" "$HOME/rpmbuild/SPECS"
-          git archive --format=tar.gz --prefix="yca-${version}/" \
-            -o "$HOME/rpmbuild/SOURCES/yca-${version}.tar.gz" HEAD
+          git archive --format=tar.gz --prefix="yca-${VERSION}/" \
+            -o "$HOME/rpmbuild/SOURCES/yca-${VERSION}.tar.gz" HEAD
           cp packaging/rpm/yca.spec "$HOME/rpmbuild/SPECS/"
+          rpmbuild --define "version ${VERSION}" -bb "$HOME/rpmbuild/SPECS/yca.spec"
+          mkdir -p /work/dist
+          cp "$HOME"/rpmbuild/RPMS/*/*.rpm /work/dist/
+          SCRIPT
+          chmod +x ci-build-rpm.sh
+          docker run --rm --platform=${{ matrix.platform }} \
+            -e VERSION -v "${{ github.workspace }}:/work" -w /work \
+            fedora:latest /work/ci-build-rpm.sh
+          rm -f ci-build-rpm.sh
 
-      - name: Build package
-        run: |
-          rpmbuild --define "version ${{ needs.check-version.outputs.version }}" \
-            -bb "$HOME/rpmbuild/SPECS/yca.spec"
-
-      # Native rpmbuild filename encodes the Fedora version and arch
+      # Native rpmbuild filename encodes the Fedora version and arch -
       # no need to rename it.
-      - name: Collect artifact
-        run: |
-          mkdir -p dist
-          cp "$HOME"/rpmbuild/RPMS/*/*.rpm dist/
-
       - uses: actions/upload-artifact@v4
         with:
           name: rpm-package-${{ matrix.arch }}
