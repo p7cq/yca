@@ -238,7 +238,7 @@ jobs:
               stage/usr/local/etc/periodic/daily/510.yca-acme-renew
             install -m644 packaging/freebsd/crontab.sample \
               stage/usr/local/share/examples/yca/crontab.sample
-            install -m644 share/nginx/yca.conf \
+            install -m644 share/nginx/freebsd/yca.conf \
               stage/usr/local/share/examples/yca/nginx/yca.conf
 
             abi="$(pkg config ABI)"
