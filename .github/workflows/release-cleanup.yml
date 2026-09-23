@@ -1,0 +1,56 @@
+name: Release cleanup
+
+on:
+  workflow_dispatch:
+    inputs:
+      keep:
+        description: "Number of most recent releases to keep"
+        type: number
+        default: 10
+      dry_run:
+        description: "Only list the releases that would be deleted"
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  delete-releases:
+    name: delete old releases
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KEEP: ${{ inputs.keep }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Delete releases beyond the newest ${{ inputs.keep }}
+        run: |
+          set -eu
+          case "$KEEP" in
+            '' | *[!0-9]* | 0)
+              echo "keep must be a positive integer, got '${KEEP}'" >&2
+              exit 1
+              ;;
+          esac
+
+          repo="repos/${GITHUB_REPOSITORY}"
+          # Collect everything before deleting, so deletions do not shift
+          # the pages still being fetched.
+          releases="$(gh api --paginate "${repo}/releases?per_page=100" \
+            --jq '.[] | "\(.created_at) \(.id) \(.tag_name)"' | sort -r)"
+
+          printf '%s\n' "$releases" | tail -n +"$((KEEP + 1))" |
+            while read -r _ id tag; do
+              [ -n "$id" ] || continue
+              if [ "$DRY_RUN" = "true" ]; then
+                echo "would delete release ${tag} (${id})"
+              else
+                echo "deleting release ${tag} (${id})"
+                gh api -X DELETE "${repo}/releases/${id}"
+              fi
+            done
