@@ -11,6 +11,8 @@
 #include "linux-aarch64/botan_all.h"
 #elif defined(__FreeBSD__) && defined(__x86_64__)
 #include "freebsd-x86_64/botan_all.h"
+#elif defined(__FreeBSD__) && defined(__aarch64__)
+#include "freebsd-aarch64/botan_all.h"
 #else
 #error                                                                         \
     "No vendored Botan amalgamation for this platform; add a target to tools/update-botan.sh"
