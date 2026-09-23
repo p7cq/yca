@@ -1,0 +1,38 @@
+name: Cleanup
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: cleanup
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+
+jobs:
+  delete-runs:
+    name: delete old workflow runs
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KEEP: 20
+    steps:
+      - name: Delete runs beyond the newest ${{ env.KEEP }}
+        run: |
+          set -eu
+          repo="repos/${GITHUB_REPOSITORY}"
+          for wf in $(gh api --paginate "${repo}/actions/workflows" \
+            --jq '.workflows[].id'); do
+            # Collect all ids before deleting, so deletions do not shift
+            # the pages still being fetched. The API returns newest first.
+            ids="$(gh api --paginate \
+              "${repo}/actions/workflows/${wf}/runs?status=completed&per_page=100" \
+              --jq '.workflow_runs[].id')"
+            for run in $(printf '%s\n' "$ids" | tail -n +"$((KEEP + 1))"); do
+              echo "deleting run ${run} (workflow ${wf})"
+              gh api -X DELETE "${repo}/actions/runs/${run}"
+            done
+          done
