@@ -4,15 +4,17 @@
 # `crontab -u ca -e` (per-user crontab, no user field on the line below;
 # add one if you instead add these to the system /etc/crontab).
 #
-# Publish: hourly, no secret needed (public artifacts only). Adjust the
-# source path to your store location.
-0 * * * *	/usr/local/bin/rsync -rt --chmod=F644 --delete --max-delete=8 --include='*.crt' --include='*.crl' --exclude='*' /var/db/yca/store/ca/ /srv/yca/
+# Publish hourly. Adjust the source path to your store location. -p
+# is required for --chmod to take effect at all (rsync(1)); D755 keeps
+# /srv/yca itself from inheriting the store dir restrictive mode - see
+# share/systemd/yca-publish.service for the full explanation.
+0 * * * *	/usr/local/bin/rsync -rtp --chmod=D755,F644 --delete --max-delete=8 --include='*.crt' --include='*.crl' --exclude='*' /var/db/yca/store/ca/ /srv/yca/
 
 # Root CRL refresh: quarterly (see yca-root-crl-refresh.timer's Linux
 # header for the cadence rationale: root_crl_next_update_days=183).
 # Needs CA_STORE_PASSPHRASE (internal backend) or CA_HSM_ROOT_PIN
-# (pkcs11 root) in /etc/yca/yca.env. NOT recommended unattended for
-# split/hybrid HSM layouts, where the root token is normally offline -
-# run this as part of the quarterly root-token ceremony instead and
-# leave this line out.
-0 3 1 1,4,7,10	set -a; . /etc/yca/yca.env; set +a; /usr/local/bin/yca --config /etc/yca/yca.toml --store /var/db/yca/store refresh crl root
+# (pkcs11 root) in /usr/local/etc/yca/yca.env. NOT recommended
+# unattended for split/hybrid HSM layouts, where the root token is
+# normally offline - run this as part of the quarterly root-token
+# ceremony instead and leave this line out.
+0 3 1 1,4,7,10 *	set -a; . /usr/local/etc/yca/yca.env; set +a; /usr/local/bin/yca --config /usr/local/etc/yca/yca.toml --store /var/db/yca/store refresh crl root
