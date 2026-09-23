@@ -339,6 +339,7 @@ jobs:
       - name: Update ebuild filename and Manifest
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
           dir=packaging/gentoo/app-crypt/yca
@@ -367,16 +368,34 @@ jobs:
           } > "${dir}/Manifest"
           rm -f "$tarball"
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add "$dir"
           if git diff --cached --quiet; then
             echo "no Gentoo packaging changes"
-          else
-            git commit -m "chore(gentoo): update app-crypt/yca for v${VERSION}"
-            git pull --rebase origin master
-            git push origin HEAD:master
+            exit 0
           fi
+
+          head="$(git ls-remote origin refs/heads/master | cut -f1)"
+          adds="$(git diff --cached --no-renames --name-only --diff-filter=AM |
+            while read -r f; do
+              jq -n --arg p "$f" --arg c "$(base64 -w0 "$f")" \
+                '{path: $p, contents: $c}'
+            done | jq -s .)"
+          dels="$(git diff --cached --no-renames --name-only --diff-filter=D |
+            jq -R . | jq -s 'map({path: .})')"
+
+          jq -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg head "$head" \
+            --arg msg "chore(gentoo): update app-crypt/yca for v${VERSION}" \
+            --argjson adds "$adds" \
+            --argjson dels "$dels" \
+            '{query: "mutation($i: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $i) { commit { url } } }",
+              variables: {i: {
+                branch: {repositoryNameWithOwner: $repo, branchName: "master"},
+                message: {headline: $msg},
+                expectedHeadOid: $head,
+                fileChanges: {additions: $adds, deletions: $dels}}}}' |
+            gh api graphql --input -
 
   release:
     name: publish release
