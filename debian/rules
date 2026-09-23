@@ -37,7 +37,7 @@ override_dh_auto_install:
 	install -m644 share/systemd/*.service share/systemd/*.timer \
 		debian/yca/lib/systemd/system/
 	install -Dm644 share/nginx/yca.conf \
-		debian/yca/usr/share/doc/yca/examples/nginx-yca.conf
+		debian/yca/usr/share/doc/yca/examples/nginx/yca.conf
 
 override_dh_shlibdeps:
 	dh_shlibdeps -- --ignore-missing-info

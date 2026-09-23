@@ -55,7 +55,7 @@ install -Dm644 share/zsh-completion/_yca-acme %{buildroot}%{_datadir}/zsh/site-f
 install -Dm600 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
 install -dm755 %{buildroot}%{_unitdir}
 install -m644 share/systemd/*.service share/systemd/*.timer %{buildroot}%{_unitdir}/
-install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/nginx-yca.conf
+install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/nginx/yca.conf
 
 %files
 %{_bindir}/yca
@@ -66,7 +66,7 @@ install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/ngin
 %{_datadir}/zsh/site-functions/_yca-acme
 %config(noreplace) %{_sysconfdir}/yca/yca.toml
 %{_unitdir}/*
-%doc %{_docdir}/%{name}/examples/nginx-yca.conf
+%doc %{_docdir}/%{name}/examples/nginx/yca.conf
 %license LICENSE
 
 %changelog

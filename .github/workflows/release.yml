@@ -224,7 +224,7 @@ jobs:
                      stage/usr/local/etc/yca \
                      stage/usr/local/etc/rc.d \
                      stage/usr/local/etc/periodic/daily \
-                     stage/usr/local/share/examples/yca
+                     stage/usr/local/share/examples/yca/nginx
             install -m755 bin/yca-acme stage/usr/local/bin/yca-acme
             install -m644 share/man/yca-acme.1 stage/usr/local/share/man/man1/yca-acme.1
             install -m644 share/zsh-completion/_yca-acme \
@@ -239,7 +239,7 @@ jobs:
             install -m644 packaging/freebsd/crontab.sample \
               stage/usr/local/share/examples/yca/crontab.sample
             install -m644 share/nginx/yca.conf \
-              stage/usr/local/share/examples/yca/nginx-yca.conf
+              stage/usr/local/share/examples/yca/nginx/yca.conf
 
             abi="$(pkg config ABI)"
             sqlite_version="$(pkg query '%v' sqlite3)"
