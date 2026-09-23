@@ -1,7 +1,7 @@
 Source: yca
 Section: utils
 Priority: optional
-Maintainer: p7cq <12068007+p7cq@users.noreply.github.com>
+Maintainer: p7cq <707c71@gmail.com>
 Build-Depends: debhelper-compat (= 13), cmake, ninja-build, clang,
  libc++-dev, libc++abi-dev, libsqlite3-dev, pkg-config, golang-go
 Standards-Version: 4.6.2

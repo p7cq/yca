@@ -87,7 +87,7 @@ jobs:
             libc++-dev libc++abi-dev libsqlite3-dev pkg-config golang-go
           git config --global --add safe.directory /work
           cd /work
-          printf 'yca (%s-1~trixie) unstable; urgency=medium\n\n  * Release %s.\n\n -- p7cq <12068007+p7cq@users.noreply.github.com>  %s\n' \
+          printf 'yca (%s-1~trixie) unstable; urgency=medium\n\n  * Release %s.\n\n -- p7cq <707c71@gmail.com>  %s\n' \
             "$VERSION" "$VERSION" "$(date -R)" > debian/changelog
           dpkg-buildpackage -b -us -uc
           mkdir -p /work/dist
@@ -187,12 +187,8 @@ jobs:
       - name: Trust the workspace
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Sync pkgver with VERSION
-        run: |
-          version="${{ needs.check-version.outputs.version }}"
-          sed -i "s/^pkgver=.*/pkgver=${version}/" PKGBUILD
-
-      # makepkg refuses to run as root.
+      # makepkg refuses to run as root. pkgver() in PKGBUILD reads VERSION
+      # itself now, no sed step needed here.
       - name: Build package
         run: |
           useradd -m builder

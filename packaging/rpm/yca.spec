@@ -70,5 +70,5 @@ install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/ngin
 %license LICENSE
 
 %changelog
-* Tue Sep 22 2026 p7cq <12068007+p7cq@users.noreply.github.com> - %{version}-1
+* Tue Sep 22 2026 p7cq <707c71@gmail.com> - %{version}-1
 - Automated packaging build.

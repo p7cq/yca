@@ -1,7 +1,9 @@
-# Maintainer: p7cq <12068007+p7cq@users.noreply.github.com>
+# Maintainer: p7cq <707c71@gmail.com>
 #
 # Builds from the local checkout (source=()), not a downloaded tarball: CI
-# runs makepkg directly against a git checkout after bumping pkgver via sed.
+# runs makepkg directly against a git checkout. pkgver() below keeps
+# pkgver in sync with VERSION dynamically - no sed step needed, and a
+# local `makepkg` gets the right version too, not just CI's.
 pkgname=yca
 pkgver=0.7.10
 pkgrel=1
@@ -23,6 +25,11 @@ makedepends=('clang' 'cmake' 'ninja' 'go')
 backup=('etc/yca/yca.toml')
 options=('!lto' '!debug')
 source=()
+
+pkgver() {
+  cd "$startdir"
+  cat VERSION
+}
 
 build() {
   cd "$startdir"
