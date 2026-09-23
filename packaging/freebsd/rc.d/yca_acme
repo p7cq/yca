@@ -10,17 +10,33 @@
 # EnvironmentFile= gives the Linux systemd unit.
 #
 # rc.conf(5) variables:
-#   yca_acme_enable   (bool)      default "NO"
-#   yca_acme_user     (str)       default "ca" - rc.subr wraps the whole
-#                                 command in `su -m <user>`, so the pidfile
-#                                 (below) must live somewhere that user can
-#                                 write - NOT the root-owned /var/run.
-#   yca_acme_env_file (path)      default "/usr/local/etc/yca/yca.env"
-#   yca_acme_state    (path)      default "/var/db/yca/acme.db"
-#   yca_acme_listen   (host:port) default "127.0.0.1:8555"
-#   yca_acme_url      (url)       default "https://pki.example.ca"
-#   yca_acme_config   (path)      default "/usr/local/etc/yca/yca.toml"
-#   yca_acme_store    (path)      default "/var/db/yca/store"
+#   yca_acme_enable      (bool)      default "NO"
+#   yca_acme_user        (str)       default "ca" - rc.subr wraps the
+#                                     whole command in `su -m <user>`, so
+#                                     the pidfile (below) must live
+#                                     somewhere that user can write - NOT
+#                                     the root-owned /var/run.
+#   yca_acme_env_file    (path)      default "/usr/local/etc/yca/yca.env"
+#   yca_acme_state       (path)      default "/var/db/yca/acme.db"
+#   yca_acme_listen      (host:port) default "127.0.0.1:8555"
+#   yca_acme_url         (url)       default "https://pki.example.ca"
+#   yca_acme_yca_bin     (path)      default "/usr/local/bin/yca" - the
+#                                     yca CLI yca-acme execs for signing
+#   yca_acme_config      (path)      default "/usr/local/etc/yca/yca.toml"
+#   yca_acme_store       (path)      default "/var/db/yca/store"
+#   yca_acme_id           (str)      default "acme" - enrolled identity
+#                                     used for signing
+#   yca_acme_http01_port (int)       default "80"
+#   yca_acme_valid       (duration)  default "" (empty: the CA's own
+#                                     ee_valid_days policy decides) -
+#                                     <N><s|m|h|d>, passed to
+#                                     'yca sign --valid'
+#   yca_acme_dns         (host[:53]) default "" (empty: system resolver)
+#                                     - resolver for dns-01 TXT lookups
+#   yca_acme_tls_cert    (path)      default "" (empty: don't serve TLS
+#                                     directly - the documented setup
+#                                     always fronts this with nginx)
+#   yca_acme_tls_key     (path)      default ""
 #
 # /var/db/yca must exist and be owned by yca_acme_user before this starts
 # (state db, pidfile); provisioning it is a manual step.
@@ -38,8 +54,15 @@ load_rc_config "$name"
 : "${yca_acme_state:="/var/db/yca/acme.db"}"
 : "${yca_acme_listen:="127.0.0.1:8555"}"
 : "${yca_acme_url:="https://pki.example.ca"}"
+: "${yca_acme_yca_bin:="/usr/local/bin/yca"}"
 : "${yca_acme_config:="/usr/local/etc/yca/yca.toml"}"
 : "${yca_acme_store:="/var/db/yca/store"}"
+: "${yca_acme_id:="acme"}"
+: "${yca_acme_http01_port:="80"}"
+: "${yca_acme_valid:=""}"
+: "${yca_acme_dns:=""}"
+: "${yca_acme_tls_cert:=""}"
+: "${yca_acme_tls_key:=""}"
 
 pidfile="/var/db/yca/${name}.pid"
 # procname/command/command_args below: all read by run_rc_command via eval
@@ -48,13 +71,22 @@ pidfile="/var/db/yca/${name}.pid"
 procname="/usr/local/bin/yca-acme"
 # shellcheck disable=SC2034
 command="/usr/sbin/daemon"
-# shellcheck disable=SC2034
-command_args="-p ${pidfile} -f /usr/local/bin/yca-acme \
-    --state ${yca_acme_state} \
-    --listen ${yca_acme_listen} \
-    --url ${yca_acme_url} \
-    --yca /usr/local/bin/yca \
-    --config ${yca_acme_config} \
-    --store ${yca_acme_store}"
+
+# Built incrementally rather than one literal string: an unset/empty
+# variable in an unquoted expansion adds no words. The optional flags (valid,
+# dns, tls-cert, tls-key) are only appended when actually set.
+command_args="-p ${pidfile} -f /usr/local/bin/yca-acme"
+command_args="${command_args} --state ${yca_acme_state}"
+command_args="${command_args} --listen ${yca_acme_listen}"
+command_args="${command_args} --url ${yca_acme_url}"
+command_args="${command_args} --yca ${yca_acme_yca_bin}"
+command_args="${command_args} --config ${yca_acme_config}"
+command_args="${command_args} --store ${yca_acme_store}"
+command_args="${command_args} --id ${yca_acme_id}"
+command_args="${command_args} --http01-port ${yca_acme_http01_port}"
+[ -n "${yca_acme_valid}" ] && command_args="${command_args} --valid ${yca_acme_valid}"
+[ -n "${yca_acme_dns}" ] && command_args="${command_args} --dns ${yca_acme_dns}"
+[ -n "${yca_acme_tls_cert}" ] && command_args="${command_args} --tls-cert ${yca_acme_tls_cert}"
+[ -n "${yca_acme_tls_key}" ] && command_args="${command_args} --tls-key ${yca_acme_tls_key}"
 
 run_rc_command "$1"
