@@ -63,9 +63,7 @@ jobs:
   build-deb:
     name: build .deb (${{ matrix.arch }})
     needs: check-version
-    if: |
-      needs.check-version.outputs.changed == 'true' &&
-      (matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true')
+    if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -82,10 +80,11 @@ jobs:
       # Job-level `container:` starts before any step runs; plain on the host
       # and drives an explicit `docker run --platform`.
       - name: Set up QEMU
-        if: matrix.arch != 'amd64'
+        if: matrix.arch == 'arm64' && github.event.inputs.include_arm64 == 'true'
         uses: docker/setup-qemu-action@v4
 
       - name: Build .deb in container
+        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
@@ -122,6 +121,7 @@ jobs:
           echo ":: End CMake Diagnostic Log ::"
 
       - uses: actions/upload-artifact@v7
+        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         with:
           name: deb-package-${{ matrix.arch }}
           path: dist/*.deb
@@ -129,9 +129,7 @@ jobs:
   build-rpm:
     name: build .rpm (${{ matrix.arch }})
     needs: check-version
-    if: |
-      needs.check-version.outputs.changed == 'true' &&
-      (matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true')
+    if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -148,10 +146,11 @@ jobs:
       # See build-deb: job-level `container:` starts before any step, so
       # QEMU can't be registered in time for a foreign platform.
       - name: Set up QEMU
-        if: matrix.arch != 'amd64'
+        if: matrix.arch == 'arm64' && github.event.inputs.include_arm64 == 'true'
         uses: docker/setup-qemu-action@v4
 
       - name: Build .rpm in container
+        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
@@ -180,6 +179,7 @@ jobs:
       # Native rpmbuild filename encodes the Fedora version and arch -
       # no need to rename it.
       - uses: actions/upload-artifact@v7
+        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         with:
           name: rpm-package-${{ matrix.arch }}
           path: dist/*.rpm
@@ -224,9 +224,7 @@ jobs:
   build-freebsd:
     name: build .pkg (FreeBSD ${{ matrix.arch }})
     needs: check-version
-    if: |
-      needs.check-version.outputs.changed == 'true' &&
-      (matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true')
+    if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
     # aarch64 is full-system QEMU emulation (not just CPU-instruction, like
     # the Linux container jobs) - vmactions' own docs say to keep
@@ -246,6 +244,7 @@ jobs:
       # No native FreeBSD runner on GH Actions: this runs a real FreeBSD VM
       # (via QEMU) on the Linux runner.
       - name: Build and package on FreeBSD
+        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         uses: vmactions/freebsd-vm@v1
         with:
           release: "15.1"
@@ -312,9 +311,11 @@ jobs:
       # written inside `run:` should be visible here too - unconfirmed by
       # an actual run yet, unlike the rest of this job's commands.
       - name: Check artifact
+        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         run: ls -la dist/
 
       - uses: actions/upload-artifact@v7
+        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         with:
           name: freebsd-package-${{ matrix.arch }}
           path: dist/*.pkg
