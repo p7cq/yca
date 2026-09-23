@@ -15,11 +15,11 @@
 #                                 command in `su -m <user>`, so the pidfile
 #                                 (below) must live somewhere that user can
 #                                 write - NOT the root-owned /var/run.
-#   yca_acme_env_file (path)      default "/etc/yca/yca.env"
+#   yca_acme_env_file (path)      default "/usr/local/etc/yca/yca.env"
 #   yca_acme_state    (path)      default "/var/db/yca/acme.db"
 #   yca_acme_listen   (host:port) default "127.0.0.1:8555"
 #   yca_acme_url      (url)       default "https://pki.example.ca"
-#   yca_acme_config   (path)      default "/etc/yca/yca.toml"
+#   yca_acme_config   (path)      default "/usr/local/etc/yca/yca.toml"
 #   yca_acme_store    (path)      default "/var/db/yca/store"
 #
 # /var/db/yca must exist and be owned by yca_acme_user before this starts
@@ -34,11 +34,11 @@ load_rc_config "$name"
 
 : "${yca_acme_enable:="NO"}"
 : "${yca_acme_user:="ca"}"
-: "${yca_acme_env_file:="/etc/yca/yca.env"}"
+: "${yca_acme_env_file:="/usr/local/etc/yca/yca.env"}"
 : "${yca_acme_state:="/var/db/yca/acme.db"}"
 : "${yca_acme_listen:="127.0.0.1:8555"}"
 : "${yca_acme_url:="https://pki.example.ca"}"
-: "${yca_acme_config:="/etc/yca/yca.toml"}"
+: "${yca_acme_config:="/usr/local/etc/yca/yca.toml"}"
 : "${yca_acme_store:="/var/db/yca/store"}"
 
 pidfile="/var/db/yca/${name}.pid"

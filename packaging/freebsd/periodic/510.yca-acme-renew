@@ -15,7 +15,7 @@ if [ -r /etc/defaults/periodic.conf ]; then
 fi
 
 : "${daily_yca_acme_renew_enable:="NO"}"
-: "${daily_yca_acme_renew_home:="/etc/yca/acme"}"
+: "${daily_yca_acme_renew_home:="/usr/local/etc/yca/acme"}"
 
 rc=0
 

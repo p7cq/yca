@@ -14,8 +14,8 @@ fi
 
 : "${daily_yca_crl_refresh_enable:="NO"}"
 : "${daily_yca_crl_refresh_user:="ca"}"
-: "${daily_yca_crl_refresh_envfile:="/etc/yca/yca.env"}"
-: "${daily_yca_crl_refresh_config:="/etc/yca/yca.toml"}"
+: "${daily_yca_crl_refresh_envfile:="/usr/local/etc/yca/yca.env"}"
+: "${daily_yca_crl_refresh_config:="/usr/local/etc/yca/yca.toml"}"
 : "${daily_yca_crl_refresh_store:="/var/db/yca/store"}"
 
 rc=0
