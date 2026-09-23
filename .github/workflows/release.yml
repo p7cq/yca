@@ -71,7 +71,7 @@ jobs:
       # and drives an explicit `docker run --platform`.
       - name: Set up QEMU
         if: matrix.arch != 'amd64'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Build .deb in container
         env:
@@ -109,7 +109,7 @@ jobs:
           cat build/CMakeFiles/CMakeConfigureLog.yaml 2>/dev/null || echo "(no CMakeConfigureLog.yaml)"
           echo ":: End CMake Diagnostic Log ::"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: deb-package-${{ matrix.arch }}
           path: dist/*.deb
@@ -135,7 +135,7 @@ jobs:
       # QEMU can't be registered in time for a foreign platform.
       - name: Set up QEMU
         if: matrix.arch != 'amd64'
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
 
       - name: Build .rpm in container
         env:
@@ -165,7 +165,7 @@ jobs:
 
       # Native rpmbuild filename encodes the Fedora version and arch -
       # no need to rename it.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rpm-package-${{ matrix.arch }}
           path: dist/*.rpm
@@ -206,7 +206,7 @@ jobs:
           mkdir -p dist
           mv ./*.pkg.tar.zst dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arch-package
           path: dist/*.pkg.tar.zst
@@ -302,7 +302,7 @@ jobs:
       - name: Check artifact
         run: ls -la dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: freebsd-package-${{ matrix.arch }}
           path: dist/*.pkg
@@ -323,7 +323,7 @@ jobs:
           git tag "$tag"
           git push origin "$tag"
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
