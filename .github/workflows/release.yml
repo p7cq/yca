@@ -3,8 +3,14 @@ name: Release
 on:
   push:
     branches: [master]
-  # Manual retry
+  # Manual retry, and/or adding arm64 assets to an already-released version
+  # (push builds amd64 only).
   workflow_dispatch:
+    inputs:
+      include_arm64:
+        description: "Also build arm64"
+        type: boolean
+        default: false
 
 concurrency:
   group: release
@@ -41,7 +47,11 @@ jobs:
             changed=true
           fi
 
-          if git ls-remote --tags origin "refs/tags/${tag}" | grep -q "refs/tags/${tag}$"; then
+          # Only push events auto-skip an already-tagged version; a manual
+          # dispatch (e.g. to add arm64 assets to that same release) must
+          # proceed even though the tag already exists.
+          if [[ "${{ github.event_name }}" == "push" ]] && \
+             git ls-remote --tags origin "refs/tags/${tag}" | grep -q "refs/tags/${tag}$"; then
             echo "tag ${tag} already exists, skipping" >&2
             changed=false
           fi
@@ -53,7 +63,9 @@ jobs:
   build-deb:
     name: build .deb (${{ matrix.arch }})
     needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
+    if: |
+      needs.check-version.outputs.changed == 'true' &&
+      (matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -117,7 +129,9 @@ jobs:
   build-rpm:
     name: build .rpm (${{ matrix.arch }})
     needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
+    if: |
+      needs.check-version.outputs.changed == 'true' &&
+      (matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -210,7 +224,9 @@ jobs:
   build-freebsd:
     name: build .pkg (FreeBSD ${{ matrix.arch }})
     needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
+    if: |
+      needs.check-version.outputs.changed == 'true' &&
+      (matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true')
     runs-on: ubuntu-latest
     # aarch64 is full-system QEMU emulation (not just CPU-instruction, like
     # the Linux container jobs) - vmactions' own docs say to keep
@@ -311,13 +327,19 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Idempotent: a manual re-run adding arm64 to an already-released
+      # version hits an existing tag - don't fail trying to recreate it.
       - name: Create and push tag
         run: |
           tag="${{ needs.check-version.outputs.tag }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$tag"
-          git push origin "$tag"
+          if git ls-remote --tags origin "refs/tags/${tag}" | grep -q "refs/tags/${tag}$"; then
+            echo "tag ${tag} already exists, not recreating"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git tag "$tag"
+            git push origin "$tag"
+          fi
 
       - uses: actions/download-artifact@v8
         with:
