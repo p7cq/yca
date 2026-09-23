@@ -9,7 +9,7 @@ User=yca
 Group=yca
 # --max-delete: a misconfigured/empty source triggers job failure instead
 # of wiping the repository.
-ExecStart=/usr/bin/rsync -rt --chmod=F644 --delete --max-delete=8 \
+ExecStart=/usr/bin/rsync -rtp --chmod=D755,F644 --delete --max-delete=8 \
     --include='*.crt' --include='*.crl' --exclude='*' \
     /var/lib/yca/store/ca/ /srv/yca/
 
