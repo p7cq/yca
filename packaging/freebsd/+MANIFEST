@@ -11,4 +11,5 @@ licenses: ["APACHE20"]
 desc: "yca is a command-line certificate authority tool (ECDSA, two-tier root/intermediate hierarchy) with yca-acme, an ACME frontend for automated certificate issuance."
 deps: {
   sqlite3: {origin: "databases/sqlite3", version: "%SQLITE_VERSION%"}
+  rsync: {origin: "net/rsync", version: "%RSYNC_VERSION%"}
 }

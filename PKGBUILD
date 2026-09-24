@@ -16,7 +16,7 @@ license=('Apache-2.0')
 # yca (C++) links libsqlite3 + libc++/libc++abi dynamically; Botan is vendored
 # and linked statically, so it is not a runtime dependency. yca-acme (Go) bundles
 # its sqlite driver via CGO.
-depends=('sqlite' 'libc++' 'libc++abi')
+depends=('sqlite' 'libc++' 'libc++abi' 'rsync')
 # bind-tools (nsupdate) is only needed if the ACME client run against
 # repository_host validates via DNS-01 through dynamic DNS (e.g. acme.sh's
 # dns_nsupdate hook).

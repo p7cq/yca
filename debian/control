@@ -10,7 +10,7 @@ Homepage: https://github.com/p7cq/yca
 Package: yca
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends},
- systemd
+ rsync, systemd
 Suggests: bind9-dnsutils
 Description: Two-tier ECDSA certificate authority CLI with an ACME frontend
  yca is a command-line certificate authority tool (ECDSA, two-tier

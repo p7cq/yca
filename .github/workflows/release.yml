@@ -216,7 +216,7 @@ jobs:
       - name: Install build dependencies
         run: |
           pacman -Syu --noconfirm base-devel clang cmake ninja go sqlite git \
-            libc++ libc++abi
+            libc++ libc++abi rsync
 
       - uses: actions/checkout@v5
 
@@ -270,7 +270,7 @@ jobs:
           arch: ${{ matrix.vm_arch }}
           usesh: true
           prepare: |
-            pkg install -y cmake ninja go sqlite3 git
+            pkg install -y cmake ninja go sqlite3 rsync git
           run: |
             set -e
             version="${{ needs.check-version.outputs.version }}"
@@ -314,10 +314,12 @@ jobs:
 
             abi="$(pkg config ABI)"
             sqlite_version="$(pkg query '%v' sqlite3)"
+            rsync_version="$(pkg query '%v' rsync)"
             mkdir -p pkgmeta
             sed -e "s/%VERSION%/${version}/" \
                 -e "s/%ABI%/${abi}/" \
                 -e "s/%SQLITE_VERSION%/${sqlite_version}/" \
+                -e "s/%RSYNC_VERSION%/${rsync_version}/" \
                 packaging/freebsd/+MANIFEST > pkgmeta/+MANIFEST
             cp packaging/freebsd/+PRE_INSTALL pkgmeta/+PRE_INSTALL
 

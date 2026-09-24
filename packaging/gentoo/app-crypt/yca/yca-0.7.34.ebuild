@@ -25,6 +25,7 @@ RDEPEND="
 	llvm-runtimes/libcxx
 	llvm-runtimes/libcxxabi
 	dev-db/sqlite
+	net-misc/rsync
 "
 DEPEND="${RDEPEND}"
 

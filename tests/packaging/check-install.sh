@@ -75,6 +75,14 @@ check "$etc/yca.toml" root yca 640
 check "$state" yca yca 700
 check /srv/yca yca yca 755
 
+# yca-publish (the FreeBSD crontab sample) needs rsync: a package dependency.
+if [ -x "$prefix/bin/rsync" ]; then
+    echo "ok   $prefix/bin/rsync: present"
+else
+    echo "FAIL $prefix/bin/rsync: missing (dependency not pulled in)"
+    fail=1
+fi
+
 # The real CLI lives in libexec; `yca` on PATH is the operator wrapper.
 if [ -x "$prefix/libexec/yca/yca" ]; then
     echo "ok   $prefix/libexec/yca/yca: executable"
