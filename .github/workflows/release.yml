@@ -350,9 +350,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.x'
+
       # The ebuild's SRC_URI is the tag's GitHub-generated tarball, so
       # digests can only be computed once the tag from the `tag` job
-      # exists.
+      # exists. The second distfile lets yca-acme build offline under
+      # Portage's network-sandbox.
       - name: Update ebuild filename and Manifest
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
@@ -371,12 +376,25 @@ jobs:
           curl -fsSL -o "$tarball" \
             "https://github.com/p7cq/yca/archive/refs/tags/v${VERSION}.tar.gz"
 
+          src="$(mktemp -d)"
+          tar -xzf "$tarball" -C "$src"
+          (cd "${src}/yca-${VERSION}/acme" && go mod vendor)
+          mkdir -p dist
+          vendor="dist/yca-${VERSION}-vendor.tar.xz"
+          tar -C "$src" --sort=name --owner=0 --group=0 --numeric-owner \
+            -cJf "$vendor" "yca-${VERSION}/acme/vendor"
+
           {
             printf 'DIST yca-%s.tar.gz %s BLAKE2B %s SHA512 %s\n' \
               "$VERSION" \
               "$(stat -c%s "$tarball")" \
               "$(b2sum "$tarball" | cut -d' ' -f1)" \
               "$(sha512sum "$tarball" | cut -d' ' -f1)"
+            printf 'DIST yca-%s-vendor.tar.xz %s BLAKE2B %s SHA512 %s\n' \
+              "$VERSION" \
+              "$(stat -c%s "$vendor")" \
+              "$(b2sum "$vendor" | cut -d' ' -f1)" \
+              "$(sha512sum "$vendor" | cut -d' ' -f1)"
             printf 'EBUILD yca-%s.ebuild %s BLAKE2B %s SHA512 %s\n' \
               "$VERSION" \
               "$(stat -c%s "$ebuild_new")" \
@@ -424,6 +442,11 @@ jobs:
                 expectedHeadOid: $head,
                 fileChanges: {additions: $adds, deletions: $dels}}}}' |
             gh api graphql --input -
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gentoo-vendor
+          path: dist/*.tar.xz
 
   release:
     name: publish release

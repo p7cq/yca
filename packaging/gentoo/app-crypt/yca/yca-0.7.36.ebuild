@@ -7,10 +7,14 @@ inherit cmake systemd tmpfiles
 
 DESCRIPTION="Two-tier ECDSA certificate authority CLI with an ACME frontend"
 HOMEPAGE="https://github.com/p7cq/yca"
-SRC_URI="https://github.com/p7cq/yca/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz"
+SRC_URI="
+	https://github.com/p7cq/yca/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz
+	https://github.com/p7cq/yca/releases/download/v${PV}/${P}-vendor.tar.xz
+"
 S="${WORKDIR}/${PN}-${PV}"
 
-LICENSE="Apache-2.0"
+# yca, go-jose (Apache-2.0); go-sqlite3 (MIT) and its bundled SQLite
+LICENSE="Apache-2.0 MIT public-domain"
 SLOT="0"
 KEYWORDS="~amd64 ~arm64"
 
@@ -42,8 +46,10 @@ src_compile() {
 	cmake_build yca
 
 	# yca-acme (Go); go-sqlite3 needs CGO, clang is already the active CC.
+	# Modules come from the vendor tarball only.
 	pushd acme > /dev/null || die
-	go build -ldflags "-X main.version=${PV}" -o ../bin/yca-acme . ||
+	GOFLAGS="-mod=vendor" GOPROXY=off GOTOOLCHAIN=local \
+		go build -ldflags "-X main.version=${PV}" -o ../bin/yca-acme . ||
 		die "go build failed"
 	popd > /dev/null || die
 }
