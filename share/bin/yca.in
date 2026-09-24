@@ -5,6 +5,10 @@
 # CA secrets from yca.env read by root (never by the caller's shell), and
 # the packaged config and store as defaults.
 #
+# CA secrets the caller exported (CA_STORE_PASSPHRASE, CA_HSM_PIN,
+# CA_HSM_ROOT_PIN: a ceremony PIN kept off disk) are passed on by name
+# only, never on a command line; yca.env wins for a variable set in both.
+#
 # Services, yca-acme and anything already running as yca call the real
 # binary directly; when this wrapper is reached as yca it just execs it.
 # Input files are opened as yca from the state directory, so pass a CSR
@@ -45,7 +49,15 @@ done
 [ "$has_store" = 1 ] || set -- --store "$state/store" "$@"
 [ "$has_config" = 1 ] || set -- --config "$etc/yca.toml" "$@"
 
+keep=
+for v in CA_STORE_PASSPHRASE CA_HSM_PIN CA_HSM_ROOT_PIN; do
+    if printenv "$v" > /dev/null; then
+        keep="${keep:+$keep,}$v"
+    fi
+done
+
 sudo=sudo
+[ -z "$keep" ] || sudo="sudo --preserve-env=$keep"
 [ "$(id -u)" != 0 ] || sudo=
 
 case "$(uname -s)" in
@@ -73,6 +85,12 @@ FreeBSD)
     if [ -t 0 ] && [ -t 1 ]; then
         io=--pty
     fi
+    # --setenv=NAME without a value takes it from systemd-run's environment.
+    setenv=
+    for v in $(echo "$keep" | tr , ' '); do
+        setenv="$setenv --setenv=$v"
+    done
+    # shellcheck disable=SC2086 # $setenv: option words, split on purpose
     exec $sudo systemd-run --quiet --wait --collect "$io" \
         --uid=yca --gid=yca \
         --working-directory="$state" \
@@ -81,6 +99,7 @@ FreeBSD)
         -p NoNewPrivileges=yes \
         -p ProtectSystem=strict \
         -p ReadWritePaths="$state" \
+        $setenv \
         "$real" "$@"
     ;;
 esac

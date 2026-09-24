@@ -248,6 +248,11 @@ caller's shell. On Linux it uses \fBsystemd\-run\fR(1) (a pseudo-terminal
 when both standard input and output are terminals, pipes otherwise); on
 FreeBSD \fBsu \-m\fR.
 .PP
+\fBCA_STORE_PASSPHRASE\fR, \fBCA_HSM_PIN\fR and \fBCA_HSM_ROOT_PIN\fR,
+when exported by the caller (a ceremony PIN kept off disk), are passed on
+by name, never on a command line; for a variable set in both places the
+env file wins.
+.PP
 \fB\-\-config\fR and \fB\-\-store\fR default to \fB/etc/yca/yca.toml\fR and
 \fB/var/lib/yca/store\fR (FreeBSD: \fB/usr/local/etc/yca/yca.toml\fR,
 \fB/var/db/yca/store\fR) unless given. Invoked as \fByca\fR, or with

@@ -9,6 +9,7 @@
 set -eu
 
 wrapper="${1:?usage: wrapper.sh <configured wrapper>}"
+unset CA_STORE_PASSPHRASE CA_HSM_PIN CA_HSM_ROOT_PIN
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 fail=0
@@ -60,12 +61,13 @@ expect() {
 }
 
 linux_run() {
-    # the systemd-run command line, after the caller-dependent prefix
+    # the systemd-run command line, after the caller-dependent prefix;
+    # arguments: extra options placed before the real binary (--setenv)
     printf '%s\n' systemd-run --quiet --wait --collect --pipe \
         --uid=yca --gid=yca --working-directory=/var/lib/yca \
         -p UMask=0077 -p EnvironmentFile=-/etc/yca/yca.env \
         -p NoNewPrivileges=yes -p ProtectSystem=strict \
-        -p ReadWritePaths=/var/lib/yca "$tmp/bin/real"
+        -p ReadWritePaths=/var/lib/yca "$@" "$tmp/bin/real"
 }
 
 expect "as yca: exec real, arguments untouched" \
@@ -91,6 +93,35 @@ expect "root: systemd-run without sudo" \
 expect "explicit --config/--store=: no defaults added" \
     "$(run Linux paul 2000 --config c.toml --store=/tmp/s list)" \
     sudo $(linux_run) --config c.toml --store=/tmp/s list
+
+# Exported CA secrets pass by name: sudo keeps them, systemd-run reads
+# them from its own environment; the value is never an argument.
+# shellcheck disable=SC2046
+expect "operator + exported root PIN: preserve-env and --setenv by name" \
+    "$(export CA_HSM_ROOT_PIN=pin-4711 && run Linux paul 2000 refresh crl root)" \
+    sudo --preserve-env=CA_HSM_ROOT_PIN \
+    $(linux_run --setenv=CA_HSM_ROOT_PIN) --config /etc/yca/yca.toml \
+    --store /var/lib/yca/store refresh crl root
+
+# shellcheck disable=SC2046
+expect "root + two exported secrets: --setenv each, no sudo" \
+    "$(export CA_STORE_PASSPHRASE=p CA_HSM_PIN=q && run Linux root 0 list)" \
+    $(linux_run --setenv=CA_STORE_PASSPHRASE --setenv=CA_HSM_PIN) \
+    --config /etc/yca/yca.toml --store /var/lib/yca/store list
+
+leak="$(export CA_HSM_ROOT_PIN=pin-4711 &&
+    run Linux paul 2000 list && run FreeBSD paul 2000 list)"
+case "$leak" in
+*pin-4711*)
+    echo "FAIL secret value appears in a command line"
+    fail=1
+    ;;
+*) echo "ok   secret values never on a command line" ;;
+esac
+
+expect "FreeBSD + exported root PIN: sudo --preserve-env" \
+    "$(export CA_HSM_ROOT_PIN=pin-4711 && run FreeBSD paul 2000 list | head -n 4)" \
+    sudo --preserve-env=CA_HSM_ROOT_PIN /bin/sh -c
 
 # FreeBSD: sudo /bin/sh -c <script> sh <env> <state> <real> <args...>;
 # the script itself spans several lines, so assert around it.
