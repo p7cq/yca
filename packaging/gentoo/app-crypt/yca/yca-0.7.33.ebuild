@@ -3,7 +3,7 @@
 
 EAPI=8
 
-inherit cmake systemd
+inherit cmake systemd tmpfiles
 
 DESCRIPTION="Two-tier ECDSA certificate authority CLI with an ACME frontend"
 HOMEPAGE="https://github.com/p7cq/yca"
@@ -20,6 +20,8 @@ BDEPEND="
 	dev-lang/go
 "
 RDEPEND="
+	acct-group/yca
+	acct-user/yca
 	llvm-runtimes/libcxx
 	llvm-runtimes/libcxxabi
 	dev-db/sqlite
@@ -55,9 +57,13 @@ src_install() {
 	insinto /usr/share/zsh/site-functions
 	doins share/zsh-completion/_yca-acme
 
+	# Root-only until pkg_postinst: the yca group is applied there by
+	# tmpfiles.d/yca.conf (root:yca 0640), which also creates the state
+	# and publication directories.
 	insinto /etc/yca
 	doins yca.toml
 	fperms 600 /etc/yca/yca.toml
+	dotmpfiles share/tmpfiles.d/yca.conf
 
 	# Installed but not enabled: a CA rollout is a manual ceremony (see
 	# the unit headers and docs/install.md).
@@ -73,4 +79,8 @@ src_install() {
 
 	insinto /usr/share/doc/${PF}/examples
 	doins share/nginx/yca.conf
+}
+
+pkg_postinst() {
+	tmpfiles_process yca.conf
 }

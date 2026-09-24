@@ -13,7 +13,7 @@ if [ -r /etc/defaults/periodic.conf ]; then
 fi
 
 : "${daily_yca_crl_refresh_enable:="NO"}"
-: "${daily_yca_crl_refresh_user:="ca"}"
+: "${daily_yca_crl_refresh_user:="yca"}"
 : "${daily_yca_crl_refresh_envfile:="/usr/local/etc/yca/yca.env"}"
 : "${daily_yca_crl_refresh_config:="/usr/local/etc/yca/yca.toml"}"
 : "${daily_yca_crl_refresh_store:="/var/db/yca/store"}"
@@ -25,10 +25,17 @@ case "$daily_yca_crl_refresh_enable" in
     echo ""
     echo "Re-signing the yca signing CRL:"
     if [ -r "$daily_yca_crl_refresh_envfile" ]; then
-        su -m "$daily_yca_crl_refresh_user" -c \
-            "set -a; . '$daily_yca_crl_refresh_envfile'; set +a; \
-             exec /usr/local/bin/yca --config '$daily_yca_crl_refresh_config' \
-             --store '$daily_yca_crl_refresh_store' refresh crl signing"
+        # The env file is root-only (0600): source it here, as root, and
+        # let `su -m` carry the environment over to the service user.
+        (
+            set -a
+            # shellcheck source=/dev/null
+            . "$daily_yca_crl_refresh_envfile"
+            set +a
+            su -m "$daily_yca_crl_refresh_user" -c \
+                "exec /usr/local/bin/yca --config '$daily_yca_crl_refresh_config' \
+                 --store '$daily_yca_crl_refresh_store' refresh crl signing"
+        )
         rc=$?
     else
         echo "yca: $daily_yca_crl_refresh_envfile not readable, skipping" 1>&2

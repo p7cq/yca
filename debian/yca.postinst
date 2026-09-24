@@ -1,0 +1,13 @@
+#!/bin/sh
+# Creates the yca service account before the dh_installtmpfiles snippet
+# (inserted by debhelper below) applies ownership from
+# usr/lib/tmpfiles.d/yca.conf.
+set -e
+
+if [ "$1" = "configure" ]; then
+    systemd-sysusers yca.conf
+fi
+
+#DEBHELPER#
+
+exit 0

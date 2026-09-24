@@ -11,12 +11,14 @@
 #
 # rc.conf(5) variables:
 #   yca_acme_enable      (bool)      default "NO"
-#   yca_acme_user        (str)       default "ca" - rc.subr wraps the
+#   yca_acme_user        (str)       default "yca" - rc.subr wraps the
 #                                     whole command in `su -m <user>`, so
 #                                     the pidfile (below) must live
 #                                     somewhere that user can write - NOT
 #                                     the root-owned /var/run.
 #   yca_acme_env_file    (path)      default "/usr/local/etc/yca/yca.env"
+#                                     - sourced as root before the `su`,
+#                                     so it stays root-only (0600)
 #   yca_acme_state       (path)      default "/var/db/yca/acme.db"
 #   yca_acme_listen      (host:port) default "127.0.0.1:8555"
 #   yca_acme_url         (url)       default "https://pki.example.ca"
@@ -39,7 +41,7 @@
 #   yca_acme_tls_key     (path)      default ""
 #
 # /var/db/yca must exist and be owned by yca_acme_user before this starts
-# (state db, pidfile); provisioning it is a manual step.
+# (state db, pidfile); the package creates it for the default yca user.
 
 . /etc/rc.subr
 
@@ -49,7 +51,7 @@ rcvar="yca_acme_enable"
 load_rc_config "$name"
 
 : "${yca_acme_enable:="NO"}"
-: "${yca_acme_user:="ca"}"
+: "${yca_acme_user:="yca"}"
 : "${yca_acme_env_file:="/usr/local/etc/yca/yca.env"}"
 : "${yca_acme_state:="/var/db/yca/acme.db"}"
 : "${yca_acme_listen:="127.0.0.1:8555"}"

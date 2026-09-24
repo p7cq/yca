@@ -66,6 +66,13 @@ package() {
   # Default config, marked backup so pacman preserves operator edits.
   install -Dm600 yca.toml "$pkgdir/etc/yca/yca.toml"
 
+  # Service account and directories. pacman's systemd hooks run
+  # systemd-sysusers and systemd-tmpfiles on install, and the tmpfiles
+  # entries set yca.toml to root:yca 0640 (the package cannot name the yca
+  # group before the account exists).
+  install -Dm644 share/sysusers.d/yca.conf "$pkgdir/usr/lib/sysusers.d/yca.conf"
+  install -Dm644 share/tmpfiles.d/yca.conf "$pkgdir/usr/lib/tmpfiles.d/yca.conf"
+
   # Packaged systemd units live under /usr/lib; they are installed but NOT
   # enabled: a CA rollout is a manual ceremony (see docs/acme-operation.md).
   install -dm755 "$pkgdir/usr/lib/systemd/system"

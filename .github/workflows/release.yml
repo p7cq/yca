@@ -122,6 +122,8 @@ jobs:
           dpkg-buildpackage -b -us -uc
           mkdir -p /work/dist
           mv /yca_*.deb /work/dist/
+          apt-get install -y /work/dist/yca_*.deb
+          /work/tests/packaging/check-install.sh linux
           SCRIPT
           chmod +x ci-build-deb.sh
           docker run --rm --platform=${{ matrix.platform }} \
@@ -188,6 +190,8 @@ jobs:
           rpmbuild --define "version ${VERSION}" -bb "$HOME/rpmbuild/SPECS/yca.spec"
           mkdir -p /work/dist
           cp "$HOME"/rpmbuild/RPMS/*/*.rpm /work/dist/
+          dnf install -y /work/dist/*.rpm
+          /work/tests/packaging/check-install.sh linux
           SCRIPT
           chmod +x ci-build-rpm.sh
           docker run --rm --platform=${{ matrix.platform }} \
@@ -229,6 +233,11 @@ jobs:
         run: |
           mkdir -p dist
           mv ./*.pkg.tar.zst dist/
+
+      - name: Install and check package
+        run: |
+          pacman -U --noconfirm dist/*.pkg.tar.zst
+          tests/packaging/check-install.sh linux
 
       - uses: actions/upload-artifact@v7
         with:
@@ -284,7 +293,9 @@ jobs:
                      stage/usr/local/etc/yca \
                      stage/usr/local/etc/rc.d \
                      stage/usr/local/etc/periodic/daily \
-                     stage/usr/local/share/examples/yca/nginx
+                     stage/usr/local/share/examples/yca/nginx \
+                     stage/var/db/yca \
+                     stage/srv/yca
             install -m755 bin/yca-acme stage/usr/local/bin/yca-acme
             install -m644 share/man/yca-acme.1 stage/usr/local/share/man/man1/yca-acme.1
             install -m644 share/zsh-completion/_yca-acme \
@@ -308,12 +319,16 @@ jobs:
                 -e "s/%ABI%/${abi}/" \
                 -e "s/%SQLITE_VERSION%/${sqlite_version}/" \
                 packaging/freebsd/+MANIFEST > pkgmeta/+MANIFEST
+            cp packaging/freebsd/+PRE_INSTALL pkgmeta/+PRE_INSTALL
 
             mkdir -p dist
             pkg create -v -m pkgmeta -r stage -p packaging/freebsd/pkg-plist -o dist
             os_major="$(echo "$abi" | cut -d: -f2)"
             cpu_arch="$(echo "$abi" | cut -d: -f3)"
             mv "dist/yca-${version}.pkg" "dist/yca-${version}-freebsd-${os_major}-${cpu_arch}.pkg"
+
+            pkg add "dist/yca-${version}-freebsd-${os_major}-${cpu_arch}.pkg"
+            sh tests/packaging/check-install.sh freebsd
 
       - name: Check artifact
         if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
@@ -368,7 +383,18 @@ jobs:
           } > "${dir}/Manifest"
           rm -f "$tarball"
 
-          git add "$dir"
+          # acct-group/yca, acct-user/yca: no distfiles, EBUILD digests only.
+          for acct in packaging/gentoo/acct-group/yca packaging/gentoo/acct-user/yca; do
+            for e in "${acct}"/*.ebuild; do
+              printf 'EBUILD %s %s BLAKE2B %s SHA512 %s\n' \
+                "$(basename "$e")" \
+                "$(stat -c%s "$e")" \
+                "$(b2sum "$e" | cut -d' ' -f1)" \
+                "$(sha512sum "$e" | cut -d' ' -f1)"
+            done > "${acct}/Manifest"
+          done
+
+          git add packaging/gentoo
           if git diff --cached --quiet; then
             echo "no Gentoo packaging changes"
             exit 0

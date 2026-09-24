@@ -1,0 +1,13 @@
+#!/bin/sh
+#
+# Creates the yca service account (Linux equivalent: sysusers.d/yca.conf):
+# same-name group, no login shell, login disabled. Runs before extraction,
+# so the ownership in pkg-plist resolves.
+
+if ! pw groupshow yca > /dev/null 2>&1; then
+    pw groupadd yca
+fi
+if ! pw usershow yca > /dev/null 2>&1; then
+    pw useradd yca -g yca -c "yca certificate authority" \
+        -d /var/db/yca -s /usr/sbin/nologin -w no
+fi

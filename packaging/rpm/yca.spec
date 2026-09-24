@@ -52,10 +52,19 @@ DESTDIR=%{buildroot} cmake --install build
 install -Dm755 bin/yca-acme %{buildroot}%{_bindir}/yca-acme
 install -Dm644 share/man/yca-acme.1 %{buildroot}%{_mandir}/man1/yca-acme.1
 install -Dm644 share/zsh-completion/_yca-acme %{buildroot}%{_datadir}/zsh/site-functions/_yca-acme
-install -Dm600 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
+install -Dm640 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
+install -Dm644 share/sysusers.d/yca.conf %{buildroot}%{_sysusersdir}/yca.conf
+install -Dm644 share/tmpfiles.d/yca.conf %{buildroot}%{_tmpfilesdir}/yca.conf
+install -dm700 %{buildroot}%{_sharedstatedir}/yca
+install -dm755 %{buildroot}/srv/yca
 install -dm755 %{buildroot}%{_unitdir}
 install -m644 share/systemd/*.service share/systemd/*.timer %{buildroot}%{_unitdir}/
 install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/nginx/yca.conf
+
+# rpm creates the yca account from the packaged sysusers.d file before
+# installing files, so the yca owners in the file list resolve at install time.
+%post
+%tmpfiles_create %{_tmpfilesdir}/yca.conf
 
 %files
 %{_bindir}/yca
@@ -64,7 +73,12 @@ install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/ngin
 %{_mandir}/man1/yca-acme.1*
 %{_datadir}/zsh/site-functions/_yca
 %{_datadir}/zsh/site-functions/_yca-acme
-%config(noreplace) %{_sysconfdir}/yca/yca.toml
+%dir %attr(0750,root,yca) %{_sysconfdir}/yca
+%config(noreplace) %attr(0640,root,yca) %{_sysconfdir}/yca/yca.toml
+%dir %attr(0700,yca,yca) %{_sharedstatedir}/yca
+%dir %attr(0755,yca,yca) /srv/yca
+%{_sysusersdir}/yca.conf
+%{_tmpfilesdir}/yca.conf
 %{_unitdir}/*
 %doc %{_docdir}/%{name}/examples/nginx/yca.conf
 %license LICENSE
