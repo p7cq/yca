@@ -80,6 +80,7 @@ src_install() {
 
 	insinto /usr/share/doc/${PF}/examples
 	doins share/nginx/yca.conf
+	docompress -x /usr/share/doc/${PF}/examples
 }
 
 pkg_postinst() {
