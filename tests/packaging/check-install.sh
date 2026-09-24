@@ -30,11 +30,13 @@ linux)
     etc=/etc/yca
     state=/var/lib/yca
     prefix=/usr
+    wheel=root
     ;;
 freebsd)
     etc=/usr/local/etc/yca
     state=/var/db/yca
     prefix=/usr/local
+    wheel=wheel
     ;;
 *)
     echo "unknown os: $os" >&2
@@ -73,7 +75,9 @@ esac
 check "$etc" root yca 750
 check "$etc/yca.toml" root yca 640
 check "$state" yca yca 700
-check /srv/yca yca yca 755
+check /srv/yca root "$wheel" 755
+check /srv/yca/pub yca yca 755
+check /srv/yca/webroot root "$wheel" 755
 
 # yca-publish (the FreeBSD crontab sample) needs rsync: a package dependency.
 if [ -x "$prefix/bin/rsync" ]; then

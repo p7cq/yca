@@ -295,7 +295,8 @@ jobs:
                      stage/usr/local/etc/periodic/daily \
                      stage/usr/local/share/examples/yca/nginx \
                      stage/var/db/yca \
-                     stage/srv/yca
+                     stage/srv/yca/pub \
+                     stage/srv/yca/webroot
             install -m755 bin/yca-acme stage/usr/local/bin/yca-acme
             install -m644 share/man/yca-acme.1 stage/usr/local/share/man/man1/yca-acme.1
             install -m644 share/zsh-completion/_yca-acme \

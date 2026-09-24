@@ -56,7 +56,7 @@ install -Dm640 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
 install -Dm644 share/sysusers.d/yca.conf %{buildroot}%{_sysusersdir}/yca.conf
 install -Dm644 share/tmpfiles.d/yca.conf %{buildroot}%{_tmpfilesdir}/yca.conf
 install -dm700 %{buildroot}%{_sharedstatedir}/yca
-install -dm755 %{buildroot}/srv/yca
+install -dm755 %{buildroot}/srv/yca/pub %{buildroot}/srv/yca/webroot
 install -dm755 %{buildroot}%{_unitdir}
 install -m644 share/systemd/*.service share/systemd/*.timer %{buildroot}%{_unitdir}/
 install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/nginx/yca.conf
@@ -77,7 +77,9 @@ install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/ngin
 %dir %attr(0750,root,yca) %{_sysconfdir}/yca
 %config(noreplace) %attr(0640,root,yca) %{_sysconfdir}/yca/yca.toml
 %dir %attr(0700,yca,yca) %{_sharedstatedir}/yca
-%dir %attr(0755,yca,yca) /srv/yca
+%dir %attr(0755,root,root) /srv/yca
+%dir %attr(0755,yca,yca) /srv/yca/pub
+%dir %attr(0755,root,root) /srv/yca/webroot
 %{_sysusersdir}/yca.conf
 %{_tmpfilesdir}/yca.conf
 %{_unitdir}/*

@@ -7,9 +7,9 @@
 #
 # Publish hourly. Adjust the source path to your store location. -p
 # is required for --chmod to take effect at all (rsync(1)); D755 keeps
-# /srv/yca itself from inheriting the store dir restrictive mode - see
+# /srv/yca/pub itself from inheriting the store dir restrictive mode - see
 # share/systemd/yca-publish.service for the full explanation.
-0 * * * *	yca	/usr/local/bin/rsync -rtp --chmod=D755,F644 --delete --max-delete=8 --include='*.crt' --include='*.crl' --exclude='*' /var/db/yca/store/ca/ /srv/yca/
+0 * * * *	yca	/usr/local/bin/rsync -rtp --chmod=D755,F644 --delete --max-delete=8 --include='*.crt' --include='*.crl' --exclude='*' /var/db/yca/store/ca/ /srv/yca/pub/
 
 # Root CRL refresh: quarterly (see yca-root-crl-refresh.timer's Linux
 # header for the cadence rationale: root_crl_next_update_days=183).

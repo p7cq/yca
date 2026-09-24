@@ -1,7 +1,7 @@
 # systemd service publishing the yca repository artifacts (CA certs + CRLs)
 
 [Unit]
-Description=Publish yca CA certificates and CRLs to /srv/yca
+Description=Publish yca CA certificates and CRLs to /srv/yca/pub
 
 [Service]
 Type=oneshot
@@ -11,13 +11,13 @@ Group=yca
 # of wiping the repository.
 ExecStart=/usr/bin/rsync -rtp --chmod=D755,F644 --delete --max-delete=8 \
     --include='*.crt' --include='*.crl' --exclude='*' \
-    /var/lib/yca/store/ca/ /srv/yca/
+    /var/lib/yca/store/ca/ /srv/yca/pub/
 
 # Artifacts dir: rw; no network.
 UMask=0022
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=/srv/yca
+ReadWritePaths=/srv/yca/pub
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
