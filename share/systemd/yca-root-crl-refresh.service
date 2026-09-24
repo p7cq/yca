@@ -17,7 +17,7 @@ Type=oneshot
 User=yca
 Group=yca
 EnvironmentFile=/etc/yca/yca.env
-ExecStart=/usr/bin/yca --config /etc/yca/yca.toml --store /var/lib/yca/store refresh crl root
+ExecStart=/usr/libexec/yca/yca --config /etc/yca/yca.toml --store /var/lib/yca/store refresh crl root
 
 # State dir: rw; pkcs11 backend: AF_UNIX (pcscd); no network.
 UMask=0077

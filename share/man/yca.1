@@ -1,4 +1,4 @@
-.TH YCA 1 "July 2026" "yca" "User Commands"
+.TH YCA 1 "September 2026" "yca" "User Commands"
 .SH NAME
 yca \- a 2-tier ECDSA certificate authority
 .SH SYNOPSIS
@@ -235,6 +235,26 @@ Delivered end-entity credentials.
 .B yca.log
 Diagnostic log, next to the store directory (\fB\-\-log\fR overrides).
 Errors are also mirrored to standard error.
+.SH OPERATOR WRAPPER
+In the distribution packages the
+.B yca
+on \fBPATH\fR is a shell wrapper; the CLI itself is
+\fB/usr/libexec/yca/yca\fR (FreeBSD: \fB/usr/local/libexec/yca/yca\fR),
+which the services and \fByca\-acme\fR call directly. The wrapper runs the
+CLI as the \fByca\fR service account, through \fBsudo\fR unless invoked by
+root, with umask 077 and the CA secrets from \fB/etc/yca/yca.env\fR
+(FreeBSD: \fB/usr/local/etc/yca/yca.env\fR), read by root and never by the
+caller's shell. On Linux it uses \fBsystemd\-run\fR(1) (a pseudo-terminal
+when both standard input and output are terminals, pipes otherwise); on
+FreeBSD \fBsu \-m\fR.
+.PP
+\fB\-\-config\fR and \fB\-\-store\fR default to \fB/etc/yca/yca.toml\fR and
+\fB/var/lib/yca/store\fR (FreeBSD: \fB/usr/local/etc/yca/yca.toml\fR,
+\fB/var/db/yca/store\fR) unless given. Invoked as \fByca\fR, or with
+\fB\-\-help\fR/\fB\-\-version\fR as the first argument, it runs the CLI
+unchanged. The CLI runs in the state directory as \fByca\fR, so a CSR in
+the caller's files is passed on standard input (\fB\-\-csr \-\fR) or
+inline.
 .SH EXIT STATUS
 0 on success, 1 on any error (details on stderr and in the log).
 .SH EXAMPLES
@@ -244,7 +264,7 @@ yca create server \-\-cn server.example.ca \-\-san dns:example.ca
 yca enroll \-\-id user@example.ca
 yca sign server \-\-id user@example.ca \e
     \-\-nonce $(yca get nonce \-\-id user@example.ca) \e
-    \-\-csr server.csr | yca get server \-\-cn \-
+    \-\-csr \- < server.csr | yca get server \-\-cn \-
 yca revoke server \-\-cn server.example.ca \-\-reason keyCompromise
 yca get crl \-\-cn signing\-ca > signing.crl
 yca list \-\-expiring 7

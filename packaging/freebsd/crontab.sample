@@ -18,4 +18,4 @@
 # unattended for split/hybrid HSM layouts, where the root token is
 # normally offline - run this as part of the quarterly root-token
 # ceremony instead and leave this line out.
-0 3 1 1,4,7,10 *	root	set -a; . /usr/local/etc/yca/yca.env; set +a; su -m yca -c '/usr/local/bin/yca --config /usr/local/etc/yca/yca.toml --store /var/db/yca/store refresh crl root'
+0 3 1 1,4,7,10 *	root	set -a; . /usr/local/etc/yca/yca.env; set +a; su -m yca -c '/usr/local/libexec/yca/yca --config /usr/local/etc/yca/yca.toml --store /var/db/yca/store refresh crl root'

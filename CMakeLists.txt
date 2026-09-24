@@ -137,8 +137,17 @@ endif()
 
 # Install: the CLI + support files. yca-seed/yca_tests are not installed;
 # the Go binaries and the systemd units are handled by a separate script.
+# The real CLI goes to libexec (services and yca-acme call it there); the
+# `yca` on PATH is the operator wrapper that runs it as the yca account.
 include(GNUInstallDirs)
-install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+set(YCA_REAL
+    ${CMAKE_INSTALL_FULL_LIBEXECDIR}/${PROJECT_NAME}/${PROJECT_NAME})
+configure_file(share/bin/${PROJECT_NAME}.in
+               ${CMAKE_BINARY_DIR}/wrapper/${PROJECT_NAME} @ONLY)
+install(TARGETS ${PROJECT_NAME}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+install(PROGRAMS ${CMAKE_BINARY_DIR}/wrapper/${PROJECT_NAME}
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/zsh-completion/_${PROJECT_NAME}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions)
 install(FILES share/man/${PROJECT_NAME}.1
@@ -148,6 +157,8 @@ enable_testing()
 add_test(NAME unit COMMAND ${PROJECT_NAME}_tests)
 add_test(NAME e2e COMMAND bash ${CMAKE_SOURCE_DIR}/tests/e2e.sh
                           $<TARGET_FILE:${PROJECT_NAME}>)
+add_test(NAME wrapper COMMAND sh ${CMAKE_SOURCE_DIR}/tests/wrapper.sh
+                              ${CMAKE_BINARY_DIR}/wrapper/${PROJECT_NAME})
 # pkcs11 backend on ephemeral SoftHSM2 token
 add_test(NAME e2e-hsm COMMAND bash ${CMAKE_SOURCE_DIR}/tests/e2e-hsm.sh
                               $<TARGET_FILE:${PROJECT_NAME}>)

@@ -1,0 +1,86 @@
+#!/bin/sh
+#
+# yca operator entry point. Runs the real CLI (@YCA_REAL@) as the yca
+# service account, in the same environment the services get: umask 077,
+# CA secrets from yca.env read by root (never by the caller's shell), and
+# the packaged config and store as defaults.
+#
+# Services, yca-acme and anything already running as yca call the real
+# binary directly; when this wrapper is reached as yca it just execs it.
+# Input files are opened as yca from the state directory, so pass a CSR
+# on stdin (`yca sign --csr - < host.csr`) or inline.
+set -eu
+
+real="@YCA_REAL@"
+
+case "$(uname -s)" in
+FreeBSD)
+    etc=/usr/local/etc/yca
+    state=/var/db/yca
+    ;;
+*)
+    etc=/etc/yca
+    state=/var/lib/yca
+    ;;
+esac
+
+if [ "$(id -un)" = yca ]; then
+    exec "$real" "$@"
+fi
+
+# Neither needs privileges or the store.
+case "${1-}" in
+-h | --help | --version) exec "$real" "$@" ;;
+esac
+
+# Defaults only when absent: a repeated option is rejected by the CLI.
+has_config=0
+has_store=0
+for a in "$@"; do
+    case "$a" in
+    --config | --config=*) has_config=1 ;;
+    --store | --store=*) has_store=1 ;;
+    esac
+done
+[ "$has_store" = 1 ] || set -- --store "$state/store" "$@"
+[ "$has_config" = 1 ] || set -- --config "$etc/yca.toml" "$@"
+
+sudo=sudo
+[ "$(id -u)" != 0 ] || sudo=
+
+case "$(uname -s)" in
+FreeBSD)
+    # No systemd-run: root sources the env file, then `su -m` keeps the
+    # environment (and the umask) while switching to yca.
+    # shellcheck disable=SC2016 # expanded by the inner shells
+    exec $sudo /bin/sh -c '
+        umask 077
+        env_file=$1 dir=$2
+        shift 2
+        if [ -r "$env_file" ]; then
+            set -a
+            . "$env_file"
+            set +a
+        fi
+        cd "$dir"
+        exec su -m yca -c '\''exec "$0" "$@"'\'' "$@"
+    ' sh "$etc/yca.env" "$state" "$real" "$@"
+    ;;
+*)
+    # --pty for interactive use (PIN prompts), --pipe when stdin or stdout
+    # is redirected, so `yca get ... | tee` and `--csr -` work.
+    io=--pipe
+    if [ -t 0 ] && [ -t 1 ]; then
+        io=--pty
+    fi
+    exec $sudo systemd-run --quiet --wait --collect "$io" \
+        --uid=yca --gid=yca \
+        --working-directory="$state" \
+        -p UMask=0077 \
+        -p EnvironmentFile=-"$etc/yca.env" \
+        -p NoNewPrivileges=yes \
+        -p ProtectSystem=strict \
+        -p ReadWritePaths="$state" \
+        "$real" "$@"
+    ;;
+esac

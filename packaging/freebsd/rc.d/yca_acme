@@ -22,7 +22,7 @@
 #   yca_acme_state       (path)      default "/var/db/yca/acme.db"
 #   yca_acme_listen      (host:port) default "127.0.0.1:8555"
 #   yca_acme_url         (url)       default "https://pki.example.ca"
-#   yca_acme_yca_bin     (path)      default "/usr/local/bin/yca" - the
+#   yca_acme_yca_bin     (path)      default "/usr/local/libexec/yca/yca" - the
 #                                     yca CLI yca-acme execs for signing
 #   yca_acme_config      (path)      default "/usr/local/etc/yca/yca.toml"
 #   yca_acme_store       (path)      default "/var/db/yca/store"
@@ -56,7 +56,7 @@ load_rc_config "$name"
 : "${yca_acme_state:="/var/db/yca/acme.db"}"
 : "${yca_acme_listen:="127.0.0.1:8555"}"
 : "${yca_acme_url:="https://pki.example.ca"}"
-: "${yca_acme_yca_bin:="/usr/local/bin/yca"}"
+: "${yca_acme_yca_bin:="/usr/local/libexec/yca/yca"}"
 : "${yca_acme_config:="/usr/local/etc/yca/yca.toml"}"
 : "${yca_acme_store:="/var/db/yca/store"}"
 : "${yca_acme_id:="acme"}"

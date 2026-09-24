@@ -69,6 +69,7 @@ install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/ngin
 %files
 %{_bindir}/yca
 %{_bindir}/yca-acme
+%{_libexecdir}/yca/yca
 %{_mandir}/man1/yca.1*
 %{_mandir}/man1/yca-acme.1*
 %{_datadir}/zsh/site-functions/_yca

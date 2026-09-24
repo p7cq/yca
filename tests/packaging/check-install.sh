@@ -29,10 +29,12 @@ case "$os" in
 linux)
     etc=/etc/yca
     state=/var/lib/yca
+    prefix=/usr
     ;;
 freebsd)
     etc=/usr/local/etc/yca
     state=/var/db/yca
+    prefix=/usr/local
     ;;
 *)
     echo "unknown os: $os" >&2
@@ -72,5 +74,23 @@ check "$etc" root yca 750
 check "$etc/yca.toml" root yca 640
 check "$state" yca yca 700
 check /srv/yca yca yca 755
+
+# The real CLI lives in libexec; `yca` on PATH is the operator wrapper.
+if [ -x "$prefix/libexec/yca/yca" ]; then
+    echo "ok   $prefix/libexec/yca/yca: executable"
+else
+    echo "FAIL $prefix/libexec/yca/yca: missing or not executable"
+    fail=1
+fi
+# Any sh shebang: Fedora's brp-mangle-shebangs rewrites /bin/sh to
+# /usr/bin/sh.
+shebang="$(head -n 1 "$prefix/bin/yca")"
+if [ "${shebang#\#!}" != "$shebang" ] && [ "${shebang%/sh}" != "$shebang" ] &&
+    grep -q "^real=\"$prefix/libexec/yca/yca\"$" "$prefix/bin/yca"; then
+    echo "ok   $prefix/bin/yca: wrapper for $prefix/libexec/yca/yca"
+else
+    echo "FAIL $prefix/bin/yca: not the wrapper for $prefix/libexec/yca/yca"
+    fail=1
+fi
 
 exit "$fail"

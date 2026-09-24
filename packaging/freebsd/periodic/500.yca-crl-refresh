@@ -33,7 +33,7 @@ case "$daily_yca_crl_refresh_enable" in
             . "$daily_yca_crl_refresh_envfile"
             set +a
             su -m "$daily_yca_crl_refresh_user" -c \
-                "exec /usr/local/bin/yca --config '$daily_yca_crl_refresh_config' \
+                "exec /usr/local/libexec/yca/yca --config '$daily_yca_crl_refresh_config' \
                  --store '$daily_yca_crl_refresh_store' refresh crl signing"
         )
         rc=$?
