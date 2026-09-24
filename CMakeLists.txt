@@ -142,11 +142,18 @@ endif()
 include(GNUInstallDirs)
 set(YCA_REAL
     ${CMAKE_INSTALL_FULL_LIBEXECDIR}/${PROJECT_NAME}/${PROJECT_NAME})
+# Configure-time copy for the wrapper test (ctest).
 configure_file(share/bin/${PROJECT_NAME}.in
                ${CMAKE_BINARY_DIR}/wrapper/${PROJECT_NAME} @ONLY)
 install(TARGETS ${PROJECT_NAME}
         RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
-install(PROGRAMS ${CMAKE_BINARY_DIR}/wrapper/${PROJECT_NAME}
+# The wrapper is generated at install time and its path to the
+# real CLI follows `cmake --install --prefix`.
+install(
+  CODE "set(YCA_REAL \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${PROJECT_NAME}\")
+  configure_file(\"${CMAKE_SOURCE_DIR}/share/bin/${PROJECT_NAME}.in\"
+                 \"${CMAKE_BINARY_DIR}/wrapper-install/${PROJECT_NAME}\" @ONLY)")
+install(PROGRAMS ${CMAKE_BINARY_DIR}/wrapper-install/${PROJECT_NAME}
         DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/zsh-completion/_${PROJECT_NAME}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions)
