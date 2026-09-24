@@ -353,6 +353,7 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version: '1.26.x'
+          cache: false
 
       # The ebuild's SRC_URI is the tag's GitHub-generated tarball, so
       # digests can only be computed once the tag from the `tag` job
