@@ -3,7 +3,7 @@
 
 EAPI=8
 
-inherit cmake systemd tmpfiles
+inherit cmake optfeature systemd tmpfiles
 
 DESCRIPTION="Two-tier ECDSA certificate authority CLI with an ACME frontend"
 HOMEPAGE="https://github.com/p7cq/yca"
@@ -64,6 +64,8 @@ src_install() {
 
 	insinto /usr/share/zsh/site-functions
 	doins share/zsh-completion/_yca-acme
+	insinto /usr/share/bash-completion/completions
+	doins share/bash-completion/yca-acme
 
 	# Root-only until pkg_postinst: the yca group is applied there by
 	# tmpfiles.d/yca.conf (root:yca 0640), which also creates the state
@@ -92,4 +94,6 @@ src_install() {
 
 pkg_postinst() {
 	tmpfiles_process yca.conf
+	optfeature "tab completion for yca and yca-acme in Bash" app-shells/bash-completion
+	optfeature "nsupdate for the acme.sh dns_nsupdate hook" net-dns/bind
 }

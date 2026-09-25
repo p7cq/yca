@@ -89,7 +89,8 @@ _yca() {
         '1:target:(server client email ca crl config nonce)' \
         '--cn[CN (- reads stdin), or CA alias for ca/crl]:cn:(root-ca signing-ca -)' \
         '--id[enrolled identity (nonce only)]:id:' \
-        '--encoding[output encoding (default pem)]:encoding:(pem der)'
+        '--encoding[output encoding (default pem)]:encoding:(pem der)' \
+        '--chain[append the issuers, up to but excluding the root (PEM only)]'
       ;;
     list)
       _arguments \

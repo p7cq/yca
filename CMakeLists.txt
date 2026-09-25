@@ -180,6 +180,8 @@ install(PROGRAMS ${CMAKE_BINARY_DIR}/wrapper-install/${PROJECT_NAME}
         DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/zsh-completion/_${PROJECT_NAME}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions)
+install(FILES share/bash-completion/${PROJECT_NAME}
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/bash-completion/completions)
 install(FILES share/man/${PROJECT_NAME}.1
         DESTINATION ${CMAKE_INSTALL_MANDIR}/man1)
 
@@ -203,3 +205,9 @@ set_tests_properties(e2e-acme PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME completion COMMAND bash ${CMAKE_SOURCE_DIR}/tests/completion.sh
                                  ${CMAKE_SOURCE_DIR}/share/zsh-completion)
 set_tests_properties(completion PROPERTIES SKIP_RETURN_CODE 77)
+# Completions against the actual options the binaries report
+add_test(NAME completion-sync
+         COMMAND bash ${CMAKE_SOURCE_DIR}/tests/completion-sync.sh
+                 $<TARGET_FILE:${PROJECT_NAME}> ${CMAKE_SOURCE_DIR}/acme
+                 ${CMAKE_SOURCE_DIR}/share)
+set_tests_properties(completion-sync PROPERTIES SKIP_RETURN_CODE 77)

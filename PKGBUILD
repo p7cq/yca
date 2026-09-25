@@ -20,7 +20,8 @@ depends=('sqlite' 'libc++' 'libc++abi' 'rsync')
 # bind-tools (nsupdate) is only needed if the ACME client run against
 # repository_host validates via DNS-01 through dynamic DNS (e.g. acme.sh's
 # dns_nsupdate hook).
-optdepends=('bind-tools: acme.sh dns_nsupdate hook for repository_host DNS-01')
+optdepends=('bind-tools: acme.sh dns_nsupdate hook for DNS-01 challenge'
+            'bash-completion: tab completion for yca and yca-acme in Bash')
 makedepends=('clang' 'cmake' 'ninja' 'go')
 backup=('etc/yca/yca.toml')
 options=('!lto' '!debug')
@@ -62,6 +63,8 @@ package() {
   install -Dm644 share/man/yca-acme.1 "$pkgdir/usr/share/man/man1/yca-acme.1"
   install -Dm644 share/zsh-completion/_yca-acme \
     "$pkgdir/usr/share/zsh/site-functions/_yca-acme"
+  install -Dm644 share/bash-completion/yca-acme \
+    "$pkgdir/usr/share/bash-completion/completions/yca-acme"
 
   # Default config, marked backup so pacman preserves operator edits.
   install -Dm600 yca.toml "$pkgdir/etc/yca/yca.toml"

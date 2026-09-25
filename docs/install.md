@@ -124,9 +124,8 @@ Build CLI and ACME server:
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_CXX_COMPILER=clang++
 cmake --build build --target yca
-
-cd acme && go build -ldflags "-X main.version=$(cat ../VERSION)" \
-    -o ../bin/yca-acme .
+(cd acme && go build -ldflags "-X main.version=$(cat ../VERSION)" \
+    -o ../bin/yca-acme .)
 
 sudo cmake --install build
 
@@ -134,6 +133,8 @@ sudo install -Dm755 bin/yca-acme /usr/libexec/yca/yca-acme
 sudo install -Dm644 share/man/yca-acme.1 /usr/share/man/man1/yca-acme.1
 sudo install -Dm644 share/zsh-completion/_yca-acme \
     /usr/share/zsh/site-functions/_yca-acme
+sudo install -Dm644 share/bash-completion/yca-acme \
+    /usr/share/bash-completion/completions/yca-acme
 sudo install -Dm600 yca.toml /etc/yca/yca.toml
 sudo install -m644 share/systemd/*.service share/systemd/*.timer \
     /usr/lib/systemd/system/

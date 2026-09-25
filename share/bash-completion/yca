@@ -1,0 +1,134 @@
+# Bash completion for the yca CA CLI.
+#
+# No bash-completion helpers needed); bash-completion loads it on demand
+# from its completions directory, e.g.:
+#   cp share/bash-completion/yca /usr/share/bash-completion/completions/
+# or source it from ~/.bashrc.
+#
+# Static lists only: completing must not run yca, which is the operator
+# wrapper (sudo + systemd-run).
+#
+# Candidates never contain blanks, so word splitting compgen output is safe.
+# shellcheck disable=SC2207
+_yca() {
+    local cur=${COMP_WORDS[COMP_CWORD]}
+    local prev=${COMP_WORDS[COMP_CWORD - 1]}
+    local commands="init create enroll sign revoke add renew refresh get list"
+    local reasons="unspecified keyCompromise cACompromise affiliationChanged
+        superseded cessationOfOperation certificateHold removeFromCRL
+        privilegeWithdrawn aACompromise"
+
+    # The subcommand is the first non-option word; global options before it
+    # take a value. After it, count the positionals, skipping option values
+    # (every subcommand option takes one, except the flags below).
+    local i w cmd="" npos=0
+    for ((i = 1; i < COMP_CWORD; i++)); do
+        w=${COMP_WORDS[i]}
+        if [[ -z $cmd ]]; then
+            case $w in
+            --config | --store | --log) ((i++)) ;;
+            -*) ;;
+            *) cmd=$w ;;
+            esac
+        else
+            case $w in
+            --tsv | --chain | -h | --help | --*=*) ;;
+            -*) ((i++)) ;;
+            *) ((npos++)) ;;
+            esac
+        fi
+    done
+
+    # Option values.
+    case $prev in
+    --config)
+        compopt -o filenames
+        COMPREPLY=($(compgen -f -X '!*.toml' -- "$cur") $(compgen -d -- "$cur"))
+        return
+        ;;
+    --store)
+        compopt -o filenames
+        COMPREPLY=($(compgen -d -- "$cur"))
+        return
+        ;;
+    --log | --csr)
+        compopt -o filenames
+        COMPREPLY=($(compgen -f -- "$cur"))
+        return
+        ;;
+    --reason)
+        COMPREPLY=($(compgen -W "$reasons" -- "$cur"))
+        return
+        ;;
+    --encoding)
+        COMPREPLY=($(compgen -W "pem der" -- "$cur"))
+        return
+        ;;
+    --cn)
+        case $cmd in
+        get) COMPREPLY=($(compgen -W "root-ca signing-ca -" -- "$cur")) ;;
+        list) COMPREPLY=($(compgen -W "root-ca signing-ca" -- "$cur")) ;;
+        esac
+        return
+        ;;
+    --san | --valid | --id | --nonce | --serial | --purpose | --new-cn | \
+        --limit | --expiring | --expired | --revoked | --last)
+        return
+        ;;
+    esac
+
+    if [[ -z $cmd ]]; then
+        if [[ $cur == -* ]]; then
+            COMPREPLY=($(compgen -W "--config --store --log -h --help --version" -- "$cur"))
+        else
+            COMPREPLY=($(compgen -W "$commands" -- "$cur"))
+        fi
+        return
+    fi
+
+    local opts="" pos1="" pos2=""
+    case $cmd in
+    init) ;;
+    create)
+        opts="--cn --san --valid"
+        pos1="server client"
+        ;;
+    enroll) opts="--id" ;;
+    sign)
+        opts="--id --nonce --csr --valid"
+        pos1="server client email"
+        ;;
+    revoke)
+        opts="--cn --serial --reason"
+        pos1="server client email ca"
+        ;;
+    add)
+        opts="--purpose"
+        pos1="signing-ca"
+        ;;
+    renew)
+        opts="--purpose --new-cn"
+        pos1="signing-ca"
+        ;;
+    refresh)
+        pos1="crl"
+        pos2="root signing all"
+        ;;
+    get)
+        opts="--cn --id --encoding --chain"
+        pos1="server client email ca crl config nonce"
+        ;;
+    list) opts="--expiring --expired --revoked --last --cn --tsv --limit" ;;
+    *) return ;;
+    esac
+
+    if [[ $cur == -* ]]; then
+        COMPREPLY=($(compgen -W "$opts" -- "$cur"))
+    elif ((npos == 0)); then
+        COMPREPLY=($(compgen -W "$pos1" -- "$cur"))
+    elif ((npos == 1)); then
+        COMPREPLY=($(compgen -W "$pos2" -- "$cur"))
+    fi
+}
+
+complete -F _yca yca

@@ -1,0 +1,69 @@
+# Bash completion for the yca ACME frontend.
+#
+# No bash-completion helpers needed; bash-completion loads it on demand
+# from its completions directory, e.g.
+#   cp share/bash-completion/yca-acme /usr/share/bash-completion/completions/
+# or source it from ~/.bashrc.
+#
+# Static lists only: completing must not run yca-acme.
+# tests/completion-sync.sh checks the lists against the binary.
+
+# Candidates never contain blanks, so word splitting compgen output is safe.
+# shellcheck disable=SC2207
+_yca_acme() {
+    local cur=${COMP_WORDS[COMP_CWORD]}
+    local prev=${COMP_WORDS[COMP_CWORD - 1]}
+
+    # Option values.
+    case $prev in
+    --state | --yca | --tls-cert | --tls-key)
+        compopt -o filenames
+        COMPREPLY=($(compgen -f -- "$cur"))
+        return
+        ;;
+    --config)
+        compopt -o filenames
+        COMPREPLY=($(compgen -f -X '!*.toml' -- "$cur") $(compgen -d -- "$cur"))
+        return
+        ;;
+    --store)
+        compopt -o filenames
+        COMPREPLY=($(compgen -d -- "$cur"))
+        return
+        ;;
+    --allow | --issuer | --window | --listen | --url | --id | --valid | \
+        --http01-port | --dns)
+        return
+        ;;
+    esac
+
+    # eab/ari must be the first argument, the verb the second.
+    case ${COMP_WORDS[1]} in
+    eab)
+        if ((COMP_CWORD == 2)); then
+            COMPREPLY=($(compgen -W "new list delete" -- "$cur"))
+        elif [[ $cur == -* ]]; then
+            COMPREPLY=($(compgen -W "--state --allow" -- "$cur"))
+        fi
+        return
+        ;;
+    ari)
+        if ((COMP_CWORD == 2)); then
+            COMPREPLY=($(compgen -W "accelerate list clear" -- "$cur"))
+        elif [[ $cur == -* ]]; then
+            COMPREPLY=($(compgen -W "--state --issuer --window" -- "$cur"))
+        fi
+        return
+        ;;
+    esac
+
+    if [[ $cur == -* ]]; then
+        COMPREPLY=($(compgen -W "--state --listen --url --yca --config --store
+            --id --valid --http01-port --dns --tls-cert --tls-key --version" \
+            -- "$cur"))
+    elif ((COMP_CWORD == 1)); then
+        COMPREPLY=($(compgen -W "eab ari" -- "$cur"))
+    fi
+}
+
+complete -F _yca_acme yca-acme

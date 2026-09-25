@@ -18,6 +18,7 @@ Requires:       sqlite-libs libcxx libcxxabi rsync
 # Only needed if the ACME client used against repository_host validates via
 # DNS-01 through dynamic DNS (e.g. acme.sh's dns_nsupdate hook).
 Suggests:       bind-utils
+Suggests:       bash-completion
 
 %description
 yca is a command-line certificate authority tool (ECDSA, two-tier
@@ -52,6 +53,7 @@ DESTDIR=%{buildroot} cmake --install build
 install -Dm755 bin/yca-acme %{buildroot}%{_libexecdir}/yca/yca-acme
 install -Dm644 share/man/yca-acme.1 %{buildroot}%{_mandir}/man1/yca-acme.1
 install -Dm644 share/zsh-completion/_yca-acme %{buildroot}%{_datadir}/zsh/site-functions/_yca-acme
+install -Dm644 share/bash-completion/yca-acme %{buildroot}%{_datadir}/bash-completion/completions/yca-acme
 install -Dm640 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
 install -Dm644 share/sysusers.d/yca.conf %{buildroot}%{_sysusersdir}/yca.conf
 install -Dm644 share/tmpfiles.d/yca.conf %{buildroot}%{_tmpfilesdir}/yca.conf
@@ -75,6 +77,8 @@ install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/ngin
 %{_mandir}/man1/yca-acme.1*
 %{_datadir}/zsh/site-functions/_yca
 %{_datadir}/zsh/site-functions/_yca-acme
+%{_datadir}/bash-completion/completions/yca
+%{_datadir}/bash-completion/completions/yca-acme
 %dir %attr(0750,root,yca) %{_sysconfdir}/yca
 %config(noreplace) %attr(0640,root,yca) %{_sysconfdir}/yca/yca.toml
 %dir %attr(0700,yca,yca) %{_sharedstatedir}/yca
