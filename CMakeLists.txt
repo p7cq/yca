@@ -60,6 +60,21 @@ if(NOT TARGET SQLite3::SQLite3)
   add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
 endif()
 
+# A fix for my broken toolchain on macOS 26 (todo).
+if(APPLE)
+  get_target_property(_sqlite_target SQLite3::SQLite3 ALIASED_TARGET)
+  if(NOT _sqlite_target)
+    set(_sqlite_target SQLite3::SQLite3)
+  endif()
+  get_target_property(_sqlite_inc ${_sqlite_target} INTERFACE_INCLUDE_DIRECTORIES)
+  if(_sqlite_inc MATCHES "/SDKs/MacOSX[^/]*\\.sdk/usr/include")
+    set_target_properties(${_sqlite_target} PROPERTIES
+                          INTERFACE_INCLUDE_DIRECTORIES "")
+  endif()
+  unset(_sqlite_target)
+  unset(_sqlite_inc)
+endif()
+
 # Add libthr on FreeBSD for Botan's OS::set_thread_name call to
 # pthread_setname_np. Debug implicitly pulls it in via ASan runtime.
 set(THREADS_PREFER_PTHREAD_FLAG ON)
