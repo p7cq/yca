@@ -99,8 +99,9 @@ sudo emerge app-crypt/yca
 ```
 
 The ebuild fetches two distfiles: the tag's source tarball and
-`yca-<version>-vendor.tar.xz` from the release assets (the Go modules of
-`yca-acme`), so the build runs offline under Portage's `network-sandbox`.
+`yca-<version>-gentoo-go-vendor.tar.xz` from the release assets (the Go
+modules of `yca-acme`), so the build runs offline under Portage's
+`network-sandbox`.
 Both are pinned in the `Manifest` by the release CI; emerge a version
 once its release is published.
 

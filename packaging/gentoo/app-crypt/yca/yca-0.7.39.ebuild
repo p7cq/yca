@@ -9,7 +9,7 @@ DESCRIPTION="Two-tier ECDSA certificate authority CLI with an ACME frontend"
 HOMEPAGE="https://github.com/p7cq/yca"
 SRC_URI="
 	https://github.com/p7cq/yca/archive/refs/tags/v${PV}.tar.gz -> ${P}.tar.gz
-	https://github.com/p7cq/yca/releases/download/v${PV}/${P}-vendor.tar.xz
+	https://github.com/p7cq/yca/releases/download/v${PV}/${P}-gentoo-go-vendor.tar.xz
 "
 S="${WORKDIR}/${PN}-${PV}"
 
