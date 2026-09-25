@@ -15,7 +15,7 @@ retain their full copyright and license notices in the file headers.
 
 | Component | Version | License | Copyright |
 |-----------|---------|---------|-----------|
-| [Botan](https://botan.randombit.net) (amalgamation) | 3.12.0 | BSD-2-Clause (Simplified BSD) | (c) 1999-2023 The Botan Authors |
+| [Botan](https://botan.randombit.net) (amalgamation) | 3.13.0 | BSD-2-Clause (Simplified BSD) | (c) 1999-2023 The Botan Authors |
 | [PKCS #11 header](https://github.com/latchset/pkcs11-headers) (`botan/pkcs11.h`) | v3.2 draft | Public domain | Simo Sorce |
 | [CLI11](https://github.com/CLIUtils/CLI11) | 2.4.2 | BSD-3-Clause | (c) 2017-2024 University of Cincinnati / Henry Schreiner |
 | [doctest](https://github.com/doctest/doctest) | 2.4.11 | MIT | (c) 2016-2023 Viktor Kirilov |

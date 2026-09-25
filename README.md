@@ -1,10 +1,9 @@
 # yca - a private CA
 
-yca is a X.509 certificate authority consisting of a C++ command line
-tool and a separate Go daemon for RFC 8555 (ACME) issuance on top of it.
-The hierarchy is two-tier: one root, and one issuing ca per *purpose*
-(`[ca.tls]` or `[ca.email]`), each having the EE profiles it is allowed
-to issue.
+yca is a X.509 certificate authority consisting of a command line tool
+and a separate daemon for ACME issuance on top of it. It has a two-tier
+hierarchy, one root and one issuing ca per *purpose* (`[ca.tls]` or
+`[ca.email]`), each having the EE profiles it is allowed to issue.
 
 ```mermaid
 flowchart LR
@@ -18,8 +17,8 @@ flowchart LR
 ## Limitations
 
 - **ECDSA only.** Known curves and digests: `secp256r1`, `secp384r1`,
-  `secp521r1`, `SHA-256`, `SHA-384`, `SHA-512`. (Verbatim Botan names
-  only - `prime256v1` is rejected).
+  `secp521r1`, `SHA-256`, `SHA-384`, `SHA-512` (verbatim Botan names
+  only).
 - **Fixed policy OID structure.** CertificatePolicies is built from one
   configurable arc (`arc_oid`, intended to be an org PEN) with suffixes
   fixed by the profile table: `<arc>.1.1` (TLS server), `<arc>.1.2`
@@ -99,10 +98,9 @@ would protect the replaceable key better than the anchor).
 
 Each profile belongs to exactly one CA, which is how issuance picks an
 issuer: `create server` routes to whichever CA lists `server`. A profile
-no CA claims is not a configuration error, it simply means this PKI does
-not issue it, and issuance says so. `email` is CSR-only: it is issued
-through `enroll` / `get nonce` / `sign`, and the CA never holds an S/MIME
-private key.
+no CA claims it means this PKI does not issue it, and issuance says so.
+`email` is CSR-only: it is issued through `enroll` / `get nonce` / `sign`,
+and the CA never holds an S/MIME private key.
 
 A CA carries the EKUs of the profiles it lists. A CA listing `email` also
 carries `clientAuth`, which the S/MIME Baseline Requirements permit on a
@@ -159,7 +157,8 @@ ee_valid_days = 398
 simple_dn = true
 ```
 
-`1.3.6.1.4.1.32473` is the IANA documentation PEN (RFC 5612).
+`1.3.6.1.4.1.32473` is the IANA documentation PEN (RFC 5612), replace it
+or remove it before `yca init`.
 
 ### Single token layout
 
@@ -219,6 +218,11 @@ Global options: `--config` (default `./yca.toml`), `--store` (default
 (signing token) and `CA_HSM_ROOT_PIN` (root token; falls back to
 `CA_HSM_PIN`). An operation needs only the secrets of the CA keys it touches.
 
+In the distribution packages, `yca` on `PATH` is an operator wrapper: it
+runs the CLI as the `yca` service account with the packaged config and
+store as defaults and the unattended secrets from `/etc/yca/yca.env`
+(see `yca(1)` and [docs/install.md](docs/install.md)).
+
 | Command | Purpose |
 |---------|---------|
 | `init` | initialize the PKI: the root plus every declared `[ca.<purpose>]`. A passphrase is generated and shown once if `CA_STORE_PASSPHRASE` is unset. Fails if already initialized. |
@@ -242,7 +246,7 @@ Examples:
 yca create server --cn server.example.ca --san dns:alt.example.ca
 yca enroll --id user@example.ca
 yca sign server --id user@example.ca \
-    --nonce $(yca get nonce --id user@example.ca) --csr server.csr | \
+    --nonce $(yca get nonce --id user@example.ca) --csr - < server.csr | \
     yca get server --cn -
 yca revoke server --cn server.example.ca --reason superseded
 yca get ca --cn root-ca --encoding der
@@ -259,12 +263,12 @@ Certificate:
     Data:
         Version: 3 (0x2)
         Serial Number:
-            b4:b9:c9:50:8f:04:b6:b3:58:90:6a:0b:16:4c:76:29
+            6c:59:88:cc:27:d4:ee:6b:22:ff:5f:94:e6:d0:d0:87
         Signature Algorithm: ecdsa-with-SHA256
-        Issuer: CN=CA E1, C=CA, O=Example 会社
+        Issuer: C=CA, O=Example 会社, CN=CA E1
         Validity
-            Not Before: Jul 23 12:05:36 2026 GMT
-            Not After : Aug 24 12:05:36 2027 GMT
+            Not Before: Sep 25 07:18:11 2026 GMT
+            Not After : Oct 28 07:18:11 2027 GMT
         Subject: CN=server.example.ca
         Subject Public Key Info:
             Public Key Algorithm: id-ecPublicKey
@@ -274,25 +278,25 @@ Certificate:
                 ASN1 OID: prime256v1
                 NIST CURVE: P-256
         X509v3 extensions:
-            Authority Information Access: 
+            Authority Information Access:
                 CA Issuers - URI:http://pki.example.ca/ca-e1.crt
-            X509v3 Subject Key Identifier: 
-                AB:B2:86:88:3C:C5:30:4F:B6:9C:CF:44:6F:8F:AE:7B:78:CE:EE:95:C6:6B:D8:F9
+            X509v3 Subject Key Identifier:
+                AA:2B:4E:AF:C5:79:F8:39:79:DE:68:85:D2:23:71:28:47:9C:9A:2D:8E:29:B9:A0
             X509v3 Key Usage: critical
                 Digital Signature
-            X509v3 Subject Alternative Name: 
+            X509v3 Subject Alternative Name:
                 DNS:alt.example.ca, DNS:server.example.ca
             X509v3 Basic Constraints: critical
                 CA:FALSE
-            X509v3 CRL Distribution Points: 
+            X509v3 CRL Distribution Points:
                 Full Name:
                   URI:http://pki.example.ca/ca-e1.crl
 
-            X509v3 Certificate Policies: 
+            X509v3 Certificate Policies:
                 Policy: 1.3.6.1.4.1.32473.1.1
-            X509v3 Authority Key Identifier: 
-                F7:6F:5F:5C:AD:9F:1F:D7:99:3E:BF:56:B0:31:59:6D:34:9F:87:BF:5B:40:89:40
-            X509v3 Extended Key Usage: 
+            X509v3 Authority Key Identifier:
+                6B:FB:BC:C4:1A:1A:F7:E9:82:A1:D1:D8:14:51:FC:D3:BF:53:F8:C1:70:0F:CA:AD
+            X509v3 Extended Key Usage:
                 TLS Web Server Authentication
     Signature Algorithm: ecdsa-with-SHA256
     Signature Value:
@@ -301,32 +305,34 @@ Certificate:
 
 ## Operations
 
-- **Install.** `yca/install.sh [prefix]` builds the release variant and
-  installs `yca`, `yca-acme`, man pages, zsh completions, and
-  the systemd units. Provisioning (service user, store directory,
-  `yca init`, enabling timers) is manual, as part of the CA init ceremony.
+- **Install.** Packages for Debian, Fedora, Arch, FreeBSD, and a Gentoo
+  overlay.
 - **Issuance.** Either `create` (the CA generates the key and delivers
   cert + key under `ee/`) or the CSR pipeline `enroll` / `get nonce` /
   `sign` (delivery via `get`). Servers can instead use ACME.
 - **Revocation and CRLs.** `revoke`, then the CRLs do the rest. Two
   cadences, each on its own systemd timer: the signing CRL performs
   re-publication within 7 days (refreshed daily), the root CRL within
-  183 days (refreshed quarterly). After `revoke ca`, run
-  `yca refresh crl root` immediately: relying parties may cache the root
-  CRL for up to 6 months.
+  183 days (refreshed quarterly).
 - **Publication.** A timer rsyncs `store/ca/` (CA certs `.crt`, CRLs
   `.crl`) to the web root served at `repository_host`; the CDP and
   caIssuers URLs in issued certificates point there.
 - **Rotation.** `renew signing-ca --purpose <p>` for one issuing CA.
 - **ACME.** `yca-acme` exposes RFC 8555 issuance for the server profile:
-  EAB-gated accounts, http-01 and dns-01 (wildcards included),
-  revokeCert, ARI (RFC 9773). It owns only protocol state and execs the
-  `yca` CLI to sign; verified with acme.sh and certbot.
+  EAB-gated accounts, http-01 and dns-01 (wildcards included), revokeCert,
+  ARI (RFC 9773). It owns only protocol state and execs the `yca` CLI to
+  sign; verified with acme.sh and certbot.
 
-## Build and test
+## Documentation
 
- Tested on: Arch Linux/AMD64, Gentoo/ARM64 (Rasbperry Pi 5),
- FreeBSD 15.1/AMD64, macOS 26/ARM64.
+- [Installation](docs/install.md) - installation, the init ceremony,
+  timers, publication and nginx, FreeBSD.
+- [CA operation](docs/operation.md) - day-to-day usage: issuance
+  (with and without a CSR), S/MIME, retrieval, listing, revocation,
+  adding and rotating issuing CAs.
+- [ACME operation](docs/acme-operation.md) - the `yca-acme`
+  frontend: TLS bootstrap, the daemon and its unit, EAB, clients, dns-01,
+  day-2 operations.
 
 ## License
 

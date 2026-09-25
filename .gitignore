@@ -27,6 +27,7 @@ go.work.sum
 /build.sh
 /install.sh
 /tools/
+/docs/TheEpsteinDrive/
 
 # Claude
 /.claude/
