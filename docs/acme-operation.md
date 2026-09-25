@@ -1,17 +1,7 @@
 # yca-acme - configuration & operations
 
 What to provision, how to run it under systemd behind nginx, how clients
-enroll, and what day-2 operations look like. Design rationale lives in
-acme-blueprint.md; this document is the "how".
-
-Status note: all four blueprint phases are implemented - http-01 and
-dns-01 (wildcards included), `revokeCert`, ARI (RFC 9773) for the server
-profile, verified with both acme.sh and certbot; the unit, nginx route,
-man page and completions ship with the packages (see
-[install.md](install.md)). The account
-lifecycle is complete too: deactivation (RFC 8555 7.3.6), key rollover
-(`keyChange`, RFC 8555 7.3.5), `eab delete`, and hourly garbage collection of
-expired protocol objects.
+enroll, and what day-2 operations look like.
 
 ## Moving parts
 
@@ -510,13 +500,15 @@ acme.sh --install-cert -d host.example.ca \
 
 ### certbot (verified with 5.6.0)
 
+As root:
+
 ```bash
-$ export ACME=https://pki.example.ca/acme/directory
-$ REQUESTS_CA_BUNDLE=root.pem certbot certonly \
+export ACME=https://pki.example.ca/acme/directory
+REQUESTS_CA_BUNDLE=root.pem certbot certonly \
       --server "$ACME" \
       --eab-kid <kid> --eab-hmac-key <hmac> \
       --standalone -d host.example.ca
-$ REQUESTS_CA_BUNDLE=root.pem certbot revoke \
+REQUESTS_CA_BUNDLE=root.pem certbot revoke \
       --cert-path .../cert.pem --reason keycompromise \
       --server "$ACME"
 ```
