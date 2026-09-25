@@ -369,81 +369,100 @@ jobs:
           dir=packaging/gentoo/app-crypt/yca
           ebuild_new="${dir}/yca-${VERSION}.ebuild"
 
-          old="$(ls "${dir}"/*.ebuild)"
-          if [ "$old" != "$ebuild_new" ]; then
-            git mv "$old" "$ebuild_new"
-          fi
-
           tarball="$(mktemp)"
           curl -fsSL -o "$tarball" \
             "https://github.com/p7cq/yca/archive/refs/tags/v${VERSION}.tar.gz"
 
+          # A re-run (e.g. the arm64 dispatch) must produce the same bytes.
           src="$(mktemp -d)"
           tar -xzf "$tarball" -C "$src"
           (cd "${src}/yca-${VERSION}/acme" && go mod vendor)
           mkdir -p dist
           vendor="dist/yca-${VERSION}-vendor.tar.xz"
           tar -C "$src" --sort=name --owner=0 --group=0 --numeric-owner \
+            --mtime=@0 --pax-option=delete=atime,delete=ctime \
             -cJf "$vendor" "yca-${VERSION}/acme/vendor"
 
-          {
-            printf 'DIST yca-%s.tar.gz %s BLAKE2B %s SHA512 %s\n' \
-              "$VERSION" \
-              "$(stat -c%s "$tarball")" \
-              "$(b2sum "$tarball" | cut -d' ' -f1)" \
-              "$(sha512sum "$tarball" | cut -d' ' -f1)"
-            printf 'DIST yca-%s-vendor.tar.xz %s BLAKE2B %s SHA512 %s\n' \
-              "$VERSION" \
-              "$(stat -c%s "$vendor")" \
-              "$(b2sum "$vendor" | cut -d' ' -f1)" \
-              "$(sha512sum "$vendor" | cut -d' ' -f1)"
-            printf 'EBUILD yca-%s.ebuild %s BLAKE2B %s SHA512 %s\n' \
-              "$VERSION" \
-              "$(stat -c%s "$ebuild_new")" \
-              "$(b2sum "$ebuild_new" | cut -d' ' -f1)" \
-              "$(sha512sum "$ebuild_new" | cut -d' ' -f1)"
-          } > "${dir}/Manifest"
-          rm -f "$tarball"
+          # Digests are computed on master, not on the commit that
+          # started this run: master may have moved during the build
+          # and expectedHeadOid would refuse the commit.
+          for attempt in 1 2 3 4 5; do
+            git fetch --depth=1 origin master
+            git reset --hard FETCH_HEAD
+            if [ "$(cat VERSION)" != "$VERSION" ]; then
+              echo "master is at $(cat VERSION); its own run updates the ebuild"
+              exit 0
+            fi
 
-          # acct-group/yca, acct-user/yca: no distfiles, EBUILD digests only.
-          for acct in packaging/gentoo/acct-group/yca packaging/gentoo/acct-user/yca; do
-            for e in "${acct}"/*.ebuild; do
-              printf 'EBUILD %s %s BLAKE2B %s SHA512 %s\n' \
-                "$(basename "$e")" \
-                "$(stat -c%s "$e")" \
-                "$(b2sum "$e" | cut -d' ' -f1)" \
-                "$(sha512sum "$e" | cut -d' ' -f1)"
-            done > "${acct}/Manifest"
+            old="$(ls "${dir}"/*.ebuild)"
+            if [ "$old" != "$ebuild_new" ]; then
+              git mv "$old" "$ebuild_new"
+            fi
+
+            {
+              printf 'DIST yca-%s.tar.gz %s BLAKE2B %s SHA512 %s\n' \
+                "$VERSION" \
+                "$(stat -c%s "$tarball")" \
+                "$(b2sum "$tarball" | cut -d' ' -f1)" \
+                "$(sha512sum "$tarball" | cut -d' ' -f1)"
+              printf 'DIST yca-%s-vendor.tar.xz %s BLAKE2B %s SHA512 %s\n' \
+                "$VERSION" \
+                "$(stat -c%s "$vendor")" \
+                "$(b2sum "$vendor" | cut -d' ' -f1)" \
+                "$(sha512sum "$vendor" | cut -d' ' -f1)"
+              printf 'EBUILD yca-%s.ebuild %s BLAKE2B %s SHA512 %s\n' \
+                "$VERSION" \
+                "$(stat -c%s "$ebuild_new")" \
+                "$(b2sum "$ebuild_new" | cut -d' ' -f1)" \
+                "$(sha512sum "$ebuild_new" | cut -d' ' -f1)"
+            } > "${dir}/Manifest"
+
+            # acct-group/yca, acct-user/yca: no distfiles, EBUILD digests only.
+            for acct in packaging/gentoo/acct-group/yca packaging/gentoo/acct-user/yca; do
+              for e in "${acct}"/*.ebuild; do
+                printf 'EBUILD %s %s BLAKE2B %s SHA512 %s\n' \
+                  "$(basename "$e")" \
+                  "$(stat -c%s "$e")" \
+                  "$(b2sum "$e" | cut -d' ' -f1)" \
+                  "$(sha512sum "$e" | cut -d' ' -f1)"
+              done > "${acct}/Manifest"
+            done
+
+            git add packaging/gentoo
+            if git diff --cached --quiet; then
+              echo "no Gentoo packaging changes"
+              exit 0
+            fi
+
+            head="$(git rev-parse HEAD)"
+            adds="$(git diff --cached --no-renames --name-only --diff-filter=AM |
+              while read -r f; do
+                jq -n --arg p "$f" --arg c "$(base64 -w0 "$f")" \
+                  '{path: $p, contents: $c}'
+              done | jq -s .)"
+            dels="$(git diff --cached --no-renames --name-only --diff-filter=D |
+              jq -R . | jq -s 'map({path: .})')"
+
+            if jq -n \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --arg head "$head" \
+              --arg msg "chore(gentoo): update app-crypt/yca for v${VERSION}" \
+              --argjson adds "$adds" \
+              --argjson dels "$dels" \
+              '{query: "mutation($i: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $i) { commit { url } } }",
+                variables: {i: {
+                  branch: {repositoryNameWithOwner: $repo, branchName: "master"},
+                  message: {headline: $msg},
+                  expectedHeadOid: $head,
+                  fileChanges: {additions: $adds, deletions: $dels}}}}' |
+              gh api graphql --input -; then
+              exit 0
+            fi
+            echo "commit refused (attempt ${attempt}), master moved; retrying" >&2
+            sleep 10
           done
-
-          git add packaging/gentoo
-          if git diff --cached --quiet; then
-            echo "no Gentoo packaging changes"
-            exit 0
-          fi
-
-          head="$(git ls-remote origin refs/heads/master | cut -f1)"
-          adds="$(git diff --cached --no-renames --name-only --diff-filter=AM |
-            while read -r f; do
-              jq -n --arg p "$f" --arg c "$(base64 -w0 "$f")" \
-                '{path: $p, contents: $c}'
-            done | jq -s .)"
-          dels="$(git diff --cached --no-renames --name-only --diff-filter=D |
-            jq -R . | jq -s 'map({path: .})')"
-
-          jq -n \
-            --arg repo "$GITHUB_REPOSITORY" \
-            --arg head "$head" \
-            --arg msg "chore(gentoo): update app-crypt/yca for v${VERSION}" \
-            --argjson adds "$adds" \
-            --argjson dels "$dels" \
-            '{query: "mutation($i: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $i) { commit { url } } }",
-              variables: {i: {
-                branch: {repositoryNameWithOwner: $repo, branchName: "master"},
-                message: {headline: $msg},
-                expectedHeadOid: $head,
-                fileChanges: {additions: $adds, deletions: $dels}}}}' |
-            gh api graphql --input -
+          echo "could not commit the Gentoo update after 5 attempts" >&2
+          exit 1
 
       - uses: actions/upload-artifact@v7
         with:
