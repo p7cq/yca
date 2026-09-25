@@ -121,6 +121,23 @@ List the active accelerations: issuer, window, and when it was set.
 \fBari clear\fR \fB\-\-issuer\fR \fIcn\fR
 Drop an acceleration; that issuer's certificates return to the policy
 window.
+.SH OPERATOR WRAPPER
+In the distribution packages the
+.B yca\-acme
+on \fBPATH\fR is a shell wrapper; the frontend itself is
+\fB/usr/libexec/yca/yca\-acme\fR (FreeBSD:
+\fB/usr/local/libexec/yca/yca\-acme\fR), which the service starts
+directly. The wrapper runs \fBeab\fR and \fBari\fR as the \fByca\fR
+service account, through \fBsudo\fR unless invoked by root, with umask
+077 in the state directory: on Linux with \fBsystemd\-run\fR(1), on
+FreeBSD with \fBsu \-m\fR. They touch only the protocol state, so no CA
+secret is read or passed on.
+.PP
+\fB\-\-state\fR defaults to \fB/var/lib/yca/acme.db\fR (FreeBSD:
+\fB/var/db/yca/acme.db\fR) unless given. Invoked as \fByca\fR, or with
+anything other than \fBeab\fR or \fBari\fR and a verb (the daemon,
+\fB\-h\fR, \fB\-\-version\fR), it runs the frontend unchanged as the
+caller.
 .SH ENVIRONMENT
 .TP
 .B CA_STORE_PASSPHRASE / CA_HSM_PIN
@@ -140,10 +157,10 @@ systemd).
 .SH EXAMPLES
 .nf
 yca enroll \-\-id acme
-yca\-acme eab new \-\-state /var/lib/yca/acme.db \-\-allow '*.example.ca'
-yca\-acme \-\-state /var/lib/yca/acme.db \-\-url https://pki.example.ca \\
-    \-\-yca /usr/libexec/yca/yca \-\-config /etc/yca/yca.toml \\
-    \-\-store /var/lib/yca/store
+yca\-acme eab new \-\-allow '*.example.ca'
+/usr/libexec/yca/yca\-acme \-\-state /var/lib/yca/acme.db \\
+    \-\-url https://pki.example.ca \-\-yca /usr/libexec/yca/yca \\
+    \-\-config /etc/yca/yca.toml \-\-store /var/lib/yca/store
 .fi
 .SH SEE ALSO
 .BR yca (1);

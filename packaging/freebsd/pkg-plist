@@ -1,6 +1,7 @@
 bin/yca
 bin/yca-acme
 libexec/yca/yca
+libexec/yca/yca-acme
 etc/rc.d/yca_acme
 etc/periodic/daily/500.yca-crl-refresh
 etc/periodic/daily/510.yca-acme-renew

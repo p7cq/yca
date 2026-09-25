@@ -1,0 +1,74 @@
+#!/bin/sh
+#
+# yca-acme operator entry point. Runs the eab and ari administration
+# commands of the real frontend (@YCA_ACME_REAL@) as the yca service
+# account, with umask 077 and the packaged protocol state database as
+# default. They touch only acme.db, so no CA secret is read or passed on.
+#
+# Anything else (the daemon, -h, --version) runs the real binary unchanged
+# as the caller: the services start it directly, as yca. When this wrapper
+# is reached as yca it just execs it.
+set -eu
+
+real="@YCA_ACME_REAL@"
+
+case "$(uname -s)" in
+FreeBSD) state=/var/db/yca ;;
+*) state=/var/lib/yca ;;
+esac
+
+if [ "$(id -un)" = yca ]; then
+    exec "$real" "$@"
+fi
+
+# eab/ari must be the first argument, the verb the second; without a verb
+# the real binary only prints its usage.
+case "${1-}" in
+eab | ari) [ $# -ge 2 ] || exec "$real" "$@" ;;
+*) exec "$real" "$@" ;;
+esac
+
+# The default goes right after the verb, where the subcommand parses its
+# flags; Go's flag package takes both one and two dashes.
+has_state=0
+for a in "$@"; do
+    case "$a" in
+    --state | --state=* | -state | -state=*) has_state=1 ;;
+    esac
+done
+if [ "$has_state" = 0 ]; then
+    sub=$1 verb=$2
+    shift 2
+    set -- "$sub" "$verb" --state "$state/acme.db" "$@"
+fi
+
+sudo=sudo
+[ "$(id -u)" != 0 ] || sudo=
+
+case "$(uname -s)" in
+FreeBSD)
+    # No systemd-run: `su -m` keeps the umask while switching to yca.
+    # shellcheck disable=SC2016 # expanded by the inner shells
+    exec $sudo /bin/sh -c '
+        umask 077
+        cd "$1"
+        shift
+        exec su -m yca -c '\''exec "$0" "$@"'\'' "$@"
+    ' sh "$state" "$real" "$@"
+    ;;
+*)
+    # --pty for interactive use, --pipe when stdin or stdout is redirected.
+    io=--pipe
+    if [ -t 0 ] && [ -t 1 ]; then
+        io=--pty
+    fi
+    exec $sudo systemd-run --quiet --wait --collect "$io" \
+        --uid=yca --gid=yca \
+        --working-directory="$state" \
+        -p UMask=0077 \
+        -p NoNewPrivileges=yes \
+        -p ProtectSystem=strict \
+        -p ReadWritePaths="$state" \
+        "$real" "$@"
+    ;;
+esac

@@ -58,7 +58,8 @@ src_install() {
 	# CMake's own install() rules: yca binary, zsh completion, man page.
 	cmake_src_install
 
-	dobin bin/yca-acme
+	exeinto /usr/libexec/yca
+	doexe bin/yca-acme
 	doman share/man/yca-acme.1
 
 	insinto /usr/share/zsh/site-functions

@@ -23,9 +23,12 @@ flowchart TD
   policy apply unchanged.
 - Protocol state (accounts, EAB credentials, orders, challenges, issued
   chains) lives in the daemon's own database (`--state`), not in the CA store.
-- `yca-acme` has no operator wrapper: its database is `yca:yca` 0600, so
-  the `eab` and `ari` subcommands run as the service account
-  (`sudo -u yca yca-acme ... --state /var/lib/yca/acme.db`).
+- Like `yca`, the `yca-acme` on `PATH` is an operator wrapper; the daemon
+  itself is `/usr/libexec/yca/yca-acme`, which the unit starts directly.
+  The wrapper runs the `eab` and `ari` subcommands as the service account
+  (the database is `yca:yca` 0600), with umask 077 and `--state
+  /var/lib/yca/acme.db` unless given; they need no CA secret, so none is
+  passed on. Anything else runs the real binary unchanged.
 - http-01 validation is outbound from the daemon: it fetches
   `http://<identifier>/.well-known/acme-challenge/<token>` - identifiers
   must resolve (internal DNS) from the PKI host's point of view.
@@ -149,7 +152,7 @@ sudo systemctl restart nginx.service
 
 ```bash
 yca enroll --id acme
-sudo -u yca yca-acme eab new --state /var/lib/yca/acme.db --allow $(hostname)
+yca-acme eab new --allow $(hostname)
 ```
 
 `eab new` prints the kid and HMAC once - save them where the
@@ -170,7 +173,7 @@ also reloads systemd). For example:
 ```systemd
 [Service]
 ExecStart=
-ExecStart=/usr/bin/yca-acme \
+ExecStart=/usr/libexec/yca/yca-acme \
   --state /var/lib/yca/acme.db \
   --listen 127.0.0.1:8555 \
   --url https://pki.example.ca \
@@ -302,13 +305,11 @@ affect the CA: issued certificates live in the store; clients simply
 re-register (new EAB credentials must be provisioned). Back it up with the
 same cadence as the store if re-enrollment churn matters to you.
 
-Without `--state`, `yca-acme` only opens `./acme.db` if it already exists
-in the current directory; it does not create one silently. When
-provisioning credentials for the running daemon (`eab new`/`list`/
-`delete`), always run as the service account and pass `--state
-/var/lib/yca/acme.db` (or whatever `--state` the unit uses) explicitly,
-otherwise you get an error:
-`sudo -u yca yca-acme eab list --state /var/lib/yca/acme.db`.
+Without `--state`, the real `yca-acme` only opens `./acme.db` if it
+already exists in the current directory; it does not create one
+silently. The operator wrapper supplies `--state /var/lib/yca/acme.db`
+to `eab` and `ari`, so `yca-acme eab list` reaches the running daemon's
+database; pass `--state` only if the unit uses another one.
 
 ## systemd
 
@@ -327,7 +328,7 @@ User=yca
 Group=yca
 # CA_HSM_PIN=... or CA_STORE_PASSPHRASE=... - root-owned, mode 0600.
 EnvironmentFile=/etc/yca/yca.env
-ExecStart=/usr/bin/yca-acme \
+ExecStart=/usr/libexec/yca/yca-acme \
   --state /var/lib/yca/acme.db \
   --listen 127.0.0.1:8555 \
   --url https://pki.example.ca \
@@ -379,7 +380,7 @@ connects:
 ```ini
 [Service]
 ExecStart=
-ExecStart=/usr/bin/yca-acme \
+ExecStart=/usr/libexec/yca/yca-acme \
   --state /var/lib/yca/acme.db \
   --listen 127.0.0.1:8555 \
   --url https://pki.example.ca \
@@ -437,7 +438,7 @@ some refuse) TLS there.
 No open registration: every account needs a provisioned credential.
 
 ```bash
-sudo -u yca yca-acme eab new --state /var/lib/yca/acme.db --allow 'pki.example.ca'
+yca-acme eab new --allow 'pki.example.ca'
 
 ┌ EAB credential (shown once) ────────────────────────┐
     KID: SXYGc6ccV4D0DX_b4rkTk3w
@@ -535,9 +536,8 @@ client to replace **now**, with a window that is already open:
 
 ```bash
 yca revoke ca --cn "CA E1" --reason cACompromise   # on the CA
-sudo -u yca yca-acme ari accelerate --state /var/lib/yca/acme.db \
-    --issuer "CA E1" --window 2h
-sudo -u yca yca-acme ari list --state /var/lib/yca/acme.db
+yca-acme ari accelerate --issuer "CA E1" --window 2h
+yca-acme ari list
 ```
 
 Clients pick a uniformly random moment inside the window (RFC 9773
@@ -823,9 +823,8 @@ wrapper around it, or use a purpose-built delegated-DNS ACME helper
   (`acme.sh --deactivate-account`; irreversible, every later request is
   refused) and roll its key over (`keyChange`, RFC 8555 7.3.5 - exercised
   by the protocol tests; the common clients do not drive it).
-- **Account compromise**: containment = `sudo -u yca yca-acme eab delete
-  --state /var/lib/yca/acme.db <kid>` (the bound accounts can no longer
-  order anything), then revoke whatever it issued (`yca revoke server
+- **Account compromise**: containment = `yca-acme eab delete <kid>`
+  (the bound accounts can no longer order anything), then revoke whatever it issued (`yca revoke server
   --serial ...`, serials in `yca list` and the
   daemon log). If the account key itself leaked but the operator still
   controls it, `keyChange` rotates it without touching the EAB binding.

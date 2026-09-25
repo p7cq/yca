@@ -70,14 +70,14 @@ pidfile="/var/db/yca/${name}.pid"
 # procname/command/command_args below: all read by run_rc_command via eval
 # in rc.subr, not used directly in this script.
 # shellcheck disable=SC2034
-procname="/usr/local/bin/yca-acme"
+procname="/usr/local/libexec/yca/yca-acme"
 # shellcheck disable=SC2034
 command="/usr/sbin/daemon"
 
 # Built incrementally rather than one literal string: an unset/empty
 # variable in an unquoted expansion adds no words. The optional flags (valid,
 # dns, tls-cert, tls-key) are only appended when actually set.
-command_args="-p ${pidfile} -f /usr/local/bin/yca-acme"
+command_args="-p ${pidfile} -f /usr/local/libexec/yca/yca-acme"
 command_args="${command_args} --state ${yca_acme_state}"
 command_args="${command_args} --listen ${yca_acme_listen}"
 command_args="${command_args} --url ${yca_acme_url}"

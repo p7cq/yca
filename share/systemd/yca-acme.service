@@ -16,7 +16,7 @@ After=network.target
 User=yca
 Group=yca
 EnvironmentFile=/etc/yca/yca.env
-ExecStart=/usr/bin/yca-acme \
+ExecStart=/usr/libexec/yca/yca-acme \
   --state /var/lib/yca/acme.db \
   --listen 127.0.0.1:8555 \
   --url https://pki.example.ca \

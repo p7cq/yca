@@ -87,22 +87,25 @@ else
     fail=1
 fi
 
-# The real CLI lives in libexec; `yca` on PATH is the operator wrapper.
-if [ -x "$prefix/libexec/yca/yca" ]; then
-    echo "ok   $prefix/libexec/yca/yca: executable"
-else
-    echo "FAIL $prefix/libexec/yca/yca: missing or not executable"
-    fail=1
-fi
-# Any sh shebang: Fedora's brp-mangle-shebangs rewrites /bin/sh to
-# /usr/bin/sh.
-shebang="$(head -n 1 "$prefix/bin/yca")"
-if [ "${shebang#\#!}" != "$shebang" ] && [ "${shebang%/sh}" != "$shebang" ] &&
-    grep -q "^real=\"$prefix/libexec/yca/yca\"$" "$prefix/bin/yca"; then
-    echo "ok   $prefix/bin/yca: wrapper for $prefix/libexec/yca/yca"
-else
-    echo "FAIL $prefix/bin/yca: not the wrapper for $prefix/libexec/yca/yca"
-    fail=1
-fi
+# The real CLI and yca-acme live in libexec; on PATH are the operator
+# wrappers.
+for b in yca yca-acme; do
+    if [ -x "$prefix/libexec/yca/$b" ]; then
+        echo "ok   $prefix/libexec/yca/$b: executable"
+    else
+        echo "FAIL $prefix/libexec/yca/$b: missing or not executable"
+        fail=1
+    fi
+    # Any sh shebang: Fedora's brp-mangle-shebangs rewrites /bin/sh to
+    # /usr/bin/sh.
+    shebang="$(head -n 1 "$prefix/bin/$b")"
+    if [ "${shebang#\#!}" != "$shebang" ] && [ "${shebang%/sh}" != "$shebang" ] &&
+        grep -q "^real=\"$prefix/libexec/yca/$b\"$" "$prefix/bin/$b"; then
+        echo "ok   $prefix/bin/$b: wrapper for $prefix/libexec/yca/$b"
+    else
+        echo "FAIL $prefix/bin/$b: not the wrapper for $prefix/libexec/yca/$b"
+        fail=1
+    fi
+done
 
 exit "$fail"

@@ -49,7 +49,7 @@ popd
 %install
 rm -rf %{buildroot}
 DESTDIR=%{buildroot} cmake --install build
-install -Dm755 bin/yca-acme %{buildroot}%{_bindir}/yca-acme
+install -Dm755 bin/yca-acme %{buildroot}%{_libexecdir}/yca/yca-acme
 install -Dm644 share/man/yca-acme.1 %{buildroot}%{_mandir}/man1/yca-acme.1
 install -Dm644 share/zsh-completion/_yca-acme %{buildroot}%{_datadir}/zsh/site-functions/_yca-acme
 install -Dm640 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
@@ -70,6 +70,7 @@ install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/ngin
 %{_bindir}/yca
 %{_bindir}/yca-acme
 %{_libexecdir}/yca/yca
+%{_libexecdir}/yca/yca-acme
 %{_mandir}/man1/yca.1*
 %{_mandir}/man1/yca-acme.1*
 %{_datadir}/zsh/site-functions/_yca

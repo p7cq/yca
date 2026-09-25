@@ -11,14 +11,17 @@ CA init is a ceremony, not a postinstall hook.
 ## How the pieces fit
 
 Every operation on the CA runs as the `yca` service account, whether a
-timer or an administrator starts it. The `yca` on `PATH` is a small
-wrapper; the CLI itself lives in libexec.
+timer or an administrator starts it. The `yca` and `yca-acme` on `PATH`
+are small wrappers; the binaries themselves live in libexec.
 
 ```mermaid
 flowchart LR
     admin["admin shell<br/>yca list ..."] --> wrapper["/usr/bin/yca<br/>wrapper"]
     wrapper -->|"sudo systemd-run --uid=yca<br/>UMask=0077"| cli["/usr/libexec/yca/yca<br/>runs as yca"]
     units["yca-* timers<br/>yca-acme.service"] -->|"User=yca"| cli
+    admin -->|"yca-acme eab / ari"| awrapper["/usr/bin/yca-acme<br/>wrapper"]
+    awrapper -->|"sudo systemd-run --uid=yca<br/>UMask=0077, no CA secret"| acme["/usr/libexec/yca/yca-acme<br/>acme.db"]
+    units -->|"yca-acme.service, User=yca"| acme
     env["/etc/yca/yca.env<br/>root:root 0600"] -.->|"read by root / PID 1"| cli
     cfg["/etc/yca/yca.toml<br/>root:yca 0640"] -->|"read"| cli
     cli -->|"read-write"| state[("/var/lib/yca<br/>yca:yca 0700")]
@@ -127,7 +130,7 @@ cd acme && go build -ldflags "-X main.version=$(cat ../VERSION)" \
 
 sudo cmake --install build
 
-sudo install -Dm755 bin/yca-acme /usr/bin/yca-acme
+sudo install -Dm755 bin/yca-acme /usr/libexec/yca/yca-acme
 sudo install -Dm644 share/man/yca-acme.1 /usr/share/man/man1/yca-acme.1
 sudo install -Dm644 share/zsh-completion/_yca-acme \
     /usr/share/zsh/site-functions/_yca-acme
@@ -400,6 +403,8 @@ See `man yca` (including its OPERATOR WRAPPER section) and
 
 - `yca <command>` as the admin; the wrapper runs it as `yca`, with the
   packaged config and store unless `--config`/`--store` are given.
+- `yca-acme eab ...` / `yca-acme ari ...` likewise, with
+  `--state /var/lib/yca/acme.db` unless given (`man yca-acme`).
 - The CLI runs in `/var/lib/yca` as `yca`, so it cannot open files in
   your home: pass a CSR on standard input or inline.
 
@@ -470,6 +475,7 @@ HSM on FreeBSD is not tested.
 | `/etc/yca` | `/usr/local/etc/yca` |
 | `/var/lib/yca` | `/var/db/yca` |
 | `/usr/libexec/yca/yca` | `/usr/local/libexec/yca/yca` |
+| `/usr/libexec/yca/yca-acme` | `/usr/local/libexec/yca/yca-acme` |
 | `systemd-run` in the wrapper | `sudo sh` sources `yca.env` as root, then `su -m yca` |
 
 ```bash

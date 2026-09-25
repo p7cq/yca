@@ -138,22 +138,30 @@ endif()
 # Install: the CLI + support files. yca-seed/yca_tests are not installed;
 # the Go binaries and the systemd units are handled by a separate script.
 # The real CLI goes to libexec (services and yca-acme call it there); the
-# `yca` on PATH is the operator wrapper that runs it as the yca account.
+# `yca` and `yca-acme` on PATH are the operator wrappers running under the
+# yca account.
 include(GNUInstallDirs)
 set(YCA_REAL
     ${CMAKE_INSTALL_FULL_LIBEXECDIR}/${PROJECT_NAME}/${PROJECT_NAME})
-# Configure-time copy for the wrapper test (ctest).
+set(YCA_ACME_REAL ${CMAKE_INSTALL_FULL_LIBEXECDIR}/${PROJECT_NAME}/yca-acme)
+# Configure-time copies for the wrapper tests (ctest).
 configure_file(share/bin/${PROJECT_NAME}.in
                ${CMAKE_BINARY_DIR}/wrapper/${PROJECT_NAME} @ONLY)
+configure_file(share/bin/yca-acme.in ${CMAKE_BINARY_DIR}/wrapper/yca-acme
+               @ONLY)
 install(TARGETS ${PROJECT_NAME}
         RUNTIME DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
-# The wrapper is generated at install time and its path to the
-# real CLI follows `cmake --install --prefix`.
+# The wrappers are generated at install time and their paths to the
+# real binaries follow `cmake --install --prefix`.
 install(
   CODE "set(YCA_REAL \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${PROJECT_NAME}\")
+  set(YCA_ACME_REAL \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/yca-acme\")
   configure_file(\"${CMAKE_SOURCE_DIR}/share/bin/${PROJECT_NAME}.in\"
-                 \"${CMAKE_BINARY_DIR}/wrapper-install/${PROJECT_NAME}\" @ONLY)")
+                 \"${CMAKE_BINARY_DIR}/wrapper-install/${PROJECT_NAME}\" @ONLY)
+  configure_file(\"${CMAKE_SOURCE_DIR}/share/bin/yca-acme.in\"
+                 \"${CMAKE_BINARY_DIR}/wrapper-install/yca-acme\" @ONLY)")
 install(PROGRAMS ${CMAKE_BINARY_DIR}/wrapper-install/${PROJECT_NAME}
+                 ${CMAKE_BINARY_DIR}/wrapper-install/yca-acme
         DESTINATION ${CMAKE_INSTALL_BINDIR})
 install(FILES share/zsh-completion/_${PROJECT_NAME}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/zsh/site-functions)
@@ -166,6 +174,8 @@ add_test(NAME e2e COMMAND bash ${CMAKE_SOURCE_DIR}/tests/e2e.sh
                           $<TARGET_FILE:${PROJECT_NAME}>)
 add_test(NAME wrapper COMMAND sh ${CMAKE_SOURCE_DIR}/tests/wrapper.sh
                               ${CMAKE_BINARY_DIR}/wrapper/${PROJECT_NAME})
+add_test(NAME wrapper-acme COMMAND sh ${CMAKE_SOURCE_DIR}/tests/wrapper-acme.sh
+                                   ${CMAKE_BINARY_DIR}/wrapper/yca-acme)
 # pkcs11 backend on ephemeral SoftHSM2 token
 add_test(NAME e2e-hsm COMMAND bash ${CMAKE_SOURCE_DIR}/tests/e2e-hsm.sh
                               $<TARGET_FILE:${PROJECT_NAME}>)

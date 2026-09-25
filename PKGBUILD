@@ -57,8 +57,8 @@ package() {
   # yca binary + _yca zsh completion + yca.1 man page (CMake install rules)
   DESTDIR="$pkgdir" cmake --install build
 
-  # ACME frontend + its man page and completion (not covered by CMake)
-  install -Dm755 bin/yca-acme "$pkgdir/usr/bin/yca-acme"
+  # Real ACME frontend + its man page and completion.
+  install -Dm755 bin/yca-acme "$pkgdir/usr/libexec/yca/yca-acme"
   install -Dm644 share/man/yca-acme.1 "$pkgdir/usr/share/man/man1/yca-acme.1"
   install -Dm644 share/zsh-completion/_yca-acme \
     "$pkgdir/usr/share/zsh/site-functions/_yca-acme"

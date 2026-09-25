@@ -555,8 +555,7 @@ yca revoke ca --cn "CA E1" --reason cACompromise
 sudo systemctl start yca-publish.service
 
 # 5. Tell the ACME fleet to replace what E1 signed, at once
-sudo -u yca yca-acme ari accelerate --state /var/lib/yca/acme.db \
-    --issuer "CA E1" --window 2h
+yca-acme ari accelerate --issuer "CA E1" --window 2h
 ```
 
 Step 5 only matters if the ACME frontend is in use: it moves the renewal
