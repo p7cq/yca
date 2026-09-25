@@ -17,16 +17,13 @@ retain their full copyright and license notices in the file headers.
 |-----------|---------|---------|-----------|
 | [Botan](https://botan.randombit.net) (amalgamation) | 3.13.0 | BSD-2-Clause (Simplified BSD) | (c) 1999-2023 The Botan Authors |
 | [PKCS #11 header](https://github.com/latchset/pkcs11-headers) (`botan/pkcs11.h`) | v3.2 draft | Public domain | Simo Sorce |
-| [CLI11](https://github.com/CLIUtils/CLI11) | 2.4.2 | BSD-3-Clause | (c) 2017-2024 University of Cincinnati / Henry Schreiner |
-| [doctest](https://github.com/doctest/doctest) | 2.4.11 | MIT | (c) 2016-2023 Viktor Kirilov |
+| [CLI11](https://github.com/CLIUtils/CLI11) | 2.7.2 | BSD-3-Clause | (c) 2017-2026 University of Cincinnati / Henry Schreiner |
+| [doctest](https://github.com/doctest/doctest) | 2.5.3 | MIT | (c) 2016-2023 Viktor Kirilov |
 | [toml++](https://github.com/marzer/tomlplusplus) | 3.4.0 | MIT | (c) Mark Gillard |
 
 ## Go modules (`acme/go.mod`)
 
 | Component | Version | License | Copyright |
 |-----------|---------|---------|-----------|
-| [go-sqlite3](https://github.com/mattn/go-sqlite3) | 1.14.47 | MIT | (c) Yasuhiro Matsumoto |
-| [go-jose](https://github.com/go-jose/go-jose) | 4.1.3 | Apache-2.0 License | (c) go-jose |
-
-go-sqlite3 is built with its `libsqlite3` tag, so `yca-acme` links the system
-SQLite (above) instead of the copy go-sqlite3 embeds.
+| [go-sqlite3](https://github.com/mattn/go-sqlite3) | 1.14.52 | MIT | (c) Yasuhiro Matsumoto |
+| [go-jose](https://github.com/go-jose/go-jose) | 4.1.5 | Apache-2.0 License | (c) go-jose |

@@ -68,12 +68,18 @@ bash_complete() {
 # -h/--help are left out everywhere: every command has them.
 no_help() { grep -vxE -- '-h|--help'; }
 
-cli_cmds="$("$YCA" --help | awk '/^Subcommands:/ { f = 1; next } f && /^  [a-z]/ { print $1 }' | norm)"
-cli_globals="$("$YCA" --help | awk '/^Options:/ { f = 1; next } /^$/ { f = 0 } f' |
-  grep -oE '^  (-[a-z],)?--[a-z][a-z0-9-]+' | grep -oE -- '--[a-z0-9-]+$' | no_help | norm)"
+# Option names from an OPTIONS section: "  -h,     --help" or
+# "          --cn TEXT"; wrapped descriptions are indented further.
+opt_names() { grep -oE '^ {2,12}(-[a-z], +)?--[a-z][a-z0-9-]+' | grep -oE -- '--[a-z0-9-]+$'; }
+
+cli_cmds="$("$YCA" --help | awk '/^SUBCOMMANDS:/ { f = 1; next } f && /^  [a-z]/ { print $1 }' | norm)"
+cli_globals="$("$YCA" --help | awk '/^OPTIONS:/ { f = 1; next } /^$/ { f = 0 } f' |
+  opt_names | no_help | norm)"
+# yca sets fallthrough, so a subcommand's help also lists the global
+# options; the completions offer those before the subcommand only.
 cli_opts() {
-  "$YCA" "$1" --help | sed -n '/^Options:/,$p' |
-    grep -oE '^  (-[a-z],)?--[a-z][a-z0-9-]+' | grep -oE -- '--[a-z0-9-]+$' | no_help | norm
+  "$YCA" "$1" --help | sed -n '/^OPTIONS:/,$p' | opt_names | no_help |
+    grep -vxF -f <(tr ' ' '\n' <<< "$cli_globals") | norm
 }
 cli_pos() {
   "$YCA" "$1" --help | grep -oE '^  [a-z]+ TEXT:\{[^}]*\}' | sed -n "${2}p" |
