@@ -1,0 +1,75 @@
+name: Release FreeBSD arm64
+
+# The arm64 FreeBSD VM is built separately (~45 min) and attached to
+# the Release (instead of holding it back).
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+concurrency:
+  group: release-freebsd-arm64
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    name: check for a new release
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # Release runs on every push to master but publishes only on a
+      # VERSION bump, tagging the commit it ran on: build only when the
+      # tag of this VERSION points at that commit.
+      - id: check
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          version="$(cat VERSION)"
+          tagged="$(git ls-remote origin "refs/tags/v${version}" | cut -f1)"
+          if [ "$tagged" = "$SHA" ]; then
+            build=true
+          else
+            echo "v${version} is not tagged at ${SHA}: no new release"
+            build=false
+          fi
+          echo "build=${build}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    uses: ./.github/workflows/freebsd.yml
+    with:
+      arch: arm64
+      version: ${{ needs.check.outputs.version }}
+      ref: ${{ github.event.workflow_run.head_sha }}
+
+  upload:
+    name: attach to the release
+    needs: [check, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: freebsd-package-arm64
+          path: dist
+
+      - name: Upload the package
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.check.outputs.version }}
+        run: |
+          gh release upload "v${VERSION}" dist/*.pkg --clobber \
+            --repo "$GITHUB_REPOSITORY"
