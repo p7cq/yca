@@ -124,8 +124,8 @@ Build CLI and ACME server:
 cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_CXX_COMPILER=clang++
 cmake --build build --target yca
-(cd acme && go build -ldflags "-X main.version=$(cat ../VERSION)" \
-    -o ../bin/yca-acme .)
+(cd acme && go build -tags libsqlite3 \
+    -ldflags "-X main.version=$(cat ../VERSION)" -o ../bin/yca-acme .)
 
 sudo cmake --install build
 

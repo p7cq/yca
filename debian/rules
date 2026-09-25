@@ -20,7 +20,8 @@ override_dh_auto_configure:
 
 override_dh_auto_build:
 	cmake --build build --target yca -j $(shell nproc)
-	cd acme && go build -ldflags "-X main.version=$$(cat ../VERSION) -linkmode=external" \
+	cd acme && go build -tags libsqlite3 \
+		-ldflags "-X main.version=$$(cat ../VERSION) -linkmode=external" \
 		-o ../bin/yca-acme .
 
 override_dh_auto_test:

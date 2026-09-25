@@ -119,7 +119,7 @@ done
 
 # --- yca-acme -------------------------------------------------------------
 
-if ! (cd "$ACME_SRC" && go build -o "$WORK/yca-acme" .); then
+if ! (cd "$ACME_SRC" && go build -tags libsqlite3 -o "$WORK/yca-acme" .); then
   bad "go build yca-acme"
   exit 1
 fi

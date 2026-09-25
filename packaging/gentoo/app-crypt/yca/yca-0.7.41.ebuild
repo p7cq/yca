@@ -13,8 +13,8 @@ SRC_URI="
 "
 S="${WORKDIR}/${PN}-${PV}"
 
-# yca, go-jose (Apache-2.0); go-sqlite3 (MIT) and its bundled SQLite
-LICENSE="Apache-2.0 MIT public-domain"
+# yca, go-jose (Apache-2.0); go-sqlite3 (MIT), linked to the system SQLite
+LICENSE="Apache-2.0 MIT"
 SLOT="0"
 KEYWORDS="~amd64 ~arm64"
 
@@ -49,7 +49,8 @@ src_compile() {
 	# Modules come from the vendor tarball only.
 	pushd acme > /dev/null || die
 	GOFLAGS="-mod=vendor" GOPROXY=off GOTOOLCHAIN=local \
-		go build -ldflags "-X main.version=${PV}" -o ../bin/yca-acme . ||
+		go build -tags libsqlite3 -ldflags "-X main.version=${PV}" \
+		-o ../bin/yca-acme . ||
 		die "go build failed"
 	popd > /dev/null || die
 }

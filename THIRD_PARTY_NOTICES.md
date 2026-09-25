@@ -9,7 +9,7 @@ retain their full copyright and license notices in the file headers.
 
 | Component | License | Notes |
 |-----------|---------|-------|
-| [SQLite](https://sqlite.org) | Public domain | linked from the system by the `yca` CLI (Botan's SQLite certificate store) |
+| [SQLite](https://sqlite.org) | Public domain | linked from the system by the `yca` CLI (Botan's SQLite certificate store) and by `yca-acme` (through go-sqlite3) |
 
 ## Vendored (`third_party/`)
 
@@ -28,5 +28,5 @@ retain their full copyright and license notices in the file headers.
 | [go-sqlite3](https://github.com/mattn/go-sqlite3) | 1.14.47 | MIT | (c) Yasuhiro Matsumoto |
 | [go-jose](https://github.com/go-jose/go-jose) | 4.1.3 | Apache-2.0 License | (c) go-jose |
 
-go-sqlite3 embeds the [SQLite](https://sqlite.org) library, which is public
-domain.
+go-sqlite3 is built with its `libsqlite3` tag, so `yca-acme` links the system
+SQLite (above) instead of the copy go-sqlite3 embeds.

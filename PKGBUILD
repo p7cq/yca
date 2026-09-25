@@ -14,8 +14,8 @@ arch=('x86_64')
 url='https://github.com/p7cq/yca'
 license=('Apache-2.0')
 # yca (C++) links libsqlite3 + libc++/libc++abi dynamically; Botan is vendored
-# and linked statically, so it is not a runtime dependency. yca-acme (Go) bundles
-# its sqlite driver via CGO.
+# and linked statically, so it is not a runtime dependency. yca-acme (Go) links
+# the same system libsqlite3 through its CGO driver (libsqlite3 tag).
 depends=('sqlite' 'libc++' 'libc++abi' 'rsync')
 # bind-tools (nsupdate) is only needed if the ACME client run against
 # repository_host validates via DNS-01 through dynamic DNS (e.g. acme.sh's
@@ -48,8 +48,8 @@ build() {
   # --- Go ACME frontend (yca-acme); go-sqlite3 is CGO, so gcc from base-devel
   export GOTOOLCHAIN=local CGO_ENABLED=1
   export GOFLAGS='-buildmode=pie -mod=readonly -modcacherw -trimpath'
-  ( cd acme && go build -ldflags "-X main.version=$pkgver -linkmode=external" \
-      -o ../bin/yca-acme . )
+  ( cd acme && go build -tags libsqlite3 \
+      -ldflags "-X main.version=$pkgver -linkmode=external" -o ../bin/yca-acme . )
 }
 
 package() {

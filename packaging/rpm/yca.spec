@@ -44,7 +44,7 @@ cmake -B build -G Ninja \
 cmake --build build --target yca -j %{?_smp_mflags}
 
 pushd acme
-go build -ldflags "-X main.version=%{version} -linkmode=external" -o ../bin/yca-acme .
+go build -tags libsqlite3 -ldflags "-X main.version=%{version} -linkmode=external" -o ../bin/yca-acme .
 popd
 
 %install

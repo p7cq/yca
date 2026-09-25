@@ -4,11 +4,6 @@ on:
   push:
     branches: [master]
   workflow_dispatch:
-    inputs:
-      include_arm64:
-        description: "Also build arm64"
-        type: boolean
-        default: false
 
 concurrency:
   group: release
@@ -46,7 +41,7 @@ jobs:
           fi
 
           # Only push events auto-skip an already-tagged version; a manual
-          # dispatch (e.g. to add arm64 assets to that same release) must
+          # dispatch (e.g. to rebuild the assets of that same release) must
           # proceed even though the tag already exists.
           if [[ "${{ github.event_name }}" == "push" ]] && \
              git ls-remote --tags origin "refs/tags/${tag}" | grep -q "refs/tags/${tag}$"; then
@@ -66,8 +61,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # A manual re-run adding arm64 to an already-released version hits
-      # an existing tag.
+      # A manual re-run for an already-released version hits an existing
+      # tag.
       - name: Create and push tag
         run: |
           tag="${{ needs.check-version.outputs.tag }}"
@@ -84,7 +79,8 @@ jobs:
     name: build .deb (${{ matrix.arch }})
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
-    runs-on: ubuntu-latest
+    # Native runner per arch: no QEMU emulation.
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -92,18 +88,14 @@ jobs:
         include:
           - arch: amd64
             platform: linux/amd64
+            runner: ubuntu-latest
           - arch: arm64
             platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
 
-      # Job-level `container:` starts before any step runs.
-      - name: Set up QEMU
-        if: matrix.arch == 'arm64' && github.event.inputs.include_arm64 == 'true'
-        uses: docker/setup-qemu-action@v4
-
       - name: Build .deb in container
-        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
@@ -142,7 +134,6 @@ jobs:
           echo ":: End CMake Diagnostic Log ::"
 
       - uses: actions/upload-artifact@v7
-        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         with:
           name: deb-package-${{ matrix.arch }}
           path: dist/*.deb
@@ -151,7 +142,8 @@ jobs:
     name: build .rpm (${{ matrix.arch }})
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
-    runs-on: ubuntu-latest
+    # Native runner per arch: no QEMU emulation.
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -159,19 +151,14 @@ jobs:
         include:
           - arch: amd64
             platform: linux/amd64
+            runner: ubuntu-latest
           - arch: arm64
             platform: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v5
 
-      # See build-deb: job-level `container:` starts before any step, so
-      # QEMU can't be registered in time for a foreign platform.
-      - name: Set up QEMU
-        if: matrix.arch == 'arm64' && github.event.inputs.include_arm64 == 'true'
-        uses: docker/setup-qemu-action@v4
-
       - name: Build .rpm in container
-        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         env:
           VERSION: ${{ needs.check-version.outputs.version }}
         run: |
@@ -201,7 +188,6 @@ jobs:
 
       # Native rpmbuild filename encodes the Fedora version and arch.
       - uses: actions/upload-artifact@v7
-        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         with:
           name: rpm-package-${{ matrix.arch }}
           path: dist/*.rpm
@@ -263,7 +249,6 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Build and package on FreeBSD
-        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         uses: vmactions/freebsd-vm@v1
         with:
           release: "15.1"
@@ -282,8 +267,11 @@ jobs:
             cmake --build build --target yca -j "$(sysctl -n hw.ncpu)"
 
             # The version is already embedded via -ldflags, VCS info
-            # isn't needed.
-            ( cd acme && go build -buildvcs=false \
+            # isn't needed. go-sqlite3 has no FreeBSD link flags for the
+            # system SQLite (libsqlite3 tag), and the port lives in /usr/local.
+            ( cd acme && CGO_CFLAGS=-I/usr/local/include \
+                CGO_LDFLAGS="-L/usr/local/lib -lsqlite3" \
+                go build -tags libsqlite3 -buildvcs=false \
                 -ldflags "-X main.version=${version}" -o ../bin/yca-acme . )
 
             rm -rf stage
@@ -337,11 +325,9 @@ jobs:
             sh tests/packaging/check-install.sh freebsd
 
       - name: Check artifact
-        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         run: ls -la dist/
 
       - uses: actions/upload-artifact@v7
-        if: matrix.arch == 'amd64' || github.event.inputs.include_arm64 == 'true'
         with:
           name: freebsd-package-${{ matrix.arch }}
           path: dist/*.pkg
@@ -376,7 +362,7 @@ jobs:
           curl -fsSL -o "$tarball" \
             "https://github.com/p7cq/yca/archive/refs/tags/v${VERSION}.tar.gz"
 
-          # A re-run (e.g. the arm64 dispatch) must produce the same bytes.
+          # A re-run (e.g. a manual dispatch) must produce the same bytes.
           src="$(mktemp -d)"
           tar -xzf "$tarball" -C "$src"
           (cd "${src}/yca-${VERSION}/acme" && go mod vendor)

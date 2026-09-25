@@ -70,7 +70,7 @@ bad() {
 w() { "$BIN" --config "$CFG" --store "$PKI" "$@"; }
 
 # --- build the frontend ---
-(cd "$ACME_SRC" && go build -o "$WORK/yca-acme" .) &&
+(cd "$ACME_SRC" && go build -tags libsqlite3 -o "$WORK/yca-acme" .) &&
   ok "go build yca-acme" || {
   bad "go build failed"
   exit 1
