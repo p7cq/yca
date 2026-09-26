@@ -1,8 +1,8 @@
 #!/bin/sh
 #
-# Re-sign the published yca signing CRL (Linux equivalent:
-# yca-crl-refresh.timer). Cadence vs nextUpdate: the signing CRL promises
-# re-publication within crl_next_update_days (7); daily leaves 6 days of
+# Re-sign the published yca signing CRL.
+# Cadence vs nextUpdate: the signing CRL promises re-publication
+# within crl_next_update_days (7); daily leaves 6 days of
 # margin - keep this comfortably below the horizon if either changes.
 # Disabled by default: set daily_yca_crl_refresh_enable="YES" in
 # /etc/periodic.conf.local to run it.

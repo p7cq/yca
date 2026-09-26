@@ -1124,7 +1124,8 @@ bool create(const cfg::Config &config, const fs::path &db_path,
                          m.cfg->purpose);
   }
 
-  log::info("created 2-tier CA: {} (root), {}", config.root.cn, names);
+  log::info("created two-tier ECDSA certificate authority: {} (root), {}",
+            config.root.cn, names);
   return true;
 }
 

@@ -538,27 +538,27 @@ TEST_CASE("cfg::load: key_backend defaults to internal per CA") {
 TEST_CASE("cfg::load: pkcs11 layouts") {
   const std::string P11 =
       "\n[pkcs11]\nmodule = \"/usr/lib/opensc-pkcs11.so\"\n";
-  const std::string LABEL = "token_label = \"yts\"\n";
+  const std::string LABEL = "token_label = \"ets\"\n";
   const std::string ON_TOKEN = "key_backend = \"pkcs11\"";
 
   // Single token: both CAs on the shared default label.
   const auto single = parse(in_ca(ON_TOKEN, in_root(ON_TOKEN)) + P11 + LABEL);
   REQUIRE(single.has_value());
-  CHECK(single->root.token_label == "yts");
-  CHECK(single->cas.at("tls").token_label == "yts");
+  CHECK(single->root.token_label == "ets");
+  CHECK(single->cas.at("tls").token_label == "ets");
 
   // Split tokens: the root declares a label of its own.
   const auto split = parse(
-      in_ca(ON_TOKEN, in_root(ON_TOKEN + "\ntoken_label = \"yts-root\"")) +
+      in_ca(ON_TOKEN, in_root(ON_TOKEN + "\ntoken_label = \"ets-root\"")) +
       P11 + LABEL);
   REQUIRE(split.has_value());
-  CHECK(split->root.token_label == "yts-root");
-  CHECK(split->cas.at("tls").token_label == "yts");
+  CHECK(split->root.token_label == "ets-root");
+  CHECK(split->cas.at("tls").token_label == "ets");
 
   // Hybrid: only the root on a token. No [pkcs11] token_label is needed,
   // since the root carries its own and no other CA asks for one.
   const auto hybrid =
-      parse(in_root(ON_TOKEN + "\ntoken_label = \"yts-root\"") + P11);
+      parse(in_root(ON_TOKEN + "\ntoken_label = \"ets-root\"") + P11);
   REQUIRE(hybrid.has_value());
   CHECK(hybrid->cas.at("tls").key_backend == "internal");
 
@@ -573,7 +573,7 @@ TEST_CASE("cfg::load: pkcs11 layouts") {
   CHECK(rejected_for(in_ca(ON_TOKEN) + P11 + LABEL, "misplaced trust"));
   // Unknown backend, orphan label, orphan section, oversized label.
   CHECK(rejected_for(in_root("key_backend = \"tpm\""), "key_backend"));
-  CHECK(rejected_for(in_root("token_label = \"yts\""),
+  CHECK(rejected_for(in_root("token_label = \"ets\""),
                      "key_backend is not \"pkcs11\""));
   CHECK(rejected_for(VALID + P11 + LABEL, "no CA key uses the pkcs11"));
   CHECK(

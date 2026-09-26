@@ -36,9 +36,6 @@ yca wraps every login failure in the same "PKCS#11 login failed: ..."
 message: look at the trailing PKCS11 error code to tell whether the attempt
 actually consumed a try.
 
-SoftHSM has no retry counter at all - see
-[softhsm.md](softhsm.md#differences-vs-the-nitrokey).
-
 ## Key backup (DKEK)
 
 A SmartCard-HSM can export a private key, but only wrapped under a
@@ -73,8 +70,7 @@ the token is bought for. The risk moves to the custody of the share
 files, and a restored key means two live copies of one private key. That
 is a defensible trade for a root and rarely one for an online signing CA.
 
-This is the alternative to the standby root in
-[ca-rotation.md](ca-rotation.md#scenario-d-standby-root-the-token-death-case),
+This is the alternative to the standby root in ca-rotation.md,
 and it has nothing to do with cross-signing: a shared DKEK puts the
 *same* root key on a second token, with no cross-certificate, no chain
 change and no code. The standby root instead accepts that the key is

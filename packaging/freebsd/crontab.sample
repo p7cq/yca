@@ -1,21 +1,7 @@
-# yca crontab sample (FreeBSD) - not auto-installed. Neither job periodic(8)
-# fits: publish needs hourly (periodic only offers daily/weekly/monthly/
-# security), and the root CRL refresh needs quarterly. Both lines go in the
-# system /etc/crontab (user field included): publish runs as yca, the root
-# CRL refresh starts as root because yca.env is root-only (0600), then
-# drops to yca with `su -m`, which keeps the sourced environment.
-#
-# Publish hourly. Adjust the source path to your store location. -p
-# is required for --chmod to take effect at all (rsync(1)); D755 keeps
-# /srv/yca/pub itself from inheriting the store dir restrictive mode - see
-# share/systemd/yca-publish.service for the full explanation.
+# yca crontab sample (FreeBSD) - not auto-installed.
+# Publish hourly.
 0 * * * *	yca	/usr/local/bin/rsync -rtp --chmod=D755,F644 --delete --max-delete=8 --include='*.crt' --include='*.crl' --exclude='*' /var/db/yca/store/ca/ /srv/yca/pub/
 
-# Root CRL refresh: quarterly (see yca-root-crl-refresh.timer's Linux
-# header for the cadence rationale: root_crl_next_update_days=183).
-# Needs CA_STORE_PASSPHRASE (internal backend) or CA_HSM_ROOT_PIN
-# (pkcs11 root) in /usr/local/etc/yca/yca.env. NOT recommended
-# unattended for split/hybrid HSM layouts, where the root token is
-# normally offline - run this as part of the quarterly root-token
-# ceremony instead and leave this line out.
+# Root CRL refresh: quarterly.
+# Not recommended unattended for split/hybrid HSM layouts.
 0 3 1 1,4,7,10 *	root	set -a; . /usr/local/etc/yca/yca.env; set +a; su -m yca -c '/usr/local/libexec/yca/yca --config /usr/local/etc/yca/yca.toml --store /var/db/yca/store refresh crl root'

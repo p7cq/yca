@@ -48,18 +48,6 @@ installed but not enabled.
 
 ## 1. Install
 
-| What | Why |
-|------|-----|
-| a distribution package (below) | CLI, `yca-acme`, wrapper, units, account and directories |
-| `sudo` | the wrapper uses it unless run by root |
-| openssl CLI | verification steps |
-| nginx | reverse proxy for the repository host |
-| a Nitrokey HSM + OpenSC, or SoftHSM | only for a `pkcs11` key backend |
-
-`rsync` (used by `yca-publish`) and `systemd` are package dependencies.
-Release assets are built for Debian Trixie, Fedora 44, Arch Linux and
-FreeBSD 15; Gentoo builds from source through a local overlay.
-
 ### Debian / Ubuntu
 
 ```bash

@@ -49,7 +49,8 @@ std::string join(const std::vector<std::string> &v) {
 } // namespace
 
 int main(int argc, char **argv) {
-  CLI::App app{std::string(app::name) + " - 2-tier ECDSA CA"};
+  CLI::App app{std::string(app::name) +
+               " - two-tier ECDSA certificate authority CLI"};
   app.fallthrough();
   app.set_version_flag("--version",
                        std::string(app::name) + " version " APP_VERSION);

@@ -7,10 +7,10 @@ enroll, and what day-2 operations look like.
 
 ```mermaid
 flowchart TD
-    client["ACME client (acme.sh / certbot)<br/>the host requesting a cert"]
-    nginx["nginx on the pki host<br/>TLS termination, one route"]
-    daemon["yca-acme daemon, as yca<br/>protocol state in its own SQLite db"]
-    cli["yca CLI (/usr/libexec/yca/yca)<br/>the single owner of CA state"]
+    client["ACME client (e.g. acme.sh)<br/>the host requesting a cert"]
+    nginx["nginx on the PKI host<br/>TLS termination, one route"]
+    daemon["yca-acme daemon<br/>protocol state in its own SQLite DB"]
+    cli["yca CLI (/usr/libexec/yca/yca)<br/>the owner of CA state"]
     store[("CA store (+ HSM)")]
     client -->|"HTTPS /acme/*"| nginx
     nginx -->|"HTTP 127.0.0.1:8555"| daemon
@@ -39,7 +39,7 @@ flowchart TD
 2. The enrolled frontend identity (one-time ceremony):
 
    ```bash
-   $ yca enroll --id acme
+   yca enroll --id acme
    ```
 
 3. The CA secret in the daemon's environment: `finalize` signs, so
@@ -144,6 +144,7 @@ yca create server --cn $(hostname) --valid 15m
 yca get server --cn $(hostname) --chain | \
   sudo tee /etc/yca/acme/fullchain.pem > /dev/null
 sudo install -m 600 /var/lib/yca/store/ee/$(hostname).key /etc/yca/acme/key.pem
+sudo chmod 600 /etc/yca/acme/fullchain.pem
 
 sudo systemctl restart nginx.service
 ```
@@ -159,9 +160,9 @@ yca-acme eab new --allow $(hostname)
 `--register-account` step below reads them from:
 
 ```bash
-echo -n '<kid printed above>'  | sudo tee /etc/yca/acme.kid
-echo -n '<hmac printed above>' | sudo tee /etc/yca/acme.hmac
-sudo chmod 600 /etc/yca/acme.{kid,hmac}
+echo -n '<kid printed above>'  | sudo tee /etc/yca/acme/.kid
+echo -n '<hmac printed above>' | sudo tee /etc/yca/acme/.hmac
+sudo chmod 600 /etc/yca/acme/.{kid,hmac}
 ```
 
 #### 6. Configure and start the daemon
@@ -210,8 +211,8 @@ sudo acme.sh \
 --config-home /etc/yca/acme \
 --server $ACME \
 --register-account \
---eab-kid $(cat /etc/yca/acme.kid) \
---eab-hmac-key $(cat /etc/yca/acme.hmac)
+--eab-kid $(cat /etc/yca/acme/.kid) \
+--eab-hmac-key $(cat /etc/yca/acme/.hmac)
 ```
 
 #### 8. Issue and install the certificate
@@ -388,13 +389,6 @@ ExecStart=/usr/libexec/yca/yca-acme \
   --config /etc/yca/yca.toml \
   --store /var/lib/yca/store
 ```
-
-A stale `--url` is easy to miss: TLS terminates at nginx and the
-directory itself loads fine - but every URL *inside* it is built from
-`--url`, so the client walks off to the wrong host and fails at its next
-step (acme.sh: curl error 6, "Could not get nonce"). The 401 "url header
-does not match" from the JWS binding appears only when the wrong host
-actually resolves.
 
 Enable it like the rotation timer: only after `/etc/yca/yca.env` exists
 (the enable is the operator's explicit decision to automate the secret).

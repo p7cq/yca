@@ -21,9 +21,7 @@ Suggests:       bind-utils
 Suggests:       bash-completion
 
 %description
-yca is a command-line certificate authority tool (ECDSA, two-tier
-root/intermediate hierarchy) with yca-acme, an ACME frontend for
-automated certificate issuance.
+yca is a two-tier ECDSA certificate authority CLI with and ACME frontend.
 
 %prep
 %setup -q
