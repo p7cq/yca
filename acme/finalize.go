@@ -1,3 +1,6 @@
+// Copyright 2026 p7cq <707c71@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // finalize (RFC 8555 §7.4): the CSR arrives here, and issuance execs the
 // yca CLI - the single owner of the CA store. The pipeline mirrors the
 // manual flow: get nonce -> sign server --csr - (DER on stdin, CN on

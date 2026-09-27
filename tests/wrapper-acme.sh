@@ -1,4 +1,7 @@
 #!/bin/sh
+# Copyright 2026 p7cq <707c71@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 #
 # Tests the yca-acme operator wrapper's dispatch (share/bin/yca-acme.in)
 # with stubbed uname/id/sudo/systemd-run and a stub real binary: every stub

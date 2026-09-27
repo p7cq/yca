@@ -1,3 +1,6 @@
+// Copyright 2026 p7cq <707c71@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // ACME protocol state. This database belongs to the frontend alone - CA
 // state lives in the yca store, which yca-acme never opens (issuance goes
 // through the yca CLI; see finalize.go.

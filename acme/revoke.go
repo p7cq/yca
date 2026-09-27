@@ -1,3 +1,6 @@
+// Copyright 2026 p7cq <707c71@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // revokeCert (RFC 8555 §7.6): the client presents the certificate to
 // revoke and proves control of either the account that ordered it (kid) or
 // the certificate's own private key (jwk). Revocation execs

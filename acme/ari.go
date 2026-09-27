@@ -1,3 +1,6 @@
+// Copyright 2026 p7cq <707c71@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // ACME Renewal Information (RFC 9773): unauthenticated GET keyed by
 // base64url(AKI keyIdentifier) "." base64url(DER serial content octets).
 // The suggested window mirrors the CA's renewal-window policy, so clients

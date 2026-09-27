@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 p7cq <707c71@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 # Smoke test for the zsh completion scripts (share/zsh-completion/_yca,
 # _yca-acme). Every option spec is fed to a real completion widget in a
 # throwaway zsh: a malformed spec makes _arguments print

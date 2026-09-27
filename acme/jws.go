@@ -1,3 +1,6 @@
+// Copyright 2026 p7cq <707c71@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // JWS handling (RFC 8555 §6): every ACME POST body is a JWS whose protected
 // header binds an anti-replay nonce and the request URL, and carries either
 // the full account key (jwk, newAccount only) or the account URL (kid).

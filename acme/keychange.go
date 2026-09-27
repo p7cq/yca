@@ -1,3 +1,6 @@
+// Copyright 2026 p7cq <707c71@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // keyChange (RFC 8555 §7.3.5): account key rollover. The outer JWS is a
 // normal account-authenticated POST (old key, kid, nonce); its payload is
 // an inner JWS signed by the NEW key, proving its holder requested the

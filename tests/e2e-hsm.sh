@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 p7cq <707c71@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 # End-to-end tests for the pkcs11 key backend, on ephemeral SoftHSM2 tokens.
 # Covers the single-token layout (both init paths: generate on a fresh
 # token, adopt on a second store over the same token), the split-token

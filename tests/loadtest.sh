@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 p7cq <707c71@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 # Load-test harness: seed the store at ramp sizes and time operations.
 # Usage: loadtest.sh <yca-binary> [size ...]   (default ramp: 1000 10000 100000)
 # NOTE: build a Release binary first (`./build.sh release`) - the debug/ASan

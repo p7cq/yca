@@ -1,3 +1,6 @@
+// Copyright 2026 p7cq <707c71@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // Challenge validation (RFC 8555 §8.3 http-01, §8.4 dns-01). Validation
 // runs inline in the challenge POST - at private-CA scale there is nothing
 // to queue, and clients poll the challenge/authz anyway.

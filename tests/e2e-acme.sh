@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Copyright 2026 p7cq <707c71@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 # End-to-end tests for the ACME frontend (acme/, binary yca-acme) against a
 # temp PKI on the internal backend, driven by a real ACME client (acme.sh).
 # The daemon serves TLS with a certificate issued by the very CA under test;

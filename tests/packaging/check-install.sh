@@ -1,4 +1,7 @@
 #!/bin/sh
+# Copyright 2026 p7cq <707c71@gmail.com>
+# SPDX-License-Identifier: Apache-2.0
+
 #
 # Asserts the service account and ownership a freshly installed yca package
 # must provide. Run as root right after installing the package.

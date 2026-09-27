@@ -1,3 +1,6 @@
+// Copyright 2026 p7cq <707c71@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 // Orders and authorizations (RFC 8555 §7.4, §7.5). dns identifiers only,
 // no wildcards (they require dns-01 - a later phase), and every identifier
 // must pass the account's EAB --allow policy.
