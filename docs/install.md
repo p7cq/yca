@@ -457,7 +457,6 @@ package scripts or `sudo tee` unexpectedly unreadable.
 
 Tested with FreeBSD 15. Prefix `/usr/local`; the timers become rc.d,
 periodic(8) and cron (`packaging/freebsd/{rc.d,periodic,crontab.sample}`).
-HSM on FreeBSD is not tested.
 
 | Linux | FreeBSD |
 |-------|---------|
