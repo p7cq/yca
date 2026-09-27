@@ -22,7 +22,7 @@ on:
 
 jobs:
   build:
-    name: build .pkg (FreeBSD ${{ inputs.arch }})
+    name: build .pkg (${{ inputs.arch }})
     runs-on: ubuntu-latest
     # vmactions' docs: keep runs-on: ubuntu-latest even for aarch64.
     timeout-minutes: 90

@@ -193,7 +193,7 @@ jobs:
           path: dist/*.rpm
 
   build-arch:
-    name: build .pkg.tar.zst
+    name: build .pkg.tar.zst (amd64)
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     runs-on: ubuntu-latest
