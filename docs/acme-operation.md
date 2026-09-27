@@ -171,7 +171,7 @@ Override the unit's `ExecStart` with the public URL, the desired validity
 and the target DNS server (`sudo systemctl edit yca-acme.service`, which
 also reloads systemd). For example:
 
-```systemd
+```ini
 [Service]
 ExecStart=
 ExecStart=/usr/libexec/yca/yca-acme \
@@ -231,8 +231,11 @@ sudo acme.sh \
 --fullchain-file /etc/yca/acme/fullchain.pem \
 --key-file /etc/yca/acme/key.pem \
 --reloadcmd 'systemctl reload nginx'
+```
 
-# FreeBSD: paths under /usr/local/etc, nginx reloaded through service(8)
+On FreeBSD, paths under /usr/local/etc, nginx reloaded through service(8).
+
+```sh
 sudo acme.sh \
 --home /usr/local/etc/yca/acme \
 --config-home /usr/local/etc/yca/acme \
@@ -375,7 +378,7 @@ the real `repository_host` set in `yca.toml` BEFORE the first client
 connects:
 
 ```bash
-# systemctl edit yca-acme
+systemctl edit yca-acme
 ```
 
 ```ini
@@ -394,11 +397,27 @@ Enable it like the rotation timer: only after `/etc/yca/yca.env` exists
 (the enable is the operator's explicit decision to automate the secret).
 
 ```bash
-# systemctl daemon-reload
-# systemctl enable --now yca-acme
-# curl -s https://pki.example.ca/acme/directory   # smoke: the URLs inside
-#                                                   must carry the public host
+systemctl daemon-reload
+systemctl enable --now yca-acme
 ```
+
+Smoke test with `curl -s https://pki.example.ca/acme/directory`; the
+URLs inside must carry the public host:
+
+```js
+{
+  "keyChange": "https://pki.example.ca/acme/key-change",
+  "meta": {
+    "externalAccountRequired": true
+  },
+  "newAccount": "https://pki.example.ca/acme/new-account",
+  "newNonce": "https://pki.example.ca/acme/new-nonce",
+  "newOrder": "https://pki.example.ca/acme/new-order",
+  "renewalInfo": "https://pki.example.ca/acme/renewal-info",
+  "revokeCert": "https://pki.example.ca/acme/revoke-cert"
+}
+```
+
 
 ## nginx
 
@@ -431,7 +450,7 @@ some refuse) TLS there.
 
 No open registration: every account needs a provisioned credential.
 
-```bash
+```console
 yca-acme eab new --allow 'pki.example.ca'
 
 ┌ EAB credential (shown once) ────────────────────────┐
@@ -616,44 +635,37 @@ Good for a first test, or a zone with no update automation. Two runs of
 the **same** `--issue` command: the first only computes and prints the
 record and stops without the confirmation flag; the second, re-run with
 `--yes-I-know-dns-manual-mode-enough-go-ahead-please` added, validates
-and finalizes. Both runs need `-d`/`--dns` again - acme.sh re-derives
-the challenge each time, it does not resume from the first run's state.
+and finalizes.
 
 ```bash
-# acme.sh --issue --server "$DIR" --ca-bundle root.pem \
-      -d host.example.ca --dns
+acme.sh --issue --server "$DIR" --ca-bundle root.pem \
+      -d pki.example.ca --dns
 # ... acme.sh prints the TXT name/value, then stops here ...
 ```
 
-Publish `_acme-challenge.host.example.ca` = the printed value on the
-zone's nameserver. **Common pitfall**: a zone file entry without a
-trailing dot on the FQDN is relative to the zone's `$ORIGIN` - writing
-`_acme-challenge.host.example.ca` (no trailing dot) inside a zone whose
-origin is `example.ca.` publishes
-`_acme-challenge.host.example.ca.example.ca.` instead, and the intended
-name resolves NXDOMAIN.
+Publish `_acme-challenge.pki.example.ca` = the printed value on the
+zone's nameserver.
 
 Verify against the resolver the daemon actually uses (the `--dns`
-target, or its system resolver) before continuing - this is the
-single most useful diagnostic step:
+target, or its system resolver) before continuing:
 
-```bash
-$ dig TXT _acme-challenge.host.example.ca @<that resolver>
+```console
+dig TXT _acme-challenge.pki.example.ca @ns1.example.ca
+...
+;; QUESTION SECTION:
+;_acme-challenge.pki.example.ca.        IN      TXT
+
+;; AUTHORITY SECTION:
+_acme-challenge.pki.example.ca. 60 IN   SOA     ns1.example.ca. admin.example.ca. 2026091920 300 300 86400 60
+...
 ```
 
-An **authoritative** (`aa` flag set) `NXDOMAIN` means the name does not
-exist at all under that nameserver - not just the TXT type (that would
-be `NOERROR` with an empty answer section). It almost always means one
-of: the zone was not reloaded after the edit, the trailing-dot mistake
-above, or the record landed in a different zone file than the one being
-served.
-
-Once the record resolves correctly, finalize by re-running the exact
-same `--issue` command, with the confirmation flag added:
+Finalize re-running the same `--issue` command, with the confirmation
+flag added:
 
 ```bash
-# acme.sh --issue --server "$DIR" --ca-bundle root.pem \
-      -d host.example.ca --dns \
+acme.sh --issue --server "$DIR" --ca-bundle root.pem \
+      -d pki.example.ca --dns \
       --yes-I-know-dns-manual-mode-enough-go-ahead-please
 ```
 
@@ -666,7 +678,7 @@ acme.sh ships a `dns_nsupdate` hook (RFC 2136 dynamic updates) that
 removes the manual step entirely. On the authoritative nameserver:
 
 ```bash
-# tsig-keygen acme-dns01 > /etc/bind/keys/acme-dns01.key
+tsig-keygen acme-dns01 > /etc/bind/keys/acme-dns01.key
 ```
 
 Include the key on the nameserver - but **do not grant it write access
@@ -676,7 +688,7 @@ DNSSEC-signed by anything other than BIND itself (an offline
 automation its own small, dedicated, unsigned zone instead - one per
 identifier that will use dns-01 - named exactly after the challenge:
 
-```
+```c
 include "/etc/bind/keys/acme-dns01.key";
 
 zone "_acme-challenge.host.example.ca" {
@@ -706,7 +718,7 @@ The zone file itself carries no data beyond SOA/NS - TXT records arrive
 solely through `nsupdate`, and BIND bumps the SOA serial on every
 dynamic update on its own:
 
-```
+```named
 $TTL 300
 @   IN  SOA ns1.example.ca. admin.example.ca. (
                 2026010100  ; serial
@@ -720,7 +732,7 @@ $TTL 300
 Short TTLs throughout: this zone exists only to be read once per
 issuance, seconds after being written, never cached anywhere.
 
-`rndc reload` to pick it up (`named-checkconf` first). This zone is
+Run `named-checkconf` and `rndc reload` to pick it up. This zone is
 **not delegated** from the parent (no NS record for it inside
 `example.ca`) - it is an island that only the nameserver hosting it
 knows about directly. That is fine for `yca-acme`, which queries a
@@ -736,14 +748,9 @@ for before the first run:
   same-host dynamic update. It is saved into the domain's conf on first
   use, so `--cron` renewals replay it automatically.
 - **Point `yca-acme --dns` (and `NSUPDATE_SERVER`) at the master
-  specifically, not at a secondary or the system resolver.** A
-  secondary only knows about zones it has a matching `type slave;`
-  stanza for; unless you have deliberately configured transfer of this
-  new zone to every secondary, only the master answers for it. A
-  request that lands on a secondary that has never heard of the zone
-  fails as a plain resolution error ("no such host"/NXDOMAIN-shaped),
-  easy to mistake for a propagation delay when it is really "wrong
-  server entirely."
+  specifically not at a secondary or the system resolver.** Only the
+  master will answer for it (assuming the master carries the
+  configuration performed earlier).
 
 Copy the generated `key { ... };` block to the client host (mode 0600),
 then issue with the hook instead of `--dns`. Pin `NSUPDATE_ZONE`
@@ -751,7 +758,7 @@ explicitly - automatic zone-apex detection would otherwise walk up
 past this dedicated zone into the parent:
 
 ```bash
-# NSUPDATE_SERVER=ns1.example.ca NSUPDATE_KEY=/etc/yca/nsupdate.key \
+NSUPDATE_SERVER=ns1.example.ca NSUPDATE_KEY=/etc/yca/nsupdate.key \
       NSUPDATE_ZONE=_acme-challenge.host.example.ca \
       acme.sh --issue --server "$DIR" --ca-bundle root.pem \
       -d host.example.ca --dns dns_nsupdate --dnssleep 5
@@ -764,7 +771,7 @@ the same shape, with a matching EAB `--allow` pattern and its own
 dedicated `_acme-challenge.<base>` zone:
 
 ```bash
-# acme.sh --issue --server "$DIR" --ca-bundle root.pem \
+acme.sh --issue --server "$DIR" --ca-bundle root.pem \
       -d '*.example.ca' --dns dns_nsupdate --dnssleep 5
 ```
 

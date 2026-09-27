@@ -152,7 +152,7 @@ complete and `--wrap-key` is available. No DKEK line at all means the
 device was initialized with zero shares: nothing leaves it and nothing
 can be restored into it, ever.
 
-```console
+```bash
 sudo sc-hsm-tool --reader 0 --wrap-key root-e1.wrap --key-reference 1 --pin ...
 sudo sc-hsm-tool --reader 1 --unwrap-key root-e1.wrap --key-reference 1 --pin ...
 ```

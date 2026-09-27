@@ -258,7 +258,7 @@ The server certificate issued above, under the example configuration
 (`yca get server --cn server.example.ca | openssl x509 -text -noout`,
 key and signature bytes elided):
 
-```
+```console
 Certificate:
     Data:
         Version: 3 (0x2)

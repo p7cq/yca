@@ -255,8 +255,7 @@ Without any `CA_STORE_PASSPHRASE` and with a key on the internal backend,
 init generates a passphrase and **shows it exactly once** - put it into
 `yca.env` and your password manager.
 
-```bash
-yca init
+```console
 
 ┌ CA_STORE_PASSPHRASE (shown once) ────────────────────────────────┐
 
@@ -426,7 +425,7 @@ runs with umask 077 as `yca`. Keep the admin's umask at 022 (or 027):
 a 077 umask follows you through `sudo` and makes files created by
 package scripts or `sudo tee` unexpectedly unreadable.
 
-## 10. Admin hygiene
+## 10. On administration
 
 - `yca` operations are administrative: the wrapper needs `sudo
   systemd-run`, which is root-equivalent and cannot be narrowed by
