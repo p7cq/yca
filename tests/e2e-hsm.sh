@@ -71,7 +71,6 @@ gen_cfg() {
 org_name = "Example"
 country_code = "CA"
 repository_host = "pki.example.ca"
-arc_oid = "1.3.6.1.4.1.32473"
 
 [pkcs11]
 module = "$MODULE"
@@ -96,6 +95,7 @@ slug_prefix = "$3"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
+policies = { server = ["1.3.6.1.4.1.32473.1.1"], client = ["1.3.6.1.4.1.32473.1.2"] }
 EOF
 }
 

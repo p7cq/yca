@@ -23,7 +23,6 @@ cat >"$CFG" <<'EOF'
 org_name = "Load Test"
 country_code = "CA"
 repository_host = "pki.test.ca"
-arc_oid = "1.3.6.1.4.1.32473"
 
 [root]
 cn = "TTS Root Load Test"
@@ -42,6 +41,7 @@ slug_prefix = "ca-load-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
+policies = { server = ["1.3.6.1.4.1.32473.1.1"], client = ["1.3.6.1.4.1.32473.1.2"] }
 EOF
 
 export CA_STORE_PASSPHRASE=loadtest

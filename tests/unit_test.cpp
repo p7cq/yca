@@ -269,7 +269,6 @@ const std::string VALID = R"([pki]
 org_name = "Example"
 country_code = "CA"
 repository_host = "pki.example.ca"
-arc_oid = "1.3.6.1.4.1.32473"
 
 [root]
 cn = "ETS Root E1"
@@ -336,17 +335,69 @@ bool rejected_for(const std::string &toml, std::string_view needle) {
 
 TEST_CASE("cfg::load accepts a valid config") { CHECK(loads(VALID)); }
 
-TEST_CASE("cfg::load: arc_oid is optional") {
-  CHECK(loads(with("arc_oid = \"1.3.6.1.4.1.32473\"\n", "")));
-  // Present means valid: empty or malformed values are still rejected.
-  CHECK_FALSE(loads(with("arc_oid = \"1.3.6.1.4.1.32473\"", "arc_oid = \"\"")));
+TEST_CASE("cfg::load: [ca.<purpose>] policies is optional and verbatim") {
+  // Absent: no profile carries policies.
+  const auto none = parse(VALID);
+  REQUIRE(none.has_value());
+  CHECK(none->cas.at("tls").policies.empty());
+  CHECK(none->cas.at("tls").ca_policies().empty());
+
+  // Any structure, any depth, several per profile; an empty list is an
+  // explicit "none" for that profile.
+  const auto c = parse(in_ca("policies = { server = "
+                             "[\"1.3.6.1.4.1.32473.1.1\", \"2.23.140.1.2.1\"], "
+                             "client = [] }"));
+  REQUIRE(c.has_value());
+  const auto &pol = c->cas.at("tls").policies;
+  CHECK(pol.at("server") ==
+        std::vector<std::string>{"1.3.6.1.4.1.32473.1.1", "2.23.140.1.2.1"});
+  CHECK(pol.at("client").empty());
+
+  // A [ca.<purpose>.policies] sub-table is the same table to TOML.
+  const auto sub = parse(VALID + R"(
+[ca.tls.policies]
+server = ["1.3.6.1.4.1.32473.1.1", "2.23.140.1.2.1"]
+client = []
+)");
+  REQUIRE(sub.has_value());
+  CHECK(sub->cas.at("tls").policies == pol);
+}
+
+TEST_CASE("cfg::load: [ca.<purpose>] policies rejects bad entries") {
+  auto pol = [](const std::string &body) {
+    return in_ca("policies = { " + body + " }");
+  };
+  CHECK(rejected_for(in_ca("policies = 1"),
+                     "[ca.tls] policies: must be a table"));
+  CHECK(rejected_for(pol("email = [\"1.2.3\"]"),
+                     "[ca.tls] policies.email: not a profile this CA lists"));
+  CHECK(rejected_for(pol("server = \"1.2.3\""),
+                     "policies.server: must be an array"));
+  CHECK(rejected_for(pol("server = [1]"),
+                     "policies.server: entries must be strings"));
+  CHECK(rejected_for(pol("server = [\"1.2.x\"]"),
+                     "policies.server: invalid OID"));
+  CHECK(rejected_for(pol("server = [\"1.02.3\"]"),
+                     "policies.server: invalid OID"));
+  CHECK(rejected_for(pol("server = [\"\"]"), "policies.server: invalid OID"));
+  CHECK(rejected_for(pol("server = [\"2.5.29.32.0\"]"), "anyPolicy"));
+  CHECK(rejected_for(pol("server = [\"1.2.3\", \"1.2.3\"]"),
+                     "policies.server: duplicate OID '1.2.3'"));
+}
+
+TEST_CASE("cfg::SigningCa::ca_policies is the union in profile order") {
+  cfg::SigningCa ca;
+  ca.profiles = {"server", "client"};
+  ca.policies = {{"client", {"1.2.3", "1.2.4"}},
+                 {"server", {"1.2.5", "1.2.3"}}};
+  CHECK(ca.ca_policies() ==
+        std::vector<std::string>{"1.2.5", "1.2.3", "1.2.4"});
 }
 
 TEST_CASE("cfg::load parses values") {
   const auto c = parse(VALID);
   REQUIRE(c.has_value());
   CHECK(c->pki.repository_host == "pki.example.ca");
-  CHECK(c->pki.arc_oid == "1.3.6.1.4.1.32473");
   CHECK(c->root.curve == "secp384r1");
   CHECK(c->cas.at("tls").purpose == "tls");
   CHECK(c->cas.at("tls").profiles ==
@@ -370,7 +421,6 @@ TEST_CASE("cfg::load rejects invalid configs") {
   CHECK_FALSE(loads(with("digest = \"SHA-384\"", "digest = \"sha384\"")));
   CHECK_FALSE(loads(with("ee_digest = \"SHA-256\"", "ee_digest = \"sha256\"")));
   CHECK_FALSE(loads(with("curve = \"secp384r1\"", "curve = \"rsa2048\"")));
-  CHECK_FALSE(loads(with("1.3.6.1.4.1.32473", "1.a.b")));
   CHECK_FALSE(loads(with("country_code = \"CA\"", "country_code = \"CAN\"")));
   CHECK_FALSE(loads(with("ee_valid_days = 397", "ee_valid_days = 500")));
   CHECK_FALSE(loads(with("org_name = \"Example\"", "org_name = \"\"")));
@@ -622,7 +672,6 @@ struct TempPki {
     config.pki.org_name = "Example";
     config.pki.country_code = "CA";
     config.pki.repository_host = "pki.unit.ca";
-    config.pki.arc_oid = "1.3.6.1.4.1.32473";
     config.root.cn = "UT Root E1";
     config.root.curve = "secp256r1"; // canonical (Config built by hand,
     config.root.digest = "SHA-256";  // no cfg::load validation here)
@@ -641,6 +690,8 @@ struct TempPki {
     ca.ee_curve = "secp256r1";
     ca.ee_digest = "SHA-256";
     ca.ee_valid_days = 90;
+    ca.policies = {{"server", {"1.3.6.1.4.1.32473.1.1"}},
+                   {"client", {"1.3.6.1.4.1.32473.1.2"}}};
     config.cas.emplace(ca.purpose, std::move(ca));
   }
   ~TempPki() { std::filesystem::remove_all(dir); }
@@ -764,6 +815,16 @@ TEST_CASE("ca::detail::live_cas selects the generations that publish CRLs") {
   CHECK(slugs("root") == std::vector<std::string>{eff->root.slug});
 }
 
+namespace {
+std::vector<std::string> policies_of(const std::filesystem::path &pem) {
+  std::vector<std::string> out;
+  for (const auto &oid :
+       Botan::X509_Certificate(pem.string()).certificate_policy_oids())
+    out.push_back(oid.to_string());
+  return out;
+}
+} // namespace
+
 TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
   TempPki t;
   REQUIRE(ca::init(t.config, t.dir, kPass));
@@ -796,6 +857,7 @@ TEST_CASE("ca::renew_signing_ca rotates the issuer, keeping the predecessor") {
   CHECK(e2.issuer_dn() == root.subject_dn());
   CHECK(e2.subject_public_key_bits() != e1.subject_public_key_bits());
   CHECK(e2.check_signature(*root.subject_public_key()));
+  CHECK(policies_of(gen2) == policies_of(t.dir / "ca" / "ut-ca-e1.pem"));
 
   // New issuance chains to the successor; the old leaf still names E1.
   REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "new.ut.ca", {}));
@@ -925,19 +987,48 @@ TEST_CASE("ca::init wants an absent or empty store_dir") {
   std::filesystem::remove_all(aside);
 }
 
-TEST_CASE("ca: CertificatePolicies present only when arc_oid is set") {
+TEST_CASE("ca: CertificatePolicies follow [ca.<purpose>] policies") {
   {
+    // The CA carries the union over its profiles, the leaf its own list.
     TempPki t;
     REQUIRE(ca::init(t.config, t.dir, kPass));
-    Botan::X509_Certificate sign((t.dir / "ca" / "ut-ca-e1.pem").string());
-    CHECK(sign.certificate_policy_oids().size() == 2);
+    CHECK(policies_of(t.dir / "ca" / "ut-ca-e1.pem") ==
+          std::vector<std::string>{"1.3.6.1.4.1.32473.1.1",
+                                   "1.3.6.1.4.1.32473.1.2"});
+    auto eff = ca::load_config(t.dir);
+    REQUIRE(eff.has_value());
+    CHECK(eff->cas.at("tls").policies == t.config.cas.at("tls").policies);
+    REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "pol.ut.ca", {}));
+    CHECK(policies_of(t.dir / "ee" / "pol.ut.ca.crt") ==
+          std::vector<std::string>{"1.3.6.1.4.1.32473.1.1"});
+    // The root is the trust anchor: no policies of its own.
+    CHECK(policies_of(t.dir / "ca" / "ut-root-e1.pem").empty());
   }
   {
+    // Several OIDs on one profile, none on the other.
     TempPki t;
-    t.config.pki.arc_oid.clear();
+    t.config.cas.at("tls").policies = {
+        {"server", {"1.2.3.4", "2.23.140.1.2.1"}}, {"client", {}}};
     REQUIRE(ca::init(t.config, t.dir, kPass));
-    Botan::X509_Certificate sign((t.dir / "ca" / "ut-ca-e1.pem").string());
-    CHECK(sign.certificate_policy_oids().empty());
+    CHECK(policies_of(t.dir / "ca" / "ut-ca-e1.pem") ==
+          std::vector<std::string>{"1.2.3.4", "2.23.140.1.2.1"});
+    auto eff = ca::load_config(t.dir);
+    REQUIRE(eff.has_value());
+    CHECK(eff->cas.at("tls").policies == t.config.cas.at("tls").policies);
+    REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "two.ut.ca", {}));
+    CHECK(policies_of(t.dir / "ee" / "two.ut.ca.crt") ==
+          std::vector<std::string>{"1.2.3.4", "2.23.140.1.2.1"});
+  }
+  {
+    // None declared: no extension anywhere.
+    TempPki t;
+    t.config.cas.at("tls").policies.clear();
+    REQUIRE(ca::init(t.config, t.dir, kPass));
+    CHECK(policies_of(t.dir / "ca" / "ut-ca-e1.pem").empty());
+    auto eff = ca::load_config(t.dir);
+    REQUIRE(eff.has_value());
+    REQUIRE(ca::issue_ee(*eff, t.dir, kPass, "server", "none.ut.ca", {}));
+    CHECK(policies_of(t.dir / "ee" / "none.ut.ca.crt").empty());
   }
 }
 
@@ -1044,9 +1135,11 @@ TEST_CASE("ca::reconcile warns and ignores every changed field (locked)") {
   // One field from a global section, one from the CA's own: both locked.
   file.pki.org_name = "Other";
   file.cas.at("tls").ee_valid_days = 45;
+  file.cas.at("tls").policies["server"] = {"1.2.3.4"};
   ca::reconcile(file, *eff);
   CHECK(eff->pki.org_name == "Example");
   CHECK(eff->cas.at("tls").ee_valid_days == 90);
+  CHECK(eff->cas.at("tls").policies == t.config.cas.at("tls").policies);
 
   // Nothing was persisted either: the DB snapshot is untouched.
   auto reloaded = ca::load_config(t.dir);

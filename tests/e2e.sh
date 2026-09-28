@@ -25,7 +25,6 @@ cat >"$CFG" <<'EOF'
 org_name = "Example"
 country_code = "CA"
 repository_host = "pki.example.ca"
-arc_oid = "1.3.6.1.4.1.32473"
 
 [root]
 cn = "ETS Root E1"
@@ -44,6 +43,7 @@ slug_prefix = "ca-e"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 397
+policies = { server = ["1.3.6.1.4.1.32473.1.1"], client = ["1.3.6.1.4.1.32473.1.2"] }
 EOF
 
 PASS=0
@@ -425,6 +425,38 @@ w create server --cn "srv★.ca" >/dev/null 2>&1 &&
   bad "unicode server CN accepted" || ok "unicode server CN rejected (DNS SAN)"
 w create client --cn "Иван Петров" --san=email:ivan@example.ca >/dev/null 2>&1 &&
   ok "unicode client CN accepted (DN-only)" || bad "unicode client CN rejected"
+
+# --- CertificatePolicies: [ca.tls] policies, verbatim ---
+w create server --cn pol.example.ca >/dev/null 2>&1
+POL_CA="$(openssl x509 -in "$PKI/ca/ca-e1.pem" -noout -ext certificatePolicies 2>/dev/null)"
+printf '%s' "$POL_CA" | grep -q "1.3.6.1.4.1.32473.1.1" &&
+  printf '%s' "$POL_CA" | grep -q "1.3.6.1.4.1.32473.1.2" &&
+  ok "issuing CA carries the union of its profiles' policies" ||
+  bad "issuing CA policies"
+POL_EE="$(openssl x509 -in "$PKI/ee/pol.example.ca.crt" -noout -ext certificatePolicies 2>/dev/null)"
+printf '%s' "$POL_EE" | grep -q "1.3.6.1.4.1.32473.1.1" &&
+  ! printf '%s' "$POL_EE" | grep -q "1.3.6.1.4.1.32473.1.2" &&
+  ok "server leaf carries only the server policy" || bad "server leaf policies"
+w get ca --cn root-ca >"$WORK/w-root.pem" 2>/dev/null
+w get server --cn pol.example.ca --chain >"$WORK/pol-chain.pem" 2>/dev/null
+openssl verify -policy_check -explicit_policy -policy 1.3.6.1.4.1.32473.1.1 \
+  -CAfile "$WORK/w-root.pem" -untrusted "$WORK/pol-chain.pem" \
+  "$PKI/ee/pol.example.ca.crt" >/dev/null 2>&1 &&
+  ok "server chain valid under explicit policy .1.1" ||
+  bad "server chain fails policy processing"
+w get config 2>/dev/null | grep -q '^policies = { server = \["1.3.6.1.4.1.32473.1.1"\], client = \["1.3.6.1.4.1.32473.1.2"\] }$' &&
+  ok "policies in the locked snapshot" || bad "policies missing from get config"
+sed 's/server = \["1.3.6.1.4.1.32473.1.1"\]/server = ["1.2.3.4"]/' "$CFG" >"$WORK/pol-drift.toml"
+"$BIN" --config "$WORK/pol-drift.toml" --store "$PKI" create server \
+  --cn poldrift.example.ca >/dev/null 2>&1
+openssl x509 -in "$PKI/ee/poldrift.example.ca.crt" -noout -ext certificatePolicies 2>/dev/null |
+  grep -q "1.3.6.1.4.1.32473.1.1" && ok "policies locked (edit warned and ignored)" ||
+  bad "policies edit reached a certificate"
+sed 's/client = \[/email = [/' "$CFG" >"$WORK/pol-bad.toml"
+ERR="$("$BIN" --config "$WORK/pol-bad.toml" --store "$WORK/pki-pol-bad" init 2>&1)"
+printf '%s' "$ERR" | grep -q "policies.email: not a profile this CA lists" &&
+  ok "policies for a profile the CA does not list rejected" ||
+  bad "policies for an unlisted profile accepted"
 
 # --- DB source of truth + reconcile on create ---
 w get config 2>/dev/null | grep -q 'repository_host = "pki.example.ca"' &&
@@ -863,7 +895,8 @@ CA_STORE_PASSPHRASE="$CA_STORE_PASSPHRASE_SAVED"
 MCFG="$WORK/multi.toml"
 MPKI="$WORK/pki-multi"
 # Start with one CA that issues only `server`: nothing issues `client` yet.
-sed 's/^profiles = .*/profiles = ["server"]/' "$CFG" >"$MCFG"
+sed -e 's/^profiles = .*/profiles = ["server"]/' -e 's/, client = \[[^]]*\]//' \
+  "$CFG" >"$MCFG"
 m() { "$BIN" --config "$MCFG" --store "$MPKI" "$@"; }
 # CA_STORE_PASSPHRASE is already exported, so this store adopts it instead
 # of generating one.
@@ -966,6 +999,7 @@ ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 825
 permitted_email = ["multi.ca"]
+policies = { email = ["1.3.6.1.4.1.32473.1.3"] }
 EOF
 m add signing-ca --purpose email >/dev/null 2>&1 &&
   ok "add signing-ca --purpose email" || bad "add email CA"
@@ -1005,6 +1039,14 @@ openssl x509 -in "$WORK/p.crt" -noout -ext extendedKeyUsage 2>/dev/null |
 openssl x509 -in "$WORK/p.crt" -noout -ext certificatePolicies 2>/dev/null |
   grep -q "1.3.6.1.4.1.32473.1.3" && ok "email policy OID .1.3" ||
   bad "email policy OID"
+# The issuing CA asserts every policy its leaves carry, so the chain
+# survives RFC 5280 policy processing with an explicit policy required.
+m get ca --cn root-ca >"$WORK/m-root.pem" 2>/dev/null
+m get email --cn p@multi.ca --chain >"$WORK/p-chain.pem" 2>/dev/null
+openssl verify -policy_check -explicit_policy -policy 1.3.6.1.4.1.32473.1.3 \
+  -CAfile "$WORK/m-root.pem" -untrusted "$WORK/p-chain.pem" "$WORK/p.crt" \
+  >/dev/null 2>&1 && ok "email chain valid under explicit policy .1.3" ||
+  bad "email chain fails policy processing"
 # The motivating case for the DN order: an S/MIME subject is organizational
 # by definition, and only a C, O, CN encoding can sit inside a
 # directoryName subtree (S/MIME BR 7.1.5).

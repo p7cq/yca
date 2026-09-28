@@ -462,14 +462,26 @@ Botan::Extensions ca_extensions(const std::vector<uint8_t> &pub_key,
   return ext;
 }
 
+// CertificatePolicies carrying `oids` verbatim; omitted when there are none.
+void add_policies(Botan::Extensions &ext,
+                  const std::vector<std::string> &oids) {
+  if (oids.empty())
+    return;
+  std::vector<Botan::OID> v;
+  for (const auto &o : oids)
+    v.emplace_back(o);
+  ext.add_new(std::make_unique<Botan::Cert_Extension::Certificate_Policies>(v));
+}
+
 // AIA (caIssuers -> root), CDP (root CRL), and CertificatePolicies for
 // the signing CA. Pointers reference the root (issuer of this cert). URLs are
 // flat under repository_host; cert/CRL file names come from the root CA slug.
 // Revocation is CRL-only in this PKI (no OCSP), so AIA carries no OCSP URI;
 // the signing CA's status channel is the root CRL (CDP).
-// Policies only when root_arc_oid is configured.
+// Policies are the union over the CA's profiles.
 void add_signing_pointer_extensions(Botan::Extensions &ext,
                                     const cfg::Config &config,
+                                    const cfg::SigningCa &ca,
                                     const std::string &root_slug) {
   const std::string base = "http://" + config.pki.repository_host;
   const std::string &root = root_slug;
@@ -485,18 +497,16 @@ void add_signing_pointer_extensions(Botan::Extensions &ext,
   ext.add_new(std::make_unique<Botan::Cert_Extension::CRL_Distribution_Points>(
       std::vector<DP>{DP(cdp)}));
 
-  if (!config.pki.arc_oid.empty())
-    ext.add_new(std::make_unique<Botan::Cert_Extension::Certificate_Policies>(
-        std::vector<Botan::OID>{Botan::OID(config.pki.arc_oid + ".1.1"),
-                                Botan::OID(config.pki.arc_oid + ".1.2")}));
+  add_policies(ext, ca.ca_policies());
 }
 
-// EE pointers reference the issuing CA (issuer of the leaf), plus the one
-// policy OID the profile carries. Revocation is CRL-only in this PKI (no
-// OCSP), so AIA carries only caIssuers; the leaf's status channel is the
-// issuing CRL (CDP).
+// EE pointers reference the issuing CA (issuer of the leaf), plus the
+// policy OIDs the CA declares for the profile. Revocation is CRL-only in this
+// PKI (no OCSP), so AIA carries only caIssuers; the leaf's status channel is
+// the issuing CRL (CDP).
 void add_ee_pointer_extensions(Botan::Extensions &ext,
                                const cfg::Config &config,
+                               const cfg::SigningCa &ca_cfg,
                                const profile::Def &prof,
                                const std::string &issuer_slug) {
   const std::string base = "http://" + config.pki.repository_host;
@@ -513,10 +523,9 @@ void add_ee_pointer_extensions(Botan::Extensions &ext,
   ext.add_new(std::make_unique<Botan::Cert_Extension::CRL_Distribution_Points>(
       std::vector<DP>{DP(cdp)}));
 
-  if (!config.pki.arc_oid.empty())
-    ext.add_new(std::make_unique<Botan::Cert_Extension::Certificate_Policies>(
-        std::vector<Botan::OID>{
-            Botan::OID(config.pki.arc_oid + std::string(prof.policy_suffix))}));
+  if (auto it = ca_cfg.policies.find(std::string(prof.name));
+      it != ca_cfg.policies.end())
+    add_policies(ext, it->second);
 }
 
 // The key usage a profile's leaf carries: always digitalSignature, plus
@@ -538,13 +547,12 @@ Botan::Key_Constraints ee_constraints(const profile::Def &prof) {
 //
 // One function because the two lists must not drift: they are the same
 // certificate shape, differing only in where the public key came from.
-Botan::Extensions ee_extensions(const cfg::Config &config,
-                                const profile::Def &prof,
-                                const Botan::X509_Certificate &issuer,
-                                const std::string &issuer_slug,
-                                const std::vector<uint8_t> &pub_key,
-                                const std::string &digest,
-                                const Botan::AlternativeName &san) {
+Botan::Extensions
+ee_extensions(const cfg::Config &config, const cfg::SigningCa &ca,
+              const profile::Def &prof, const Botan::X509_Certificate &issuer,
+              const std::string &issuer_slug,
+              const std::vector<uint8_t> &pub_key, const std::string &digest,
+              const Botan::AlternativeName &san) {
   Botan::Extensions ext;
   ext.add_new(std::make_unique<Botan::Cert_Extension::Basic_Constraints>(false),
               true);
@@ -559,7 +567,7 @@ Botan::Extensions ee_extensions(const cfg::Config &config,
       std::make_unique<Botan::Cert_Extension::Subject_Key_ID>(pub_key, digest));
   ext.add_new(
       std::make_unique<Botan::Cert_Extension::Subject_Alternative_Name>(san));
-  add_ee_pointer_extensions(ext, config, prof, issuer_slug);
+  add_ee_pointer_extensions(ext, config, ca, prof, issuer_slug);
   return ext;
 }
 
@@ -742,6 +750,36 @@ std::vector<std::string> split_profiles(const std::string &s) {
   return out;
 }
 
+// [ca.<purpose>] policies as one column: "server=oid;client=oid", in
+// map order.
+std::string
+join_policies(const std::map<std::string, std::vector<std::string>> &policies) {
+  std::string out;
+  for (const auto &[prof, oids] : policies) {
+    if (!out.empty())
+      out += ';';
+    out += prof + '=' + join_profiles(oids);
+  }
+  return out;
+}
+
+std::map<std::string, std::vector<std::string>>
+split_policies(const std::string &s) {
+  std::map<std::string, std::vector<std::string>> out;
+  for (std::size_t i = 0; i < s.size();) {
+    const std::size_t end = s.find(';', i);
+    const std::string entry = s.substr(i, end - i);
+    const std::size_t eq = entry.find('=');
+    const std::string oids = entry.substr(eq + 1);
+    out[entry.substr(0, eq)] =
+        oids.empty() ? std::vector<std::string>{} : split_profiles(oids);
+    if (end == std::string::npos)
+      break;
+    i = end + 1;
+  }
+  return out;
+}
+
 // The sections that exist once per store, recorded at init and enforced on
 // every later run: locked, re-init to change any of them. Keys are dotted
 // section paths so a warning names the section the operator has to look at.
@@ -750,7 +788,6 @@ KeyValues locked_global(const cfg::Config &c) {
       {"pki.org_name", c.pki.org_name},
       {"pki.country_code", c.pki.country_code},
       {"pki.repository_host", c.pki.repository_host},
-      {"pki.arc_oid", c.pki.arc_oid},
       {"pkcs11.module", c.pkcs11.module},
       {"pkcs11.token_label", c.pkcs11.token_label},
       {"root.cn", c.root.cn},
@@ -784,6 +821,7 @@ KeyValues locked_purpose(const cfg::SigningCa &ca) {
       {"simple_dn", ca.simple_dn ? "1" : "0"},
       {"permitted_dns", join_profiles(ca.permitted_dns)},
       {"permitted_email", join_profiles(ca.permitted_email)},
+      {"policies", join_policies(ca.policies)},
   };
 }
 
@@ -799,6 +837,7 @@ void ensure_purpose_table(store::Database &db) {
                               "NOT NULL, simple_dn INTEGER NOT NULL DEFAULT 0, "
                               "permitted_dns TEXT NOT NULL "
                               "DEFAULT '', permitted_email TEXT NOT NULL "
+                              "DEFAULT '', policies TEXT NOT NULL "
                               "DEFAULT '')",
                               app::purpose_table));
 }
@@ -809,9 +848,10 @@ void lock_purpose(store::Database &db, const cfg::SigningCa &ca) {
   auto ins = db.stmt(
       std::format("INSERT INTO {} (purpose,profiles,cn,curve,digest,valid_days,"
                   "slug_prefix,slug,key_backend,token_label,ee_curve,ee_digest,"
-                  "ee_valid_days,simple_dn,permitted_dns,permitted_email) "
+                  "ee_valid_days,simple_dn,permitted_dns,permitted_email,"
+                  "policies) "
                   "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,"
-                  "?16)",
+                  "?16,?17)",
                   app::purpose_table));
   ins->bind(1, ca.purpose);
   ins->bind(2, join_profiles(ca.profiles));
@@ -829,6 +869,7 @@ void lock_purpose(store::Database &db, const cfg::SigningCa &ca) {
   ins->bind(14, static_cast<std::size_t>(ca.simple_dn ? 1 : 0));
   ins->bind(15, join_profiles(ca.permitted_dns));
   ins->bind(16, join_profiles(ca.permitted_email));
+  ins->bind(17, join_policies(ca.policies));
   ins->spin();
 }
 
@@ -1007,7 +1048,7 @@ Botan::Extensions signing_ca_extensions(const cfg::Config &config,
         std::make_unique<x509ext::Name_Constraints>(
             x509ext::NameConstraints{ca.permitted_dns, ca.permitted_email}),
         true);
-  add_signing_pointer_extensions(ext, config, root_slug);
+  add_signing_pointer_extensions(ext, config, ca, root_slug);
   return ext;
 }
 
@@ -1555,7 +1596,6 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
   c.pki.org_name = S("pki.org_name");
   c.pki.country_code = S("pki.country_code");
   c.pki.repository_host = S("pki.repository_host");
-  c.pki.arc_oid = S("pki.arc_oid");
   c.pkcs11.module = S("pkcs11.module");
   c.pkcs11.token_label = S("pkcs11.token_label");
   c.root.cn = S("root.cn");
@@ -1573,7 +1613,7 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
   auto cas = dbh->stmt(std::format(
       "SELECT purpose,profiles,cn,curve,digest,valid_days,slug_prefix,slug,"
       "key_backend,token_label,ee_curve,ee_digest,ee_valid_days,simple_dn,"
-      "permitted_dns,permitted_email FROM {}",
+      "permitted_dns,permitted_email,policies FROM {}",
       app::purpose_table));
   while (cas->step()) {
     cfg::SigningCa ca;
@@ -1593,6 +1633,7 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
     ca.simple_dn = cas->get_size_t(13) != 0;
     ca.permitted_dns = split_profiles(cas->get_str(14));
     ca.permitted_email = split_profiles(cas->get_str(15));
+    ca.policies = split_policies(cas->get_str(16));
     c.cas.emplace(ca.purpose, std::move(ca));
   }
   // An initialized store always holds at least one issuing CA; without one
@@ -1819,7 +1860,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
       issuer.signature_op(), rng, issuer.algorithm_identifier(), pub,
       Botan::X509_Time(tp), Botan::X509_Time(tp + validity),
       sign_cert->subject_dn(), subject_dn(config.pki, cn, ca_cfg->simple_dn),
-      ee_extensions(config, *prof, *sign_cert, sign.slug, pub,
+      ee_extensions(config, *ca_cfg, *prof, *sign_cert, sign.slug, pub,
                     ca_cfg->ee_digest, an));
 
   store.insert_cert(ee_cert);
@@ -2205,8 +2246,8 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
       req->raw_public_key(), Botan::X509_Time(tp),
       Botan::X509_Time(tp + validity), sign_cert->subject_dn(),
       subject_dn(config.pki, cn, ca_cfg->simple_dn),
-      ee_extensions(config, *prof, *sign_cert, sign.slug, req->raw_public_key(),
-                    ca_cfg->ee_digest, an));
+      ee_extensions(config, *ca_cfg, *prof, *sign_cert, sign.slug,
+                    req->raw_public_key(), ca_cfg->ee_digest, an));
 
   store.insert_cert(ee_cert);
   index_cert(*dbh, ee_cert, profile, sign.purpose);
@@ -2661,8 +2702,6 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
                "repository_host = \"{}\"\n",
                config.pki.org_name, config.pki.country_code,
                config.pki.repository_host);
-    if (!config.pki.arc_oid.empty())
-      std::print("arc_oid = \"{}\"\n", config.pki.arc_oid);
 
     const bool root_p11 = config.root.key_backend == "pkcs11";
     bool any_p11 = root_p11;
@@ -2709,6 +2748,23 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
       };
       print_subtrees("permitted_dns", ca.permitted_dns);
       print_subtrees("permitted_email", ca.permitted_email);
+      if (!ca.policies.empty()) {
+        std::print("policies = {{ ");
+        // In profile order, as the operator declared them.
+        bool first = true;
+        for (const auto &prof : ca.profiles) {
+          const auto it = ca.policies.find(prof);
+          if (it == ca.policies.end())
+            continue;
+          const auto &oids = it->second;
+          std::print("{}{} = [", first ? "" : ", ", prof);
+          for (std::size_t i = 0; i < oids.size(); ++i)
+            std::print("{}\"{}\"", i ? ", " : "", oids[i]);
+          std::print("]");
+          first = false;
+        }
+        std::print(" }}\n");
+      }
     }
     return true;
   }

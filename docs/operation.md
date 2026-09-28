@@ -412,6 +412,7 @@ sudoedit /etc/yca/yca.toml
 # ee_digest = "SHA-256"
 # ee_valid_days = 825
 # permitted_email = ["example.ca"]
+# policies = { email = ["1.3.6.1.4.1.32473.1.3"] }
 
 # 2. Create it (root key online)
 yca add signing-ca --purpose email

@@ -169,7 +169,9 @@ which each is locked into the store: `[pki]`, an optional `[pkcs11]`,
 - validities; a CA's `ee_valid_days` doubles as its `--valid` ceiling and
   is itself capped by the strictest profile that CA lists. Everything is
   locked at init - re-initialize to change a materialized section.
-- `[pki] arc_oid` - optional policy arc; omit to skip CertificatePolicies.
+- `[ca.<purpose>] policies` - optional CertificatePolicies OIDs per
+  profile, verbatim (`policies = { server = [...], client = [...] }`); the
+  CA itself carries the union over its profiles.
 - `[ca.<purpose>] permitted_dns` / `permitted_email` - optional
   `nameConstraints` subtrees bounding who that CA may issue to.
 - `[ca.<purpose>] simple_dn` - optional, default `false`. Subject DNs are

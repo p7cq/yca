@@ -23,9 +23,7 @@ enum class Subject {
 
 // One end-entity certificate shape. This table is the only place that says
 // what a profile means: which EKU it carries, which key usage bits, what it
-// demands of the subject, its policy OID under the org arc, and how long it
-// may live. Adding a profile is an entry here plus tests; nothing about a
-// profile is a per-deployment decision, so none of it is configurable.
+// demands of the subject, and how long it may live.
 //
 // Before adding one, check that a CA carrying it can still be a CA to
 // Botan, which treats a certificate whose EKU names none of serverAuth,
@@ -46,8 +44,6 @@ struct Def {
   // directoryName name constraint, which is compared position by position
   // against a C, O, CN encoding.
   bool full_dn;
-  // Appended to <arc_oid>; the registry of assignments is in cps-tpl.md.
-  std::string_view policy_suffix;
   // Ceiling on this profile's certificates. 398 days is the TLS Baseline
   // Requirements number; the S/MIME BR cap the Strict and Multipurpose
   // profiles at 825.
@@ -78,19 +74,18 @@ inline constexpr Def kDefs[] = {
     // The TLS profiles are the only ones with no use for an organizational
     // subject: a server is named by its dNSName SANs and a client by the
     // SAN its relying party matches, so [ca.*] simple_dn may reduce them.
-    {"server", "1.3.6.1.5.5.7.3.1", false, Subject::DnsCn, false, ".1.1", 398,
+    {"server", "1.3.6.1.5.5.7.3.1", false, Subject::DnsCn, false, 398, false,
+     ""},
+    {"client", "1.3.6.1.5.5.7.3.2", false, Subject::RequireSan, false, 398,
      false, ""},
-    {"client", "1.3.6.1.5.5.7.3.2", false, Subject::RequireSan, false, ".1.2",
-     398, false, ""},
     // S/MIME, as one dual-use certificate carrying both signing and ECDH key
     // agreement rather than a separate signing and encryption pair. There is
     // no key escrow and nonRepudiation is deliberately not asserted.
     // full_dn: an S/MIME subordinate CA counts as technically constrained
     // only with a directoryName subtree beside the rfc822Name one (S/MIME BR
     // 7.1.5), and a bare CN cannot sit inside any non-empty such subtree.
-    {"email", "1.3.6.1.5.5.7.3.4", true, Subject::EmailMatchingCn, true, ".1.3",
-     825, true,
-     "1.3.6.1.5.5.7.3.2"}, // + clientAuth on the CA, see ca_companion_eku
+    {"email", "1.3.6.1.5.5.7.3.4", true, Subject::EmailMatchingCn, true, 825,
+     true, "1.3.6.1.5.5.7.3.2"}, // + clientAuth on the CA, see ca_companion_eku
 };
 
 inline std::span<const Def> all() { return kDefs; }

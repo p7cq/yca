@@ -29,9 +29,6 @@ struct Pki {
   std::string country_code;
   // The host serving the published artifacts.
   std::string repository_host;
-  // Optional dotted OID arc (an org PEN), parent of the policy OIDs.
-  // Empty means certificates carry no CertificatePolicies extension.
-  std::string arc_oid;
 };
 
 // [pkcs11]. Absent unless some CA holds its key on a token.
@@ -93,6 +90,13 @@ struct SigningCa : CaFields {
   // for but not who it may be issued to.
   std::vector<std::string> permitted_dns;
   std::vector<std::string> permitted_email;
+  // policies = { <profile> = [...] }: the CertificatePolicies OIDs,
+  // verbatim.
+  std::map<std::string, std::vector<std::string>> policies;
+
+  // The union of `policies` over `profiles`, in profile order, without
+  // duplicates.
+  std::vector<std::string> ca_policies() const;
 };
 
 struct Config {

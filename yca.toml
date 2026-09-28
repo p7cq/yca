@@ -2,7 +2,6 @@
 org_name = "Example 会社"
 country_code = "CA"
 repository_host = "pki.example.ca"
-# arc_oid = "1.3.6.1.4.1.32473"
 
 [root]
 cn = "ETS Root E1"
@@ -27,6 +26,8 @@ simple_dn = true
 # permitted_dns = ["example.ca"]       # also covers www.example.ca
 # permitted_email = ["example.ca"]     # every mailbox at that host;
 #                                      # ".example.ca" means subdomains only
+# Optional: CertificatePolicies OIDs per profile, verbatim.
+# policies = { server = ["1.3.6.1.4.1.32473.1.1"], client = ["1.3.6.1.4.1.32473.1.2"] }
 
 # HSM-held CA keys (optional; default internal).
 # [pkcs11]

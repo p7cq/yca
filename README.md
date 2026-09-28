@@ -19,10 +19,6 @@ flowchart LR
 - **ECDSA only.** Known curves and digests: `secp256r1`, `secp384r1`,
   `secp521r1`, `SHA-256`, `SHA-384`, `SHA-512` (verbatim Botan names
   only).
-- **Fixed policy OID structure.** CertificatePolicies is built from one
-  configurable arc (`arc_oid`, intended to be an org PEN) with suffixes
-  fixed by the profile table: `<arc>.1.1` (TLS server), `<arc>.1.2`
-  (VPN/mTLS client), `<arc>.1.3` (S/MIME). Only the arc is configurable.
 - **Narrow HSM support.** The `PKCS#11` key backend is tested against
   SoftHSM2 and the Nitrokey HSM 2 via OpenSC only.
 - **Fixed subject DN structure.** Every DN is encoded `C`, `O`, `CN` in
@@ -55,7 +51,6 @@ Default configuration file is `./yca.toml` and can be overridden with `--config`
 | `org_name`        | Organization name (`O`)                                                                                       |
 | `country_code`    | Two letter country code (`C`)                                                                                 |
 | `repository_host` | `host[:port]` serving the published artifacts; used to build the CDP and AIA (caIssuers) URLs in certificates |
-| `arc_oid`         | optional dotted OID arc (org PEN) for CertificatePolicies; absent means no policies extension                 |
 
 `[pkcs11]`, present only when a CA holds its key on a token
 
@@ -87,6 +82,7 @@ Shared by `[root]` and `[ca.<purpose>]`
 | `simple_dn`       | optional, default `false`; `true` reduces the subject DN to the bare `CN`.                                                                               |
 | `permitted_dns`   | optional `nameConstraints` permitted subtrees, as bare FQDNs; `example.ca` also covers `www.example.ca`                                                  |
 | `permitted_email` | optional `nameConstraints` permitted subtrees, as FQDNs; `example.ca` means every mailbox at that host, `.example.ca` every mailbox in a subdomain of it |
+| `policies`        | optional `{ <profile> = [OIDs] }`: the CertificatePolicies OIDs each profile's certificates carry, verbatim; only for profiles listed in `profiles`      |
 
 Constraints enforced: curves/digests from the sets above; purposes and
 slug prefixes lowercase kebab-case `[a-z0-9.-]`; `repository_host` a DNS
@@ -106,6 +102,13 @@ A CA carries the EKUs of the profiles it lists. A CA listing `email` also
 carries `clientAuth`, which the S/MIME Baseline Requirements permit on a
 subordinate CA (7.1.2.2) and some public S/MIME intermediates ship; the leaf
 still carries `emailProtection` alone.
+
+Policy OIDs are taken as written: any arc, any depth, several per
+profile. A profile without an entry, or with an empty list, gets no
+CertificatePolicies extension. The CA's own certificate includes the union
+of the policies of the profiles it lists, so every policy a leaf asserts
+is included by its issuer. `anyPolicy` is refused and the root carries
+no policies.
 
 `simple_dn` does not apply to the CA's own certificate, and is refused on a
 CA carrying a profile whose subject must be organizational (`email`).
@@ -135,7 +138,6 @@ a passphrase is auto-generated and shown once.
 org_name = "Example 会社"
 country_code = "CA"
 repository_host = "pki.example.ca"
-arc_oid = "1.3.6.1.4.1.32473" # org PEN arc (optional)
 
 [root]
 cn = "ETS Root E1"
@@ -155,10 +157,11 @@ ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 398
 simple_dn = true
+policies = { server = ["1.3.6.1.4.1.32473.1.1"], client = ["1.3.6.1.4.1.32473.1.2"] }
 ```
 
 `1.3.6.1.4.1.32473` is the IANA documentation PEN (RFC 5612), replace it
-or remove it before `yca init`.
+or remove the policies before `yca init`.
 
 ### Single token layout
 

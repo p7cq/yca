@@ -3,6 +3,7 @@
 
 #include "config.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <format>
@@ -134,6 +135,16 @@ const SigningCa *Config::ca_for_profile(const std::string &profile) const {
   return nullptr;
 }
 
+std::vector<std::string> SigningCa::ca_policies() const {
+  std::vector<std::string> out;
+  for (const auto &p : profiles)
+    if (auto it = policies.find(p); it != policies.end())
+      for (const auto &oid : it->second)
+        if (std::ranges::find(out, oid) == out.end())
+          out.push_back(oid);
+  return out;
+}
+
 std::expected<Config, std::vector<std::string>>
 load(const std::filesystem::path &path) {
   std::vector<std::string> errs;
@@ -263,14 +274,6 @@ load(const std::filesystem::path &path) {
                       "optionally with :port (no underscores, scheme, or "
                       "path), got '{}'",
                       c.pki.repository_host));
-    // Optional: without it, certificates carry no CertificatePolicies.
-    if (t->contains("arc_oid") && get_str(*t, "pki", "arc_oid", c.pki.arc_oid))
-      try {
-        static_cast<void>(Botan::OID(c.pki.arc_oid));
-      } catch (const std::exception &) {
-        errs.push_back(
-            std::format("[pki] arc_oid: invalid OID '{}'", c.pki.arc_oid));
-      }
   }
 
   // Optional section: read now, required-ness decided once the backends
@@ -397,6 +400,54 @@ load(const std::filesystem::path &path) {
       };
       read_subtrees("permitted_dns", false, ca.permitted_dns);
       read_subtrees("permitted_email", true, ca.permitted_email);
+
+      // policies = { <profile> = [...] }: complete OIDs per profile, taken
+      // verbatim, with no structure imposed on them.
+      const auto *pol = (*t)["policies"].as_table();
+      if (!pol && t->contains("policies"))
+        errs.push_back(std::format("[{}] policies: must be a table", sec));
+      if (pol) {
+        for (const auto &[pk, pv] : *pol) {
+          const std::string prof(pk.str());
+          if (std::ranges::find(ca.profiles, prof) == ca.profiles.end()) {
+            errs.push_back(std::format(
+                "[{}] policies.{}: not a profile this CA lists", sec, prof));
+            continue;
+          }
+          const auto *arr = pv.as_array();
+          if (!arr) {
+            errs.push_back(
+                std::format("[{}] policies.{}: must be an array", sec, prof));
+            continue;
+          }
+          auto &oids = ca.policies[prof];
+          for (const auto &v : *arr) {
+            const auto oid = v.value<std::string>();
+            if (!oid) {
+              errs.push_back(std::format(
+                  "[{}] policies.{}: entries must be strings", sec, prof));
+              continue;
+            }
+            bool valid = false;
+            try {
+              valid = !oid->empty() && Botan::OID(*oid).to_string() == *oid;
+            } catch (const std::exception &) {
+            }
+            if (!valid)
+              errs.push_back(std::format("[{}] policies.{}: invalid OID '{}'",
+                                         sec, prof, *oid));
+            else if (*oid == "2.5.29.32.0")
+              errs.push_back(std::format("[{}] policies.{}: anyPolicy is not a "
+                                         "certificate policy",
+                                         sec, prof));
+            else if (std::ranges::find(oids, *oid) != oids.end())
+              errs.push_back(std::format("[{}] policies.{}: duplicate OID '{}'",
+                                         sec, prof, *oid));
+            else
+              oids.push_back(*oid);
+          }
+        }
+      }
 
       if (get_str(*t, sec, "ee_curve", ca.ee_curve))
         check_curve(sec, "ee_curve", ca.ee_curve);
