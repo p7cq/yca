@@ -224,7 +224,7 @@ makes no such claim.
 ```bash
 openssl x509 -in user.crt -noout -subject -nameopt oneline \
     -ext keyUsage,extendedKeyUsage,subjectAltName,certificatePolicies
-# subject=C = CA, O = Example, CN = user@example.ca  <- organizational DN
+# subject=C = CA, O = Example 会社, CN = user@example.ca  <- organizational DN
 # Digital Signature, Key Agreement                   <- dual use, no nonRepudiation
 # E-mail Protection
 # email:user@example.ca
@@ -351,10 +351,10 @@ The two CRLs run on separate cadences. The signing CRL carries a 7-day
 `nextUpdate`; the root CRL carries a 183-day one (industry-standard
 offline-root practice sits in the 6-12 month band; yca borrows the
 cadence; the isolation depends on the layout - with a single token or
-store the root key is reachable whenever the signing key is, while the
-split and hybrid layouts keep the root on its own token, see the README
-limitations). Both are clamped so the promise never extends past the
-issuing CA's own `notAfter`. Keep them with:
+internal backend the root key is reachable whenever the signing key is,
+while the split and hybrid layouts keep the root on its own token. Both
+are clamped so the promise never extends past the issuing CA's own
+`notAfter`. Keep them with:
 
 ```bash
 yca refresh crl signing   # daily: re-signs the signing CRL, fresh nextUpdate
@@ -440,7 +440,7 @@ Rotating the signing CA never touches a relying party's trust store: old
 leaves keep validating through the old generation, new leaves through the
 new one, and both chains end at the same root. That is what the 2-tier
 hierarchy buys. Rotating the **root** is the expensive case and has its
-own scenario in [CA rotation](ca-rotation.md).
+own scenario in CA rotation.
 
 ### When to rotate
 
@@ -453,7 +453,7 @@ own scenario in [CA rotation](ca-rotation.md).
 The aging-out horizon is visible without any new tooling:
 
 ```bash
-yca list --expiring 397     # an issuing CA appears once it is within
+yca list --expiring 398     # an issuing CA appears once it is within
                             # its own ee_valid_days of its notAfter
 ```
 
@@ -499,8 +499,8 @@ curl -I http://pki.example.ca/ca-e2.crl
 
 From step 1 on, every new certificate chains to E2: `create`, `sign` and
 the ACME frontend all follow the active generation, with **nothing to
-reconfigure** - `yca-acme` fetches the chain through `get ca --cn
-signing-ca`, which is an alias for "whichever generation is active".
+reconfigure** - `yca-acme` fetches the chain through `get server
+--chain`, which follows the issuer of the certificate just signed.
 
 ### The overlap
 

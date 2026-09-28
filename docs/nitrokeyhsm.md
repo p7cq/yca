@@ -37,7 +37,6 @@ No other user beyond the designated ones can touch the HSM.
 Add a rule in `/usr/local/etc/polkit-1/rules.d/50-yca.rules`:
 
 ```js
-// Only root and the yca service account may talk to pcscd and the HSM.
 polkit.addRule(function(action, subject) {
     if (action.id == "org.debian.pcsc-lite.access_pcsc" ||
         action.id == "org.debian.pcsc-lite.access_card") {
@@ -162,7 +161,7 @@ the token is bought for. The risk moves to the custody of the share
 files, and a restored key means two live copies of one private key. That
 is a defensible trade for a root and rarely one for an online signing CA.
 
-This is the alternative to the standby root in ca-rotation.md,
+This is the alternative to the standby root in CA rotation,
 and it has nothing to do with cross-signing: a shared DKEK puts the
 *same* root key on a second token, with no cross-certificate, no chain
 change and no code. The standby root instead accepts that the key is

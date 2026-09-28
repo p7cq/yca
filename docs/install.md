@@ -123,7 +123,7 @@ sudo install -Dm644 share/zsh-completion/_yca-acme \
     /usr/share/zsh/site-functions/_yca-acme
 sudo install -Dm644 share/bash-completion/yca-acme \
     /usr/share/bash-completion/completions/yca-acme
-sudo install -Dm600 yca.toml /etc/yca/yca.toml
+sudo install -Dm640 yca.toml /etc/yca/yca.toml
 sudo install -m644 share/systemd/*.service share/systemd/*.timer \
     /usr/lib/systemd/system/
 ```
@@ -199,12 +199,13 @@ with polkit and denies the account (the journal shows the denial), allow
 it explicitly:
 
 ```js
-// /etc/polkit-1/rules.d/60-yca-pcsc.rules
 polkit.addRule(function (action, subject) {
     if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
-         action.id == "org.debian.pcsc-lite.access_card") &&
-        subject.user == "yca") {
-        return polkit.Result.YES;
+         action.id == "org.debian.pcsc-lite.access_card") {
+        if (subject.user == "root" || subject.user == "yca") {
+            return polkit.Result.YES;
+        }
+        return polkit.Result.NO;
     }
 });
 ```
@@ -372,7 +373,7 @@ curl -I http://pki.example.ca/ca-e1.crl
 # the published CRLs verify against the published chain
 curl -s http://pki.example.ca/ca-e1.crl |
     openssl crl -inform DER -noout \
-        -CAfile <(curl -s http://pki.example.ca>/ca-e1.crt |
+        -CAfile <(curl -s http://pki.example.ca/ca-e1.crt |
                   openssl x509 -inform DER)
 # expect: "verify OK"
 

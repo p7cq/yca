@@ -14,7 +14,7 @@ flowchart TD
     store[("CA store (+ HSM)")]
     client -->|"HTTPS /acme/*"| nginx
     nginx -->|"HTTP 127.0.0.1:8555"| daemon
-    daemon -->|"exec: get nonce, sign server --csr -, get server, get ca"| cli
+    daemon -->|"exec: get nonce, sign server --csr -, get server --chain, revoke server --serial"| cli
     cli --> store
 ```
 
@@ -134,9 +134,11 @@ this time with its HTTPS block.
 Manually issue a short-lived certificate for `repository_host` then copy
 the certificate and key to the location set in the NGINX (`yca.conf`). The
 certificate must hold validity until `acme.sh --issue` below is 
-finalized. The CN must match the identifier used in every later step - it
-is used both here and by `acme.sh` (assuming `hostname` resolves to
-`pki.example.ca`):
+finalized, and the order is accepted only once this certificate has
+less than 33% of its lifetime left (the CA's renewal window, see above):
+with `--valid 15m`, run step 8 between minute 10 and minute 15. The CN must
+match the identifier used in every later step - it is used both here and by
+`acme.sh` (assuming `hostname` resolves to `pki.example.ca`):
 
 ```bash
 yca create server --cn $(hostname) --valid 15m
@@ -169,7 +171,7 @@ sudo chmod 600 /etc/yca/acme/.{kid,hmac}
 
 Override the unit's `ExecStart` with the public URL, the desired validity
 and the target DNS server (`sudo systemctl edit yca-acme.service`, which
-also reloads systemd). For example:
+also reloads the unit). For example:
 
 ```ini
 [Service]
@@ -195,8 +197,11 @@ export NSUPDATE_ZONE=_acme-challenge.pki.example.ca
 ```
 
 ```bash
-sudo systemctl enable yca-acme.service yca-crl-refresh.timer yca-root-crl-refresh.timer yca-publish.timer --now
+sudo systemctl enable yca-acme.service yca-crl-refresh.timer yca-publish.timer --now
 ```
+
+Enable `yca-root-crl-refresh.timer` as well only when the root key is
+reachable unattended (internal backend or single token).
 
 #### 7. Register the acme.sh account
 
@@ -393,11 +398,10 @@ ExecStart=/usr/libexec/yca/yca-acme \
   --store /var/lib/yca/store
 ```
 
-Enable it like the rotation timer: only after `/etc/yca/yca.env` exists
+Enable it like the CRL refresh timers: only after `/etc/yca/yca.env` exists
 (the enable is the operator's explicit decision to automate the secret).
 
 ```bash
-systemctl daemon-reload
 systemctl enable --now yca-acme
 ```
 
@@ -582,7 +586,7 @@ CA's `ee_valid_days`:
 |----------------|----------------------|--------------------|-------------------------------|
 | 90 (`--valid 90d`) | 61 days          | `--days 61`        | 29 days                       |
 | 180            | 121 days             | `--days 121`       | 59 days                       |
-| 397 (ee_valid_days default) | 266 days | `--days 266`      | 131 days                      |
+| 398 (ee_valid_days default) | 267 days | `--days 267`      | 131 days                      |
 
 (Earliest age = just past 67% of the lifetime. A refused renewal is
 harmless - the client retries on its schedule - but a cron that retries a
@@ -638,7 +642,7 @@ record and stops without the confirmation flag; the second, re-run with
 and finalizes.
 
 ```bash
-acme.sh --issue --server "$DIR" --ca-bundle root.pem \
+acme.sh --issue --server "$ACME" --ca-bundle root.pem \
       -d pki.example.ca --dns
 # ... acme.sh prints the TXT name/value, then stops here ...
 ```
@@ -664,7 +668,7 @@ Finalize re-running the same `--issue` command, with the confirmation
 flag added:
 
 ```bash
-acme.sh --issue --server "$DIR" --ca-bundle root.pem \
+acme.sh --issue --server "$ACME" --ca-bundle root.pem \
       -d pki.example.ca --dns \
       --yes-I-know-dns-manual-mode-enough-go-ahead-please
 ```
@@ -760,7 +764,7 @@ past this dedicated zone into the parent:
 ```bash
 NSUPDATE_SERVER=ns1.example.ca NSUPDATE_KEY=/etc/yca/nsupdate.key \
       NSUPDATE_ZONE=_acme-challenge.host.example.ca \
-      acme.sh --issue --server "$DIR" --ca-bundle root.pem \
+      acme.sh --issue --server "$ACME" --ca-bundle root.pem \
       -d host.example.ca --dns dns_nsupdate --dnssleep 5
 ```
 
@@ -771,7 +775,7 @@ the same shape, with a matching EAB `--allow` pattern and its own
 dedicated `_acme-challenge.<base>` zone:
 
 ```bash
-acme.sh --issue --server "$DIR" --ca-bundle root.pem \
+acme.sh --issue --server "$ACME" --ca-bundle root.pem \
       -d '*.example.ca' --dns dns_nsupdate --dnssleep 5
 ```
 
