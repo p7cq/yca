@@ -89,8 +89,7 @@ slug prefixes lowercase kebab-case `[a-z0-9.-]`; `repository_host` a DNS
 host name with optional port (no scheme or path); slug prefixes and CNs
 unique across all CAs, and no two prefixes differing only by digits;
 `ee_valid_days < valid_days` per CA and every CA's `valid_days` below the
-root's. An `internal` root under a `pkcs11` issuing CA is rejected (it
-would protect the replaceable key better than the anchor).
+root's.
 
 Each profile belongs to exactly one CA, which is how issuance picks an
 issuer: `create server` routes to whichever CA lists `server`. A profile
@@ -157,15 +156,45 @@ ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 398
 simple_dn = true
-policies = { server = ["1.3.6.1.4.1.32473.1.1"], client = ["1.3.6.1.4.1.32473.1.2"] }
 ```
 
-`1.3.6.1.4.1.32473` is the IANA documentation PEN (RFC 5612), replace it
-or remove the policies before `yca init`.
+The example `policies` OIDs in `yca.toml` use `1.3.6.1.4.1.32473`, the
+IANA documentation PEN (RFC 5612); replace them before enabling.
 
-### Single token layout
+### Key backend layouts
 
-Add when a single token holds both CA keys:
+Where the CA keys live:
+
+- **Internal**: every key encrypted in the store.
+- **Single token**: every CA key on one token.
+- **Split token**: the root key on its own token, the issuing CA keys on a
+  second one.
+- **Hybrid token**: the root key on a token, the issuing CA keys in the store.
+
+Token labels (`ets`, `ets-root`, `ets-ca`) are examples: the label each
+token was initialized with. Keys on a token are labeled by CA slug
+(`root-e1`, `ca-e1`).
+
+| Key                    | Internal              | Single token | Split token                     | Hybrid token                            |
+| ---------------------- | --------------------- | ------------ | ------------------------------- | --------------------------------------- |
+| `[root] key_backend`   | `internal` (default)  | `pkcs11`     | `pkcs11`                        | `pkcs11`                                |
+| `[root] token_label`   | absent                | absent       | `"ets-root"`                    | `"ets-root"`                            |
+| `[ca.*] key_backend`   | `internal` (default)  | `pkcs11`     | `pkcs11`                        | `internal` (default)                    |
+| `[ca.*] token_label`   | absent                | absent       | `"ets-ca"`                      | absent                                  |
+| `[pkcs11] module`      | absent                | required     | required                        | required                                |
+| `[pkcs11] token_label` | absent                | `"ets"`      | absent                          | absent                                  |
+| Secrets                | `CA_STORE_PASSPHRASE` | `CA_HSM_PIN` | `CA_HSM_ROOT_PIN`, `CA_HSM_PIN` | `CA_HSM_ROOT_PIN`, `CA_STORE_PASSPHRASE` |
+
+`key_backend` is chosen per CA. yca rejects a `pkcs11` issuing CA under
+an `internal` root (it would protect the replaceable key better than the
+anchor), `[pkcs11]` when no CA uses the `pkcs11` backend, a CA's
+`token_label` when its backend is `internal`, and `[pkcs11] token_label`
+when every token-held CA declares a label of its own; a token-held CA
+with neither is rejected too.
+
+If `CA_HSM_ROOT_PIN` is unset, it falls back to `CA_HSM_PIN`.
+
+#### Single token layout
 
 ```toml
 [root]
@@ -179,11 +208,7 @@ module = "/usr/lib/opensc-pkcs11.so"
 token_label = "ets"
 ```
 
-User PIN from `CA_HSM_PIN`.
-
-### Split token layout
-
-Add when root and issuing CA keys are kept on different tokens:
+#### Split token layout
 
 ```toml
 [root]
@@ -192,28 +217,22 @@ token_label = "ets-root"
 
 [ca.tls]
 key_backend = "pkcs11"
-token_label = "ets-sign"
+token_label = "ets-ca"
 
 [pkcs11]
 module = "/usr/lib/opensc-pkcs11.so"
 ```
-User PIN from `CA_HSM_ROOT_PIN` and `CA_HSM_PIN`. If `CA_HSM_ROOT_PIN` is unset,
-it falls back to `CA_HSM_PIN`.
 
-### Hybrid layout
-
-Add when only the root key is kept on token:
+#### Hybrid layout
 
 ```toml
 [root]
 key_backend = "pkcs11"
-token_label = "ets"
+token_label = "ets-root"
 
 [pkcs11]
 module = "/usr/lib/opensc-pkcs11.so"
 ```
-
-A layout where only the issuing CA key is on a hardware token is rejected.
 
 ## CLI
 

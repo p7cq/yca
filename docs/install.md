@@ -179,21 +179,19 @@ which each is locked into the store: `[pki]`, an optional `[pkcs11]`,
   the bare `CN`, which suits TLS and is refused on a CA carrying the `email`
   profile. The CA's own DN is always the full one.
 - `key_backend`, per CA - `internal` (software key, passphrase-encrypted
-  in the store) or `pkcs11` (key on a token/HSM). Three HSM layouts
-  exist: single token (every CA on the shared `[pkcs11] token_label`),
-  split tokens (a `token_label` of its own under `[root]` puts the root
-  key on a separate token) and hybrid (`[root] key_backend = "pkcs11"`
-  with internal issuing keys). In the split and hybrid layouts the root
-  token leaves the safe only for ceremonies: init, `add signing-ca`,
-  `renew signing-ca`, `refresh crl root` and `revoke ca`.
+  in the store) or `pkcs11` (key on a token/HSM). See the
+  [layout](../README.md#key-backend-layouts) table. In the split and hybrid
+  layouts the root token leaves the safe only for ceremonies: init,
+  `add signing-ca`, `renew signing-ca`, `refresh crl root` and `revoke ca`.
 
 ## 3. Only for a `pkcs11` backend
 
 Prepare the token(s) first - SoftHSM: [softhsm.md](softhsm.md); Nitrokey HSM 2:
 [nitrokeyhsm.md](nitrokeyhsm.md) - then set `[pkcs11] module` and the label(s):
 `[pkcs11] token_label` is the default every token-held CA falls back to,
-and a CA may override it with its own `token_label` (required under `[root]`
-in the hybrid layout, where no other CA is on a token to set the default).
+and a CA may override it with its own `token_label` (the split and hybrid
+layouts label each token-held CA and omit the default, which yca rejects
+when no CA falls back to it).
 `yca` makes exactly one login attempt per token per run.
 
 The CLI talks to the token through pcscd, as `yca`. Where pcscd is built
@@ -269,11 +267,11 @@ init generates a passphrase and **shows it exactly once** - put it into
 ```
 
 For every key on a `pkcs11` backend, an existing token keypair must already
-be labeled with the derived CA slug (`<slug_prefix>1`, i.e. root-e1 / ca-e1
-with the default prefixes) to be adopted, and a missing one is generated on
-that key's token under exactly that label. Init needs every configured token
-present; afterwards the split and hybrid layouts need the root token only for
-ceremonies.
+be labeled with the derived CA slug (`<slug_prefix>1`, i.e. root-e1 /
+ca-e1 with the default prefixes) to be adopted, and a missing one is
+generated on that key's token under exactly that label. Init needs every
+configured token present; afterwards the split and hybrid layouts need the
+root token only for ceremonies.
 
 ## 5. CRL refresh timers
 

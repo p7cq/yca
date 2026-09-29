@@ -407,7 +407,7 @@ sudoedit /etc/yca/yca.toml
 # curve = "secp384r1"
 # digest = "SHA-384"
 # valid_days = 1194
-# slug_prefix = "email-e"
+# slug_prefix = "ca-email-e"
 # ee_curve = "secp256r1"
 # ee_digest = "SHA-256"
 # ee_valid_days = 825
@@ -420,8 +420,8 @@ Email CA E1                              # the new CN, on stdout
 
 # 3. Publish (or wait for the timer)
 sudo systemctl start yca-publish.service
-curl -I http://pki.example.ca/email-e1.crt
-curl -I http://pki.example.ca/email-e1.crl
+curl -I http://pki.example.ca/ca-email-e1.crt
+curl -I http://pki.example.ca/ca-email-e1.crl
 ```
 
 The section is locked into the store as the CA is created, so from then
@@ -476,10 +476,9 @@ Do not wait for that: at that point issuance is about to start refusing.
 ### Planned rotation, step by step
 
 Rotation is per issuing CA: it moves one purpose's lineage and leaves
-every other CA on its current generation. With a single issuing CA -
-the ordinary case, and what this runbook assumes - `--purpose` may be
-omitted and is inferred; with several it is required, and the bare
-`signing-ca` alias below becomes `<purpose>-ca`.
+every other CA on its current generation. With a single issuing CA
+`--purpose` may be omitted, otherwise it is required, and the bare
+`signing-ca` alias passed to `yca renew` becomes `<purpose>-ca`.
 
 ```bash
 # 1. Create the next generation (root key online)
@@ -488,9 +487,9 @@ CA E2                                    # the new CN, on stdout
 
 # 2. Confirm the switch: E2 active, E1 retiring
 yca list --cn signing-ca
-# CN     KIND     SERIAL    EXPIRES     STATUS
-# CA E2  signing  1A2B...   2035-01-01  active
-# CA E1  signing  0F9E...   2033-06-01  active     <- still an issuer of record
+# CN           KIND     SERIAL    EXPIRES     STATUS
+# CA E2        signing  1A2B...   2035-01-01  active
+# CA E1        signing  0F9E...   2033-06-01  active  <- still an issuer of record
 
 # 3. Publish the new artifacts (or wait for the hourly timer)
 sudo systemctl start yca-publish.service

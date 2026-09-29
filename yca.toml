@@ -1,6 +1,9 @@
+# yca configuration.
+
 [pki]
 org_name = "Example 会社"
 country_code = "CA"
+# Host serving artifacts and ACME endpoint.
 repository_host = "pki.example.ca"
 
 [root]
@@ -9,6 +12,9 @@ curve = "secp384r1"
 digest = "SHA-384"
 valid_days = 7164
 slug_prefix = "root-e"
+# key_backend = "internal"
+# Optional: token label for split/hybrid layout.
+# token_label = "ets-root"
 
 [ca.tls]
 profiles = ["server", "client"]
@@ -17,19 +23,43 @@ curve = "secp384r1"
 digest = "SHA-384"
 valid_days = 1194
 slug_prefix = "ca-e"
+# key_backend = "internal"
+# Optional: for split token layout.
+# token_label = "ets-ca"
 ee_curve = "secp256r1"
 ee_digest = "SHA-256"
 ee_valid_days = 398
 # Optional: reduce ee subject DN to the bare CN.
 simple_dn = true
+#
 # Optional: bound a CA by who it may issue to.
-# permitted_dns = ["example.ca"]       # also covers www.example.ca
-# permitted_email = ["example.ca"]     # every mailbox at that host;
-#                                      # ".example.ca" means subdomains only
+# permitted_dns = ["example.ca"]
 # Optional: CertificatePolicies OIDs per profile, verbatim.
 # policies = { server = ["1.3.6.1.4.1.32473.1.1"], client = ["1.3.6.1.4.1.32473.1.2"] }
 
-# HSM-held CA keys (optional; default internal).
+# [ca.email]
+# profiles = ["email"]
+# cn = "Email CA E1"
+# curve = "secp384r1"
+# digest = "SHA-384"
+# valid_days = 1194
+# slug_prefix = "ca-email-e"
+# # key_backend = "internal"
+# # Optional: for split token layout.
+# # token_label = "ets-ca"
+# ee_curve = "secp256r1"
+# ee_digest = "SHA-256"
+# ee_valid_days = 825
+# # The email profile requires C and O.
+# # simple_dn = false
+# #
+# # Optional: bound a CA by who it may issue to.
+# # permitted_email = ["example.ca"]
+# # Optional: CertificatePolicies OIDs per profile, verbatim.
+# # policies = { email = ["1.3.6.1.4.1.32473.1.3"] }
+
+# Optional: HSM-held keys.
 # [pkcs11]
 # module = "/usr/lib/opensc-pkcs11.so"
+# Optional: single token layout.
 # token_label = "ets"
