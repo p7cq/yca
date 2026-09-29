@@ -66,6 +66,7 @@ jobs:
                      stage/usr/local/etc/rc.d \
                      stage/usr/local/etc/periodic/daily \
                      stage/usr/local/share/examples/yca/nginx \
+                     stage/usr/local/share/examples/yca/polkit \
                      stage/var/db/yca \
                      stage/srv/yca/pub \
                      stage/srv/yca/webroot
@@ -86,6 +87,8 @@ jobs:
               stage/usr/local/share/examples/yca/crontab.sample
             install -m644 share/nginx/freebsd/yca.conf \
               stage/usr/local/share/examples/yca/nginx/yca.conf
+            install -m644 share/polkit-1/rules.d/50-yca.rules \
+              stage/usr/local/share/examples/yca/polkit/50-yca.rules
 
             abi="$(pkg config ABI)"
             sqlite_version="$(pkg query '%v' sqlite3)"

@@ -182,13 +182,12 @@ label(s) as in the [layout table](../README.md#key-backend-layouts).
 
 The CLI talks to the token through pcscd, as `yca`. Where pcscd is built
 with polkit and denies the account (the journal shows the denial), allow
-it explicitly in `/etc/polkit-1/rules.d/50-yca.rules` (the rule ships as
-`share/polkit-1/rules.d/50-yca.rules`):
+it explicitly with a new rule in `/etc/polkit-1/rules.d/50-yca.rules`:
 
 ```js
 polkit.addRule(function (action, subject) {
-    if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
-         action.id == "org.debian.pcsc-lite.access_card")) {
+    if (action.id == "org.debian.pcsc-lite.access_pcsc" ||
+        action.id == "org.debian.pcsc-lite.access_card") {
         if (subject.user == "root" || subject.user == "yca") {
             return polkit.Result.YES;
         }

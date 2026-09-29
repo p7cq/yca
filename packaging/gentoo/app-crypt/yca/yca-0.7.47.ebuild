@@ -90,6 +90,7 @@ src_install() {
 
 	insinto /usr/share/doc/${PF}/examples
 	doins share/nginx/yca.conf
+	doins share/polkit-1/rules.d/50-yca.rules
 	docompress -x /usr/share/doc/${PF}/examples
 }
 

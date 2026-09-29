@@ -43,6 +43,8 @@ override_dh_auto_install:
 		debian/yca/lib/systemd/system/
 	install -Dm644 share/nginx/yca.conf \
 		debian/yca/usr/share/doc/yca/examples/nginx/yca.conf
+	install -Dm644 share/polkit-1/rules.d/50-yca.rules \
+		debian/yca/usr/share/doc/yca/examples/polkit/50-yca.rules
 
 override_dh_shlibdeps:
 	dh_shlibdeps -- --ignore-missing-info

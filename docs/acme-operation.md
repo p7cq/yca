@@ -126,8 +126,8 @@ the certificate and key to the location set in the NGINX (`yca.conf`). The
 certificate must hold validity until `acme.sh --issue` below is 
 finalized, and the order is accepted only once this certificate enters
 the CA's renewal window: with `--valid 15m`, run step 8 between minute 10
-and minute 15. The CN must match the identifier used in every later step
-- it is used both here and by `acme.sh` (assuming `hostname` resolves to
+and minute 15. The CN must match the identifier used in every later step -
+it is used both here and by `acme.sh` (assuming `hostname` resolves to
 `pki.example.ca`):
 
 ```bash

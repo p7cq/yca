@@ -69,5 +69,7 @@ package() {
     "$pkgdir/usr/lib/systemd/system/"
 
   install -Dm644 share/nginx/yca.conf "$pkgdir/usr/share/$pkgname/nginx/yca.conf"
+  install -Dm644 share/polkit-1/rules.d/50-yca.rules \
+    "$pkgdir/usr/share/$pkgname/polkit/50-yca.rules"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

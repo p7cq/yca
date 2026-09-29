@@ -60,6 +60,7 @@ install -dm755 %{buildroot}/srv/yca/pub %{buildroot}/srv/yca/webroot
 install -dm755 %{buildroot}%{_unitdir}
 install -m644 share/systemd/*.service share/systemd/*.timer %{buildroot}%{_unitdir}/
 install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/nginx/yca.conf
+install -Dm644 share/polkit-1/rules.d/50-yca.rules %{buildroot}%{_docdir}/%{name}/examples/polkit/50-yca.rules
 
 # rpm creates the yca account from the packaged sysusers.d file before
 # installing files, so the yca owners in the file list resolve at install time.
@@ -87,6 +88,7 @@ install -Dm644 share/nginx/yca.conf %{buildroot}%{_docdir}/%{name}/examples/ngin
 %{_tmpfilesdir}/yca.conf
 %{_unitdir}/*
 %doc %{_docdir}/%{name}/examples/nginx/yca.conf
+%doc %{_docdir}/%{name}/examples/polkit/50-yca.rules
 %license LICENSE
 
 %changelog
