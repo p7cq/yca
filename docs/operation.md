@@ -4,8 +4,10 @@ Examples for every issuance and lookup flow the CLI offers. Commands
 assume an initialized store and run as the admin through the packaged
 `yca` wrapper: it runs the CLI as the `yca` account with
 `/etc/yca/yca.toml` and `/var/lib/yca/store`, and the unattended secrets
-from `/etc/yca/yca.env`. A secret kept off disk is exported for the
-ceremony only, and the wrapper passes it on:
+from `/etc/yca/yca.env`. In the split and hybrid layouts the root token
+leaves the safe only for root key ceremonies: `init`, `add signing-ca`,
+`renew signing-ca`, `refresh crl root` and `revoke ca`. Its PIN is
+exported for the ceremony only, and the wrapper passes it on:
 
 ```bash
 read -rs CA_HSM_ROOT_PIN && export CA_HSM_ROOT_PIN  # root token (split/hybrid)
@@ -14,16 +16,15 @@ unset CA_HSM_ROOT_PIN
 ```
 
 Without the wrapper (a development build) the secrets come from the
-environment the same way: `CA_STORE_PASSPHRASE` (keys on the internal
-backend), `CA_HSM_PIN` (signing token), `CA_HSM_ROOT_PIN` (root token,
-falling back to `CA_HSM_PIN`). Through the wrapper the CLI runs in
-`/var/lib/yca` as `yca` and cannot open files in your home, which is why
-the examples pass CSRs on stdin.
+environment the same way (see
+[Key backend layouts](../README.md#key-backend-layouts)). Through the
+wrapper the CLI runs in `/var/lib/yca` as `yca` and cannot open files in
+your home, which is why the examples pass CSRs on stdin.
 
 ## Issue a certificate (CA-generated key)
 
-`create` generates the key on the CA side and delivers cert + unencrypted
-PKCS#8 key under `<store>/ee/`:
+`create` generates the key on the CA side and delivers cert + PKCS#8 key
+under `<store>/ee/`:
 
 ```bash
 yca create server --cn server.example.ca --san dns:example.ca
@@ -55,7 +56,7 @@ A certificate may never outlive its issuer: once the requested validity
 CA's own `notAfter`, issuance (`create` and `sign` alike) is refused - lower
 the configured validity, or renew the signing CA.
 
-## Issue a certificate from a CSR (key stays with the requester)
+## Issue a certificate from a CSR
 
 The CA never sees the private key: the requester generates the keypair and a
 PKCS#10 request, an operator-enrolled identity plus a short-lived nonce gate
@@ -105,9 +106,9 @@ The CA rebuilds the subject DN from its own configuration, so an
 `organizationName` or `countryName` in the CSR is replaced rather than
 carried through.
 
-For the `email` profile this is the only issuance path - `yca create email`
-is refused - and it has rules of its own; see
-[S/MIME certificates](#smime-certificates-the-email-profile) below.
+For the `email` profile this is the only issuance path, with rules of its
+own; see [S/MIME certificates](#smime-certificates-the-email-profile)
+below.
 
 **CA side** - enroll the requester once, then a nonce per issuance:
 
@@ -232,8 +233,8 @@ openssl x509 -in user.crt -noout -subject -nameopt oneline \
 ```
 
 The subject DN is organizational here even when the TLS CA uses
-`simple_dn`: an S/MIME subject must carry `C` and `O`, so the `email`
-profile refuses the knob (see [Installation](install.md)).
+`simple_dn`: an S/MIME subject must carry `C` and `O` (see
+[Configuration](../README.md#configuration)).
 
 **Delivery to a mail client** is a PKCS#12 bundle, and the subscriber
 assembles it: the CA can hand out the certificate and the chain, but never
@@ -326,10 +327,8 @@ yca list --last --tsv        # tab-separated
 
 The CA certificates sit in the same index, so `list --expiring N` (N up to
 825, the longest life any profile allows) and `list --cn <purpose>-ca`
-cover them too. Monitor each issuing CA's expiry externally and well
-ahead: issuance stops as soon as a certificate would outlive its issuer -
-that is, that CA's `ee_valid_days` *before* its own `notAfter` - and
-`--expiring <ee_valid_days>` flags the CA no later than that moment.
+cover them too. See [When to rotate](#when-to-rotate) for watching an
+issuing CA's expiry.
 
 ## Revoke
 
@@ -338,10 +337,9 @@ yca revoke server --cn server.example.ca --reason keyCompromise
 yca revoke client --cn "Client Name"        # reason defaults to unspecified
 ```
 
-Revocation rewrites the signed CRL (`<store>/ca/<signing-slug>.crl`, DER) -
-the only revocation channel: this PKI is CRL-only, there is no OCSP.
-CSR-signed certificates revoke
-exactly like `create`d ones. After a revocation the CN is free for re-issue:
+Revocation rewrites the signed CRL (`<store>/ca/<signing-slug>.crl`, DER).
+CSR-signed certificates revoke exactly like `create`d ones. After a
+revocation the CN is free for re-issue:
 
 ```bash
 yca create server --cn server.example.ca          # or another sign round
@@ -366,27 +364,24 @@ Each scope wants only its own secret: `signing` the signing secret,
 `root` the root secret (`CA_HSM_ROOT_PIN` in the split and hybrid
 layouts - plug the root token in for it). `all` wants both.
 
-Run each scope on a schedule shorter than its horizon
-(`share/systemd/yca-crl-refresh.{service,timer}` does signing daily,
-`share/systemd/yca-root-crl-refresh.{service,timer}` does root quarterly;
-the hourly publish timer picks the re-signed files up). The `signing` scope
-never loads the root key, so the routine daily job does not touch it.
-Each refresh (and each revoke) also prunes entries whose certificate has
-expired, per RFC 5280 3.3: an entry stays until one scheduled CRL issued
-beyond the certificate's validity has carried it, then drops off. The CRL
-therefore holds at most `ee_valid_days` worth of revocations regardless of
-the CA's age; the store's `cert_index` keeps the full revocation history.
-Without a refresh, strict CRL checkers consider a CRL stale once its
-`nextUpdate` passes - and the CRLs are the only revocation channel
-(CRL-only PKI), so the timers matter.
+Run each scope on a schedule shorter than its horizon, as the shipped
+timers do (see [Installation](install.md#5-crl-refresh-timers)); the
+publish timer picks the re-signed files up. The `signing` scope never
+loads the root key, so the routine job does not touch it. Each refresh
+(and each revoke) also prunes entries whose certificate has expired, per
+RFC 5280 3.3: an entry stays until one scheduled CRL issued beyond the
+certificate's validity has carried it, then drops off. The CRL therefore
+holds at most `ee_valid_days` worth of revocations regardless of the CA's
+age; the store's `cert_index` keeps the full revocation history. Without
+a refresh, strict CRL checkers consider a CRL stale once its `nextUpdate`
+passes, so the timers matter.
 
 Trade-off of the 6-month root horizon: relying parties may keep serving a
-cached root CRL until its `nextUpdate`, so revoking the signing CA becomes
-visible to them only after a fresh root CRL is published. After any signing
-CA revocation, run `yca refresh crl root` immediately instead of waiting
-for the quarterly timer (and let the publish timer push it out).
-
-See [Installation](install.md) for the timers and the publishing pipeline.
+cached root CRL until its `nextUpdate`, so revoking a signing CA becomes
+visible to them only after they fetch a fresh one. That window is the
+deliberate trade-off for a root key that stays quiet the rest of the
+year. `revoke ca` re-signs the root CRL itself; publish it at once rather
+than waiting for the publish timer.
 
 ## Add an issuing CA
 
@@ -395,8 +390,7 @@ carries the EE profiles it is allowed to issue. `init` creates every
 purpose the config declares at that moment; one declared later is created
 with its own ceremony, without re-initializing the store.
 
-This is a **root key ceremony**: in the split or hybrid HSM layouts the
-root token has to come out of the safe, exactly as for a rotation.
+This is a **root key ceremony**, exactly as for a rotation.
 
 ```bash
 # 1. Declare it.
@@ -424,16 +418,13 @@ curl -I http://pki.example.ca/ca-email-e1.crt
 curl -I http://pki.example.ca/ca-email-e1.crl
 ```
 
-The section is locked into the store as the CA is created, so from then
-on it behaves like every other: edits to it are warned and ignored.
-Until step 2 runs, the purpose is declared but does not exist, and
-issuance for its profiles is refused rather than silently routed
-somewhere else.
+The section is locked into the store as the CA is created (see
+[Configuration](../README.md#configuration)). Until step 2 runs, the
+purpose is declared but does not exist, and issuance for its profiles is
+refused rather than silently routed somewhere else.
 
-Which CA signs a certificate follows from the profile: `create server`
-goes to whichever CA lists `server`. A profile no CA claims is not a
-configuration error - that PKI simply does not issue it, and issuance
-says so.
+Which CA signs a certificate follows from the profile (see
+[Configuration](../README.md#configuration)).
 
 ## CA rotation - the renewal ceremony
 
@@ -561,15 +552,12 @@ yca-acme ari accelerate --issuer "CA E1" --window 2h
 Step 5 only matters if the ACME frontend is in use: it moves the renewal
 window `renewalInfo` advertises to "now", so clients re-issue on their
 next poll instead of at 67% of their lifetime. See
-[acme-operation.md](acme-operation.md#accelerating-renewal-after-a-ca-compromise).
+[Accelerating renewal after a CA compromise](acme-operation.md#accelerating-renewal-after-a-ca-compromise).
 
 Step 3 rewrites the root CRL with the new entry *and* a fresh
 `nextUpdate`, so there is no `refresh crl root` to run afterwards; what
-is left is publication. That is the price of the 6-month root horizon:
-relying parties may keep serving a cached root CRL until its own
-`nextUpdate`, so clients that fetched it recently keep trusting E1 until
-their copy expires. That window is the deliberate trade-off for a root
-key that stays quiet the rest of the year.
+is left is publication. Clients that fetched the root CRL recently keep
+trusting E1 until their copy expires (see [Revoke](#revoke)).
 
 The order is enforced, not merely advised: `revoke ca` refuses to revoke
 the active issuer, so step 1 cannot be skipped. Revoking the root is

@@ -83,18 +83,24 @@ softhsm2-util --init-token --free --label ets --pin 1234 --so-pin 87654321
 
 ## Second token (split and hybrid layouts)
 
-The split layout keeps the root key on its own token (a `token_label`
-under `[root]`), and the hybrid layout uses only that root token (the
-issuing keys stay internal). Initialize it like the first, with its own
-label and PINs:
+The split and hybrid layouts (see
+[Key backend layouts](../README.md#key-backend-layouts)) keep the root key
+on its own token. Initialize it like the first, with its own label and
+PINs:
 
 ```bash
 softhsm2-util --init-token --free --label ets-root --pin 5678 --so-pin 87654321
 ```
 
-`yca` logs into the root token with `CA_HSM_ROOT_PIN`, falling back to
-`CA_HSM_PIN` when unset (the identical-PIN case). Both tokens are slots
-of the same `[pkcs11] module`; nothing else changes.
+In the split layout the issuing CA keys sit on a token labeled `ets-ca`
+rather than `ets`:
+
+```bash
+softhsm2-util --init-token --free --label ets-ca --pin 1234 --so-pin 87654321
+```
+
+`yca` logs into the root token with `CA_HSM_ROOT_PIN`. Both tokens are
+slots of the same `[pkcs11] module`; nothing else changes.
 
 ## List / inspect
 
@@ -188,8 +194,8 @@ copying its `tokendir` (treat it as secret material).
 ## Differences vs the Nitrokey
 
 - **No PIN lockout**: SoftHSM tolerates wrong PINs forever; the Nitrokey
-  decrements a hardware retry counter (yca makes exactly one login attempt
-  per run for this reason).
+  decrements a hardware retry counter (see
+  [user PIN retry counter](nitrokeyhsm.md#user-pin-retry-counter)).
 - **Keys are files**: no physical protection; dev/test only.
 - **Speed**: on-token operations are local calls - fast enough that the
   `e2e-hsm` suite runs in well under a second.

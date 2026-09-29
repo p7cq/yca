@@ -34,19 +34,9 @@ There are two paths to follow: restrict access with a polkit rule
 
 No other user beyond the designated ones can touch the HSM.
 
-Add a rule in `/usr/local/etc/polkit-1/rules.d/50-yca.rules`:
-
-```js
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.debian.pcsc-lite.access_pcsc" ||
-        action.id == "org.debian.pcsc-lite.access_card") {
-        if (subject.user == "root" || subject.user == "yca") {
-            return polkit.Result.YES;
-        }
-        return polkit.Result.NO;
-    }
-});
-```
+Copy the [polkit rule](install.md#3-only-for-a-pkcs11-backend) from
+`/usr/local/share/examples/yca/polkit/50-yca.rules` to
+`/usr/local/etc/polkit-1/rules.d/50-yca.rules`.
 
 Enable and start dbus and pcscd:
 
@@ -105,8 +95,7 @@ User PIN tries left  : 3
 `yca` makes exactly one login attempt per token per command - never a
 retry loop - so a mistyped PIN costs at most one try. In the split
 layout each Nitrokey is its own token with its own counter; the root
-token's PIN comes from `CA_HSM_ROOT_PIN` (falling back to
-`CA_HSM_PIN`).
+token's PIN comes from `CA_HSM_ROOT_PIN`.
 
 Not every login failure consumes a try, though. OpenSC validates the PIN
 *length* in software (the HSM 2 user PIN is 6-16 characters) and rejects

@@ -150,58 +150,45 @@ sudoedit /etc/yca/yca.toml
 `sudoedit` keeps the file's owner and mode (`root:yca` 0640), `tmpfiles`
 will restore them if modified.
 
-The file is organized in sections, which is also the granularity at
-which each is locked into the store: `[pki]`, an optional `[pkcs11]`,
-`[root]`, and one `[ca.<purpose>]` per issuing CA. Fields to review
-(see [README](../README.md#configuration) for reference):
+The file is organized in sections: `[pki]`, an optional `[pkcs11]`,
+`[root]`, and one `[ca.<purpose>]` per issuing CA. Fields to review:
 
 - `[pki] org_name`, `country_code`, and each CA's `cn` - DN content.
 - `[pki] repository_host` - the host serving the CRL/caIssuers URLs.
   Baked into every issued certificate; not changeable after init.
 - each CA's `slug_prefix` - the stable part of the file/URL identifiers;
-  the full slug is `<prefix><generation>` (root-e1, ca-e1 at init). They
-  must be unique across CAs, and must not differ from one another only by
-  digits.
+  the full slug is `<prefix><generation>` (root-e1, ca-e1 at init).
 - `[ca.<purpose>] profiles` - the EE profiles that CA issues, from
-  `server`, `client`, `email`. A profile belongs to exactly one CA, and
-  that is how issuance picks an issuer. A purpose declared here but not
-  created at init is added later with `yca add signing-ca --purpose <p>`.
-- validities; a CA's `ee_valid_days` doubles as its `--valid` ceiling and
-  is itself capped by the strictest profile that CA lists. Everything is
-  locked at init - re-initialize to change a materialized section.
+  `server`, `client`, `email`. A purpose declared here but not created at
+  init is added later with `yca add signing-ca --purpose <p>`.
+- validities; a CA's `ee_valid_days` doubles as its `--valid` ceiling.
 - `[ca.<purpose>] policies` - optional CertificatePolicies OIDs per
   profile, verbatim (`policies = { server = [...], client = [...] }`); the
   CA itself carries the union over its profiles.
 - `[ca.<purpose>] permitted_dns` / `permitted_email` - optional
   `nameConstraints` subtrees bounding who that CA may issue to.
-- `[ca.<purpose>] simple_dn` - optional, default `false`. Subject DNs are
-  encoded `C`, `O`, `CN`; `true` reduces the subject DN that CA issues to
-  the bare `CN`, which suits TLS and is refused on a CA carrying the `email`
-  profile. The CA's own DN is always the full one.
+- `[ca.<purpose>] simple_dn` - optional; reduces the subject DN to the
+  bare `CN`.
 - `key_backend`, per CA - `internal` (software key, passphrase-encrypted
   in the store) or `pkcs11` (key on a token/HSM). See the
-  [layout](../README.md#key-backend-layouts) table. In the split and hybrid
-  layouts the root token leaves the safe only for ceremonies: init,
-  `add signing-ca`, `renew signing-ca`, `refresh crl root` and `revoke ca`.
+  [layout](../README.md#key-backend-layouts) table.
 
 ## 3. Only for a `pkcs11` backend
 
-Prepare the token(s) first - SoftHSM: [softhsm.md](softhsm.md); Nitrokey HSM 2:
-[nitrokeyhsm.md](nitrokeyhsm.md) - then set `[pkcs11] module` and the label(s):
-`[pkcs11] token_label` is the default every token-held CA falls back to,
-and a CA may override it with its own `token_label` (the split and hybrid
-layouts label each token-held CA and omit the default, which yca rejects
-when no CA falls back to it).
-`yca` makes exactly one login attempt per token per run.
+Prepare the token(s) first, then set `[pkcs11] module` and the
+label(s) as in the [layout table](../README.md#key-backend-layouts).
+`yca` makes one login attempt per token per run (see
+[user PIN retry counter](nitrokeyhsm.md#user-pin-retry-counter)).
 
 The CLI talks to the token through pcscd, as `yca`. Where pcscd is built
 with polkit and denies the account (the journal shows the denial), allow
-it explicitly:
+it explicitly in `/etc/polkit-1/rules.d/50-yca.rules` (the rule ships as
+`share/polkit-1/rules.d/50-yca.rules`):
 
 ```js
 polkit.addRule(function (action, subject) {
     if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
-         action.id == "org.debian.pcsc-lite.access_card") {
+         action.id == "org.debian.pcsc-lite.access_card")) {
         if (subject.user == "root" || subject.user == "yca") {
             return polkit.Result.YES;
         }
@@ -214,8 +201,8 @@ polkit.addRule(function (action, subject) {
 
 Each operation needs only the secrets of the CA keys it touches:
 `CA_STORE_PASSPHRASE` for keys on the `internal` backend, `CA_HSM_PIN`
-for the signing token, `CA_HSM_ROOT_PIN` for the root token (falling
-back to `CA_HSM_PIN`). They reach the CLI in two ways:
+for the signing token, `CA_HSM_ROOT_PIN` for the root token. They reach
+the CLI in two ways:
 
 - **`/etc/yca/yca.env`** - for what the timers and `yca-acme` need
   unattended: the store passphrase or the signing token PIN. Root-only;
@@ -266,12 +253,9 @@ init generates a passphrase and **shows it exactly once** - put it into
 
 ```
 
-For every key on a `pkcs11` backend, an existing token keypair must already
-be labeled with the derived CA slug (`<slug_prefix>1`, i.e. root-e1 /
-ca-e1 with the default prefixes) to be adopted, and a missing one is
-generated on that key's token under exactly that label. Init needs every
-configured token present; afterwards the split and hybrid layouts need the
-root token only for ceremonies.
+For every key on a `pkcs11` backend, init adopts or generates the token
+keypair (see [key backend layouts](../README.md#key-backend-layouts)).
+Init needs every configured token present.
 
 ## 5. CRL refresh timers
 
@@ -352,7 +336,7 @@ against `yca-acme`, curl, the nginx upstream checks):
 yca get ca --cn root-ca > root.pem
 
 # Debian, Gentoo
-sudo install -m 644 root.pem /usr/local/share/ca-certificates/ets-root-e1.crt
+sudo install -m 644 root.pem /usr/local/share/ca-certificates/ETS_Root_E1.crt
 sudo update-ca-certificates
 
 # Fedora, Arch
@@ -388,7 +372,7 @@ curl -s http://pki.example.ca/ca-e1.crl |
 ## 9. Day-to-day operation
 
 See `man yca` (including its OPERATOR WRAPPER section) and
-[operation.md](operation.md). In short:
+[CA operation](operation.md). In short:
 
 - `yca <command>` as the admin; the wrapper runs it as `yca`, with the
   packaged config and store unless `--config`/`--store` are given.
@@ -515,7 +499,7 @@ Trust the root:
 
 ```bash
 yca get ca --cn root-ca > root.pem
-sudo install -m 644 root.pem /usr/local/share/certs/yca-root.crt
+sudo install -m 644 root.pem /usr/local/share/certs/ETS_Root_E1.crt
 sudo certctl rehash
 # libssl, s_client and friends from ports look in /usr/local/openssl
 sudo ln -s /etc/ssl/cert.pem /usr/local/openssl/cert.pem

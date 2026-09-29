@@ -28,8 +28,7 @@ flowchart LR
 - **TLS and S/MIME profiles.** `server`, `client` and `email`, which is
   what fits within Botan offer: the Code Signing BR leave no extendedKeyUsage
   that a code signing CA can carry and Botan will still sign with, so
-  code signing and document signing are not issued. Each profile belongs
-  to one issuing CA, and a CA carries the EKUs of the profiles it lists.
+  code signing and document signing are not issued.
 - **Name constraints are `dNSName` and `rfc822Name` only.** An issuing CA
   can be bounded by `permitted_dns` and `permitted_email`, but not by
   `directoryName`, which the S/MIME BR also require of a technically
@@ -50,7 +49,7 @@ Default configuration file is `./yca.toml` and can be overridden with `--config`
 | ----------------- | ------------------------------------------------------------------------------------------------------------- |
 | `org_name`        | Organization name (`O`)                                                                                       |
 | `country_code`    | Two letter country code (`C`)                                                                                 |
-| `repository_host` | `host[:port]` serving the published artifacts; used to build the CDP and AIA (caIssuers) URLs in certificates |
+| `repository_host` | host serving the published artifacts; used to build the CDP and AIA (caIssuers) URLs in certificates          |
 
 `[pkcs11]`, present only when a CA holds its key on a token
 
@@ -75,7 +74,7 @@ Shared by `[root]` and `[ca.<purpose>]`
 
 | Key               | Description                                                                                                                                              |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `profiles`        | the EE profiles this CA issues, from `server`, `client`, `email`; each profile belongs to exactly one CA                                                 |
+| `profiles`        | the EE profiles this CA issues, from `server`, `client`, `email`                                                                                         |
 | `ee_curve`        | EE key curve                                                                                                                                             |
 | `ee_digest`       | EE signature digest                                                                                                                                      |
 | `ee_valid_days`   | default and ceiling for EE validity under this CA; capped to 398 for `server`/`client`, and to 825 for `email`                                           |
@@ -84,18 +83,35 @@ Shared by `[root]` and `[ca.<purpose>]`
 | `permitted_email` | optional `nameConstraints` permitted subtrees, as FQDNs; `example.ca` means every mailbox at that host, `.example.ca` every mailbox in a subdomain of it |
 | `policies`        | optional `{ <profile> = [OIDs] }`: the CertificatePolicies OIDs each profile's certificates carry, verbatim; only for profiles listed in `profiles`      |
 
-Constraints enforced: curves/digests from the sets above; purposes and
-slug prefixes lowercase kebab-case `[a-z0-9.-]`; `repository_host` a DNS
-host name with optional port (no scheme or path); slug prefixes and CNs
-unique across all CAs, and no two prefixes differing only by digits;
-`ee_valid_days < valid_days` per CA and every CA's `valid_days` below the
-root's.
+Constraints:
 
-Each profile belongs to exactly one CA, which is how issuance picks an
-issuer: `create server` routes to whichever CA lists `server`. A profile
-no CA claims it means this PKI does not issue it, and issuance says so.
-`email` is CSR-only: it is issued through `enroll` / `get nonce` / `sign`,
-and the CA never holds an S/MIME private key.
+- Every key that is neither optional nor defaulted is required and
+  non-empty.
+- At least one `[ca.<purpose>]`; a purpose is lowercase `[a-z0-9.-]` and
+  not `root`.
+- `country_code` is two letters; `repository_host` is a DNS host name (no
+  underscores), with no scheme or path.
+- Curves and digests come from the sets in [Limitations](#limitations).
+- Slug prefixes are lowercase `[a-z0-9.-]`; slug prefixes and CNs are
+  unique across all CAs, and no two prefixes differ only by digits.
+- `valid_days` and `ee_valid_days` are positive; `ee_valid_days` is below
+  the CA's `valid_days` and at most the strictest ceiling of its profiles;
+  every CA's `valid_days` is below the root's.
+- `profiles` lists at least one known profile, and each profile is
+  claimed by exactly one CA.
+- `permitted_dns` / `permitted_email`, when present, list at least one DNS
+  host name; a `permitted_email` entry is a domain, never a mailbox.
+- `policies` keys are profiles the CA lists; each OID is valid, not
+  `anyPolicy`, and not repeated.
+- `simple_dn = true` is refused on a CA listing `email`.
+- `token_label` is at most 32 bytes; the key backend rules are under
+  [Key backend layouts](#key-backend-layouts).
+
+Issuance picks the issuer by profile: `create server` routes to whichever
+CA lists `server`. A profile no CA claims it means this PKI does not issue
+it, and issuance says so.
+`email` is CSR-only, see
+[S/MIME certificates](docs/operation.md#smime-certificates-the-email-profile).
 
 A CA carries the EKUs of the profiles it lists. A CA listing `email` also
 carries `clientAuth`, which the S/MIME Baseline Requirements permit on a
@@ -106,31 +122,23 @@ Policy OIDs are taken as written: any arc, any depth, several per
 profile. A profile without an entry, or with an empty list, gets no
 CertificatePolicies extension. The CA's own certificate includes the union
 of the policies of the profiles it lists, so every policy a leaf asserts
-is included by its issuer. `anyPolicy` is refused and the root carries
-no policies.
+is included by its issuer. The root carries no policies.
 
-`simple_dn` does not apply to the CA's own certificate, and is refused on a
-CA carrying a profile whose subject must be organizational (`email`).
+`simple_dn` does not apply to the CA's own certificate.
 
 Slug prefixes: the stable part of the CA slugs (file/URL names, PKCS#11 
 key labels). The full slug is `<slug_prefix>1` at init; signing CA rotation
 increments its generation.
 
-On-token key labels are the derived slugs: at init an existing keypair
-MUST already be labeled `<slug_prefix>1` to be adopted (curve-checked),
-and a missing one WILL be generated on the token under exactly that
-label (`root-e1` and `ca-e1` in the example configuration below).
-
-`yca init` snapshots the config into the store, which becomes the
-definitive reference: all fields are locked, and later edits to
-`yca.toml` are warned and ignored. The snapshot follows the sections:
+Each section is snapshotted into the store when it is materialized (at
+`yca init`, or at `add signing-ca` for a `[ca.<purpose>]` declared
+later), and the snapshot becomes the definitive reference: its fields are
+locked, later edits to `yca.toml` are warned and ignored, and changing
+them means re-initializing. The snapshot follows the sections:
 `ca_config` holds `[pki]`, `[pkcs11]` and `[root]` under dotted keys,
 `ca_purpose` holds one row per issuing CA.
 
 ### Default configuration
-
-Internal only. Store passphrase from `CA_STORE_PASSPHRASE`; if undefined,
-a passphrase is auto-generated and shown once.
 
 ```toml
 [pki]
@@ -159,7 +167,7 @@ simple_dn = true
 ```
 
 The example `policies` OIDs in `yca.toml` use `1.3.6.1.4.1.32473`, the
-IANA documentation PEN (RFC 5612); replace them before enabling.
+IANA documentation PEN (RFC 5612); replace them before initialization.
 
 ### Key backend layouts
 
@@ -173,7 +181,8 @@ Where the CA keys live:
 
 Token labels (`ets`, `ets-root`, `ets-ca`) are examples: the label each
 token was initialized with. Keys on a token are labeled by CA slug
-(`root-e1`, `ca-e1`).
+(`root-e1`, `ca-e1`): at init an existing keypair with that label is
+adopted (curve-checked), and a missing one is generated under it.
 
 | Key                    | Internal              | Single token | Split token                     | Hybrid token                            |
 | ---------------------- | --------------------- | ------------ | ------------------------------- | --------------------------------------- |
@@ -241,15 +250,14 @@ yca [--config PATH] [--store DIR] <action> <target> [options]
 ```
 
 Global options: `--config` (default `./yca.toml`), `--store` (default
-`./store`), `--version`. Secrets come from the environment:
-`CA_STORE_PASSPHRASE` (keys on the internal backend), `CA_HSM_PIN`
-(signing token) and `CA_HSM_ROOT_PIN` (root token; falls back to
-`CA_HSM_PIN`). An operation needs only the secrets of the CA keys it touches.
+`./store`), `--version`. Secrets come from the environment, see
+[Key backend layouts](#key-backend-layouts). An operation needs only the
+secrets of the CA keys it touches.
 
 In the distribution packages, `yca` on `PATH` is an operator wrapper: it
 runs the CLI as the `yca` service account with the packaged config and
 store as defaults and the unattended secrets from `/etc/yca/yca.env`
-(see `yca(1)` and [docs/install.md](docs/install.md)).
+(see `yca(1)` and [installation](docs/install.md)).
 
 | Command | Purpose |
 |---------|---------|
@@ -335,9 +343,7 @@ Certificate:
 
 - **Install.** Packages for Debian, Fedora, Arch, FreeBSD, and a Gentoo
   overlay.
-- **Issuance.** Either `create` (the CA generates the key and delivers
-  cert + key under `ee/`) or the CSR pipeline `enroll` / `get nonce` /
-  `sign` (delivery via `get`). Servers can instead use ACME.
+- **Issuance.** Either `create` or the CSR pipeline; servers can use ACME.
 - **Revocation and CRLs.** `revoke`, then the CRLs do the rest. Two
   cadences, each on its own systemd timer: the signing CRL performs
   re-publication within 7 days (refreshed daily), the root CRL within
@@ -365,8 +371,8 @@ Certificate:
 ## License
 
 Copyright 2026 p7cq. Licensed under the Apache License, Version 2.0,
-see [LICENSE](LICENSE).
+see [license](LICENSE).
 
 Vendored and module dependencies are under their own permissive licenses
 (BSD, MIT, public domain), see
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[Third-party notices](THIRD_PARTY_NOTICES.md).

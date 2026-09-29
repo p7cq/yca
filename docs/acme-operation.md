@@ -73,9 +73,8 @@ Renewing the endpoint certificate manually works the same way. For an
 automated setup where `yca-acme` issues and renews its own endpoint
 certificate via ACME against itself (dns-01 - the endpoint is not
 reachable for http-01 until nginx is already serving it), see
-"Automated renewal" below. Either way the CA's renewal window applies: an
-order succeeds only once the active endpoint cert has less than 33% of
-its lifetime left, which is exactly when you should be renewing anyway.
+"Automated renewal" below. Either way the CA's renewal window applies
+(see the [renewal cadence](#renewal-cadence-vs-the-cas-renewal-window)).
 
 **CN vs SAN caveat**: uniqueness is keyed on (CN, profile), but TLS
 identity lives in the SANs - modern verifiers ignore the CN entirely. If a
@@ -98,17 +97,8 @@ yca init
 
 #### 2. Trust the root
 
-```bash
-yca get ca --cn root-ca | sudo tee /etc/ssl/certs/ETS_Root_E1.pem
-```
-
-Add the anchor to the system trust store. On Arch Linux (and Fedora; commands
-are OS specific):
-
-```bash
-sudo trust anchor --store /etc/ssl/certs/ETS_Root_E1.pem
-sudo update-ca-trust
-```
+Check the anchor exists in system trust store (added during
+[installation](install.md#7-trust-the-root-on-this-host)); on Arch or Fedora:
 
 ```bash
 sudo trust list | head -3
@@ -126,7 +116,7 @@ sudo install -d -m 700 /etc/yca/acme
 ```
 
 Install the example server block as in
-[Installation, section 6](install.md#6-repository-host-publication-and-reverse-proxy),
+[installation, section 6](install.md#6-repository-host-publication-and-reverse-proxy),
 this time with its HTTPS block.
 
 #### 4. Bootstrap a short-lived certificate
@@ -134,11 +124,11 @@ this time with its HTTPS block.
 Manually issue a short-lived certificate for `repository_host` then copy
 the certificate and key to the location set in the NGINX (`yca.conf`). The
 certificate must hold validity until `acme.sh --issue` below is 
-finalized, and the order is accepted only once this certificate has
-less than 33% of its lifetime left (the CA's renewal window, see above):
-with `--valid 15m`, run step 8 between minute 10 and minute 15. The CN must
-match the identifier used in every later step - it is used both here and by
-`acme.sh` (assuming `hostname` resolves to `pki.example.ca`):
+finalized, and the order is accepted only once this certificate enters
+the CA's renewal window: with `--valid 15m`, run step 8 between minute 10
+and minute 15. The CN must match the identifier used in every later step
+- it is used both here and by `acme.sh` (assuming `hostname` resolves to
+`pki.example.ca`):
 
 ```bash
 yca create server --cn $(hostname) --valid 15m
@@ -200,8 +190,8 @@ export NSUPDATE_ZONE=_acme-challenge.pki.example.ca
 sudo systemctl enable yca-acme.service yca-crl-refresh.timer yca-publish.timer --now
 ```
 
-Enable `yca-root-crl-refresh.timer` as well only when the root key is
-reachable unattended (internal backend or single token).
+Enable `yca-root-crl-refresh.timer` as well where the layout allows it
+(see [CRL refresh timers](install.md#5-crl-refresh-timers)).
 
 #### 7. Register the acme.sh account
 
@@ -542,9 +532,10 @@ See [dns-01 challenges](#dns-01-challenges) below for the full walkthrough
 
 ### Accelerating renewal after a CA compromise
 
-`renewalInfo` normally mirrors the CA's policy window (open at 33% of the
-lifetime remaining, closed at 10%). Two things override it and tell a
-client to replace **now**, with a window that is already open:
+`renewalInfo` normally mirrors the CA's policy window (see
+[renewal cadence](#renewal-cadence-vs-the-cas-renewal-window)). Two
+things override it and tell a client to replace **now**, with a window
+that is already open:
 
 - the certificate is revoked (the frontend records the revocations it
   performs; one revoked through the CLI or by revoking its issuing CA is
@@ -805,8 +796,8 @@ wrapper around it, or use a purpose-built delegated-DNS ACME helper
   execs `yca revoke server --serial <hex>`, so the EXACT certificate dies
   even during a renewal overlap. Operators keep the CLI: `yca revoke server
   --cn <name>` (newest active) or `--serial <hex>` (precise). Either way
-  the signed CRL - the only revocation channel - is rewritten immediately;
-  `yca-crl-refresh.timer` keeps it fresh regardless.
+  the signed CRL is rewritten immediately; `yca-crl-refresh.timer` keeps
+  it fresh regardless.
 - **Certificates issued via ACME are ordinary yca certificates**: AIA/CDP
   point at the repository host, the CRL covers them with no extra
   configuration, `list`/`get` see them, and the store is their source of
@@ -844,9 +835,9 @@ wrapper around it, or use a purpose-built delegated-DNS ACME helper
 - JWS URL binding (`--url`) plus single-use nonces make replay/cross-site
   reuse of captured requests ineffective; TLS is still required by the
   RFC and by common sense.
-- Identifiers are validated with the CA's hostname rules; the CA dictates
-  the certificate profile - a hostile CSR's extensions never survive
-  (same `sign` path as the manual flow).
+- Identifiers are validated with the CA's hostname rules; the CSR goes
+  through the same `sign` path as the manual flow (see
+  [Issue a certificate from a CSR](operation.md#issue-a-certificate-from-a-csr)).
 - The CSR may carry only dNSName SANs and must match the order's
   identifiers exactly: challenges validate dns names and nothing else,
   and the CA's `sign` path honors email/IP SANs from CSRs (trust the
