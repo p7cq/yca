@@ -31,9 +31,8 @@ int main(int argc, char **argv) {
 
   CLI11_PARSE(app, argc, argv);
 
-  // Same audit convention as the CLI: file log next to the store dir
-  // (seeding pollutes the store; it deserves a trace). Errors mirror to
-  // stderr.
+  // Same audit log as the CLI: seeding pollutes the store, it deserves a
+  // trace.
   log::set_file(log::default_path(store_dir));
 
   try {

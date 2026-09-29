@@ -48,9 +48,8 @@ bool two_letters(std::string_view s) {
   return s.size() == 2 && alpha(s[0]) && alpha(s[1]);
 }
 
-// Slugs are declared identifiers that end up verbatim in AIA/CDP URIs
-// (IA5String, ASCII-only) and in file names: lowercase kebab-case.
-// Names (org_name, cn) are DN-only (UTF8String), where any script is legal.
+// Slugs (see config.h) end up verbatim in AIA/CDP URIs and file names:
+// lowercase kebab-case.
 bool valid_slug(std::string_view s) {
   for (char c : s) {
     const bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
@@ -358,11 +357,8 @@ load(const std::filesystem::path &path) {
                 "[{}] simple_dn: the '{}' profile requires an organizational "
                 "subject (C and O beside the CN)",
                 sec, name));
-      // nameConstraints subtrees. A dNSName is a bare FQDN and covers its
-      // subdomains by label suffix. An rfc822Name is a FQDN, optionally
-      // preceded by a full stop, and never a mailbox: "example.ca" means
-      // every mailbox at that host, ".example.ca" every mailbox in a
-      // subdomain of it, and the two do not overlap.
+      // nameConstraints subtrees; see x509ext::NameConstraints for the
+      // matching rules.
       auto read_subtrees = [&](std::string_view field, bool email,
                                std::vector<std::string> &out) {
         const auto *arr = (*t)[field].as_array();

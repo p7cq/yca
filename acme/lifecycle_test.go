@@ -1,7 +1,8 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// Account deactivation (§7.3.6), EAB credential deletion, and protocol GC.
+// Account deactivation (RFC 8555 7.3.6), EAB credential deletion,
+// and protocol GC.
 package main
 
 import (
@@ -104,11 +105,8 @@ func TestGC(t *testing.T) {
 	}
 }
 
-// A kid is base64url, so one in sixty-four would start with '-'. Such a
-// kid reads as an option to Go's flag package and to every shell tool it
-// is pasted into: `eab delete` used to be unable to remove those
-// credentials at all. newID no longer produces that shape, and the parser
-// no longer depends on it either.
+// Regression: `eab delete` could not remove a kid starting with '-' (see
+// newID and splitDeleteKid).
 func TestNewIDShapeAndEntropy(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 4096; i++ {
@@ -116,9 +114,7 @@ func TestNewIDShapeAndEntropy(t *testing.T) {
 		if id == "" || id[0] == '-' {
 			t.Fatalf("newID produced an option-shaped id: %q", id)
 		}
-		// 17 bytes: rejecting a leading '-' must not push a challenge
-		// token under the 128 bits RFC 8555 8.3 requires, and 16 bytes
-		// would sit exactly on that floor.
+		// 17 bytes, see newID.
 		if len(id) != 23 {
 			t.Fatalf("id %q is %d chars, want 23 (17 bytes of entropy)",
 				id, len(id))

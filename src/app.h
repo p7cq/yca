@@ -19,25 +19,17 @@ inline constexpr const char *passphrase_env = "CA_STORE_PASSPHRASE";
 // User PIN of the PKCS#11 signing token.
 inline constexpr const char *pin_env = "CA_HSM_PIN";
 
-// User PIN of the PKCS#11 root token; falls back to pin_env when unset
-// (identical-PIN case and the single-token layout).
+// User PIN of the PKCS#11 root token (fallback: see ca::Secrets).
 inline constexpr const char *root_pin_env = "CA_HSM_ROOT_PIN";
 
 // Default directory holding the store and the delivered artifacts.
 inline constexpr std::string_view store_dir = "store";
 inline constexpr std::string_view store_file = "ca-store.db";
 
-// Configuration table names. `config_table` holds the sections that exist
-// once per store ([pki], [pkcs11], [root]); `purpose_table` holds one row
-// per issuing CA, so a CA declared after init can be locked on its own.
+// Configuration table names: the once-per-store sections and one row per
+// issuing CA.
 inline constexpr std::string_view config_table = "ca_config";
 inline constexpr std::string_view purpose_table = "ca_purpose";
-
-// The cap on ee_valid_days lives in the profile table (profile.h): it is a
-// property of the certificate shape, not of the deployment, and the
-// profiles no longer share one number. The TLS profiles keep the historic
-// CA/Browser Forum limit deliberately - private trust is exempt from the
-// SC-081 reductions (200 days from 2026, 100 from 2027, 47 from 2029).
 
 // SPIFFE ID limits (SPIFFE-ID standard): a trust domain name has "a
 // maximum length of 255 bytes", and implementations "SHOULD NOT generate
@@ -79,9 +71,7 @@ inline constexpr std::size_t nonce_bytes = 32;
 
 // CRL nextUpdate horizons, in days: the re-publication promise made to
 // relying parties (previously Botan's implicit 604800-second default for
-// both). Clamped at signing time to the issuing CA's own notAfter - see
-// ca::detail::crl_next_update - with a floor that keeps the field sane
-// even on an already-expired issuer.
+// both). Clamped at signing time, see ca::detail::crl_next_update.
 //
 // The root CRL gets its own, much longer horizon: the root only certifies
 // the signing CA (routine revocations land on the signing CRL), so it
@@ -95,9 +85,8 @@ inline constexpr int crl_next_update_days = 7;
 inline constexpr int root_crl_next_update_days = 183;
 inline constexpr int crl_next_update_floor_secs = 60 * 60;
 
-// SQLite busy_timeout set on EVERY store connection, in ms - the bounded
-// lock-wait contract. The Go responder's DSN (_busy_timeout=5000)
-// mirrors it; change both together.
+// SQLite busy_timeout set on EVERY store connection, in ms (see
+// ca::detail::open_store).
 inline constexpr int store_busy_timeout_ms = 5000;
 
 // PKCS#11 CK_TOKEN_INFO.label is a fixed 32-byte field.

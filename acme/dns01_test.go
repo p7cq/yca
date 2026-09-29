@@ -34,7 +34,7 @@ func TestWildcardOrderShape(t *testing.T) {
 	authzURL := order["authorizations"].([]any)[0].(string)
 	_, authz := e.post(e.path(authzURL), nil, e.kid, "")
 
-	// RFC 8555 §7.1.4: base identifier + wildcard flag, dns-01 only.
+	// RFC 8555 7.1.4: base identifier + wildcard flag, dns-01 only.
 	id := authz["identifier"].(map[string]any)
 	if id["value"] != "test.ca" || authz["wildcard"] != true {
 		t.Fatalf("authz: %v", authz)

@@ -103,14 +103,13 @@ void reconcile(const cfg::Config &file, const cfg::Config &eff);
 // key usage, subject rules, policy OID, validity ceiling) - see profile.h.
 // Refused for a profile no configured CA claims, and for one the CA may
 // only sign from a CSR. Fails if a certificate for the same CN is still active
-// - unless that cert is inside the renewal window (less than
-// app::renew_window_pct of its lifetime left): then an overlapping successor is
-// issued and the old cert is left to expire. The cert is stored and, together
+// - unless that cert is inside the renewal window (see app::renew_window_pct):
+// then an overlapping successor is issued. The cert is stored and, together
 // with its (unencrypted) key, written under <store>/ee/.
 //
 // `valid_override` (CLI --valid) replaces the ee_valid_days validity
-// for this one issuance; range [5m, ee_valid_days] - the policy is the
-// ceiling, shorter is always allowed - and not persisted anywhere.
+// for this one issuance, within [app::min_valid_override_minutes,
+// ee_valid_days], and is not persisted anywhere.
 bool issue_ee(
     const cfg::Config &config, const std::filesystem::path &store_dir,
     const Secrets &secrets, const std::string &profile, const std::string &cn,
@@ -122,9 +121,9 @@ bool issue_ee(
 bool enroll(const std::filesystem::path &store_dir, const std::string &id);
 
 // Issues (or returns) the enrollment nonce for `id` and writes it to stdout.
-// A pending nonce with at least max(1 minute, 20%) of its validity left is
-// returned as is; otherwise a fresh one (32 random bytes, lowercase hex) is
-// issued with app::max_nonce_validity minutes of validity. No CA secret
+// A pending nonce is returned as is while it has usable life left (see
+// app::nonce_rotate_pct); otherwise a fresh one (lowercase hex) is issued
+// with app::max_nonce_validity minutes of validity. No CA secret
 // needed: the nonce gates a later `sign`, which requires the secret anyway.
 bool get_nonce(const std::filesystem::path &store_dir, const std::string &id);
 
@@ -134,17 +133,16 @@ bool get_nonce(const std::filesystem::path &store_dir, const std::string &id);
 // self-signature (proof-of-possession) is verified on decode.
 //
 // Only the public key, the subject CN and the supported SAN entries
-// (dns/email/ipv4) are taken from the CSR - any other requested extension or
-// DN attribute is ignored and the CA dictates the profile (same extensions
-// as issue_ee). The key must be ECDSA on the configured ee_curve.
-// Profile rules match issue_ee: server needs a hostname CN (DNS:CN is always
-// included), client needs at least one supported SAN.
+// (dns/email/ipv4/uri) are taken from the CSR - any other requested
+// extension or DN attribute is ignored and the CA dictates the profile (same
+// extensions as issue_ee). The key must be ECDSA on the configured ee_curve.
+// Subject rules per profile.h, same as issue_ee.
 //
 // On success the nonce is consumed (same transaction as the insert), the cert
 // is stored/indexed like issue_ee - but nothing is written under <store>/ee/
 // (the CA never sees the private key) - and the CN is printed to stdout for
 // retrieval via `get <profile> --cn`. `valid_override` behaves exactly as in
-// issue_ee ([5m, ee_valid_days], one-shot).
+// issue_ee.
 bool sign_csr(
     const cfg::Config &config, const std::filesystem::path &store_dir,
     const Secrets &secrets, const std::string &profile, const std::string &id,
@@ -152,7 +150,7 @@ bool sign_csr(
     std::optional<std::chrono::seconds> valid_override = std::nullopt);
 
 // Revokes the active `target` certificate (server|client) for `cn` by
-// adding it to the signing CA's CRL (<store>/ca/<signing-slug>.crl).
+// adding it to the CRL of the CA generation that issued it.
 // `reason` is a CRLReason name.
 // A non-empty `serial` (hex, ':' separators tolerated) selects the exact
 // certificate instead - during a renewal overlap, by-CN means "the newest
@@ -180,12 +178,9 @@ enum class CrlScope { Root, Signing, All };
 
 // Re-signs the published CRLs selected by `scope` from their current entry
 // sets: same unexpired revocations, crlNumber+1, fresh thisUpdate/nextUpdate.
-// Entries whose certificate has expired are pruned per RFC 5280 3.3 (see
-// crl_entry_prunable), so a CRL is bounded by the revoked-and-unexpired set,
-// not by the CA's age. Run each scope on a schedule shorter than its
-// nextUpdate horizon (see share/systemd/yca-crl-refresh.* for signing,
-// daily, and share/systemd/yca-root-crl-refresh.* for root, quarterly) so
-// relying parties never see a stale CRL.
+// Expired entries are pruned per crl_entry_prunable, so a CRL is bounded by
+// the revoked-and-unexpired set, not by the CA's age. Run each scope below
+// its nextUpdate horizon (see app::crl_next_update_days).
 bool refresh_crl(const cfg::Config &config,
                  const std::filesystem::path &store_dir, const Secrets &secrets,
                  CrlScope scope = CrlScope::All);

@@ -258,7 +258,7 @@ a3 --issue -d localhost --webroot "$WORK/webroot" --keylength ec-256 \
 grep -q rejectedIdentifier "$WORK/issue3.log" &&
   ok "refusal is rejectedIdentifier" || bad "wrong refusal: $(tail -2 "$WORK/issue3.log")"
 
-# --- account deactivation (RFC 8555 §7.3.6), the account's last word ---
+# --- account deactivation (RFC 8555 7.3.6), the account's last word ---
 a --deactivate-account >"$WORK/deact.log" 2>&1 &&
   ok "acme.sh --deactivate-account" ||
   bad "deactivate: $(tail -3 "$WORK/deact.log")"

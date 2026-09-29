@@ -12,9 +12,9 @@ import (
 	jose "github.com/go-jose/go-jose/v4"
 )
 
-// innerKeyChange builds the §7.3.5 inner JWS: signed by newKey (embedded
-// jwk), same url, NO nonce, over {"account", "oldKey"}. oldKey and the
-// nonce are parameters so tests can bend each rule.
+// innerKeyChange builds the RFC 8555 7.3.5 inner JWS: signed by newKey
+// (embedded jwk), same url, NO nonce, over {"account", "oldKey"}. oldKey
+// and the nonce are parameters so tests can bend each rule.
 func (e *testEnv) innerKeyChange(newKey *ecdsa.PrivateKey, oldPub any,
 	withNonce bool) []byte {
 	e.t.Helper()

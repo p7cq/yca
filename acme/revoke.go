@@ -1,7 +1,7 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// revokeCert (RFC 8555 §7.6): the client presents the certificate to
+// revokeCert (RFC 8555 7.6): the client presents the certificate to
 // revoke and proves control of either the account that ordered it (kid) or
 // the certificate's own private key (jwk). Revocation execs
 // `yca revoke server --serial <hex>` - the serial names the EXACT
@@ -91,9 +91,8 @@ func (s *server) handleRevokeCert(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// A revocation we already performed is answerable without the CA: the
-	// local note is only ever trusted in the affirmative, so its absence
-	// still goes through the CLI, whose refusal remains authoritative.
+	// A revocation we already performed is answerable without the CA (see
+	// MarkCertRevoked).
 	if known, err := s.db.CertBySerial(serial); err == nil && known != nil &&
 		!known.RevokedAt.IsZero() {
 		s.writeProblem(w, problem(http.StatusBadRequest, "alreadyRevoked",

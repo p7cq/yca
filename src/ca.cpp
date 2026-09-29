@@ -59,8 +59,7 @@ void set_perms(const std::filesystem::path &path, fs::perms p) {
               ec.message());
 }
 
-// Artifacts written atomically (tmp + rename), ends up read-only (0400).
-// Rewrites (CRL on revoke, re-issued EE cert) replace the file via rename.
+// Backs detail::write_pem/write_der (see ca_detail.h for the contract).
 bool write_file(const std::filesystem::path &path, std::string_view bytes) {
   fs::path tmp = path;
   tmp += ".tmp";
@@ -88,10 +87,10 @@ bool write_file(const std::filesystem::path &path, std::string_view bytes) {
   return true;
 }
 
-// Serializes store writers across processes: the connection's bounded lock
-// waits (open_store) plus an immediate (reserved) transaction make
-// check-then-insert sequences atomic. Error paths simply return with the
-// transaction open - closing the connection rolls it back.
+// Serializes store writers across processes: an immediate (reserved)
+// transaction on top of open_store's lock waits makes check-then-insert
+// sequences atomic. Error paths simply return with the transaction open -
+// closing the connection rolls it back.
 void begin_write(store::Database &db) {
   // WAL: a long-running reader never blocks a CA write
   // and vice versa.
@@ -439,10 +438,7 @@ std::optional<Botan::CRL_Code> parse_reason(const std::string &s) {
 // roots do. `issuer` is the CA signing this certificate, nullptr for the
 // self-signed root, whose authorityKeyIdentifier is its own subject one.
 //
-// Built as an extension set rather than an X509_Cert_Options because the
-// options struct also owns the subject DN and orders it CN-first; every
-// certificate here is minted through X509_CA::make_cert instead, which
-// takes the DN detail::subject_dn builds.
+// Not via X509_Cert_Options, see detail::subject_dn.
 Botan::Extensions ca_extensions(const std::vector<uint8_t> &pub_key,
                                 const std::string &digest,
                                 std::optional<std::size_t> path_limit,
@@ -501,8 +497,7 @@ void add_signing_pointer_extensions(Botan::Extensions &ext,
 }
 
 // EE pointers reference the issuing CA (issuer of the leaf), plus the
-// policy OIDs the CA declares for the profile. Revocation is CRL-only in this
-// PKI (no OCSP), so AIA carries only caIssuers; the leaf's status channel is
+// policy OIDs the CA declares for the profile. The leaf's status channel is
 // the issuing CRL (CDP).
 void add_ee_pointer_extensions(Botan::Extensions &ext,
                                const cfg::Config &config,
@@ -528,8 +523,7 @@ void add_ee_pointer_extensions(Botan::Extensions &ext,
     add_policies(ext, it->second);
 }
 
-// The key usage a profile's leaf carries: always digitalSignature, plus
-// keyAgreement for a profile whose key also does ECDH.
+// The key usage a profile's leaf carries (see profile::Def).
 Botan::Key_Constraints ee_constraints(const profile::Def &prof) {
   uint32_t bits =
       static_cast<uint32_t>(Botan::Key_Constraints::DigitalSignature);
@@ -599,9 +593,8 @@ std::string fmt_epoch(std::size_t e) {
   return buf;
 }
 
-// Fingerprint of the NEWEST active cert for (cn, kind), via cert_index.
-// During a renewal overlap two certs are active; get/revoke operate on the
-// newest one (revoke again to clear the older).
+// Fingerprint of the NEWEST active cert for (cn, kind), via cert_index
+// (revoke again to clear the older one of an overlap).
 std::optional<std::string> active_fp(store::Database &db, const std::string &cn,
                                      const std::string &kind) {
   auto q = db.stmt(
@@ -615,9 +608,8 @@ std::optional<std::string> active_fp(store::Database &db, const std::string &cn,
   return std::nullopt;
 }
 
-// Fingerprint of the active cert with `serial` (uppercase minimal hex, the
-// store contract's format) and `kind` - the exact-certificate selector:
-// during a renewal overlap by-CN means "the newest", by-serial is precise.
+// Fingerprint of the active cert with `serial` (see normalize_serial)
+// and `kind`.
 std::optional<std::string> active_fp_by_serial(store::Database &db,
                                                const std::string &serial,
                                                const std::string &kind) {
@@ -651,11 +643,9 @@ std::string normalize_serial(const std::string &s) {
 }
 
 // True (and logged) when an active cert for (cn, kind) exists that is not
-// yet inside the renewal window - the uniqueness rule, made renewal-aware:
-// a successor may only be issued once the active cert has less than
-// app::renew_window_pct of its lifetime left. The overlap is what automated
-// rotation needs; the superseded cert is left to expire, never auto-revoked
-// (it may still be serving during the rollout).
+// yet inside the renewal window (see app::renew_window_pct). The
+// superseded cert is never auto-revoked: it may still be serving during
+// the rollout.
 bool blocking_duplicate(store::Database &db, const std::string &cn,
                         const std::string &kind) {
   auto q =
@@ -780,9 +770,8 @@ split_policies(const std::string &s) {
   return out;
 }
 
-// The sections that exist once per store, recorded at init and enforced on
-// every later run: locked, re-init to change any of them. Keys are dotted
-// section paths so a warning names the section the operator has to look at.
+// The sections that exist once per store. Keys are dotted section paths so
+// a warning names the section the operator has to look at.
 KeyValues locked_global(const cfg::Config &c) {
   return {
       {"pki.org_name", c.pki.org_name},
@@ -801,9 +790,8 @@ KeyValues locked_global(const cfg::Config &c) {
   };
 }
 
-// One issuing CA's locked fields. Stored as its own row rather than folded
-// into the global snapshot, so a CA declared after init can be locked when
-// it is created instead of forcing a re-init.
+// One issuing CA's locked fields, stored as its own row so a CA declared
+// after init can be locked when it is created.
 KeyValues locked_purpose(const cfg::SigningCa &ca) {
   return {
       {"profiles", join_profiles(ca.profiles)},
@@ -980,9 +968,8 @@ token_ca_key(p11::Token &token, const std::string &label,
 
 // Loads one CA private key per its CA's backend: from the store
 // ("internal", passphrase-encrypted) or from that CA's token, where `slug`
-// (the generation's) is the key label. `tokens` owns the PKCS#11 sessions
-// and must outlive the returned key; open sessions are reused (see
-// open_token).
+// (the generation's) is the key label. `tokens` owns the sessions (see
+// TokenSessions).
 std::shared_ptr<const Botan::Private_Key>
 ca_key(const cfg::Config &config, const ca::Secrets &secrets,
        Botan::Certificate_Store_In_SQL &store,
@@ -999,9 +986,8 @@ ca_key(const cfg::Config &config, const ca::Secrets &secrets,
   return store.find_key(cert);
 }
 
-// Adopt-or-generate one CA key per its backend: token-resident (adopted by
-// label, or generated on that CA's token), or in-memory ECDSA that the
-// caller persists encrypted into the store.
+// Adopt-or-generate one CA key per its backend; an internal key is
+// in-memory ECDSA that the caller persists encrypted into the store.
 std::shared_ptr<const Botan::Private_Key>
 make_ca_key(const cfg::Config &config, const ca::Secrets &secrets,
             TokenSessions &tokens, const CaSpec &spec, const std::string &slug,
@@ -1015,10 +1001,8 @@ make_ca_key(const cfg::Config &config, const ca::Secrets &secrets,
 }
 
 // The certificate profile of an issuing CA: pathlen 0, the EKUs it may
-// issue - so the CA can never be broader than its purpose - and the
-// pointers at the root that signed it. Shared by the init ceremony,
-// `add signing-ca` and the rotation, which mint the same shape and differ
-// only in the generation and in what they record afterwards.
+// issue and the pointers at the root that signed it. Shared by every
+// ceremony (see mint_ca_generation).
 Botan::Extensions signing_ca_extensions(const cfg::Config &config,
                                         const cfg::SigningCa &ca,
                                         const Botan::X509_Certificate &root,
@@ -1039,10 +1023,9 @@ Botan::Extensions signing_ca_extensions(const cfg::Config &config,
     }
   ext.add_new(
       std::make_unique<Botan::Cert_Extension::Extended_Key_Usage>(ekus));
-  // nameConstraints, when declared: the EKU bounds what a certificate may
-  // be used for, this bounds who it may be issued to. Critical, as RFC
-  // 5280 requires - a verifier that cannot understand the limit must
-  // refuse the chain rather than ignore it.
+  // nameConstraints, when declared. Critical, as RFC 5280 requires - a
+  // verifier that cannot understand the limit must refuse the chain rather
+  // than ignore it.
   if (!ca.permitted_dns.empty() || !ca.permitted_email.empty())
     ext.add_new(
         std::make_unique<x509ext::Name_Constraints>(
@@ -1074,10 +1057,8 @@ bool create(const cfg::Config &config, const fs::path &db_path,
   auto root_key =
       make_ca_key(config, secrets, tokens, root_ca, config.root.slug, rng);
 
-  // The anchor, self-signed. X509::create_self_signed_cert cannot be used:
-  // it builds the subject DN through X509_Cert_Options and would order it
-  // CN-first, so the certificate is assembled here from the same parts -
-  // with the issuer DN equal to the subject, as self-signing means.
+  // The anchor, self-signed. Not via X509::create_self_signed_cert (see
+  // detail::subject_dn): assembled here, issuer DN equal to the subject.
   const auto now = Clock::now();
   const std::vector<uint8_t> root_pub = Botan::X509::BER_encode(*root_key);
   auto root_signer = Botan::X509_Object::choose_sig_format(
@@ -1297,8 +1278,7 @@ std::string resolve_ca_cn(store::Database &db, const cfg::Config &config,
   return selector; // a literal generation CN
 }
 
-// A CN identifies a generation in cert_index and in a CRL's issuer field,
-// so no two CAs, of any purpose or generation, may share one.
+// Runtime twin of the CN uniqueness check in cfg::load.
 bool cn_is_taken(store::Database &db, const CaGen &root,
                  const std::string &cn) {
   if (cn == root.cn || gen_by_cn(db, "signing", cn) ||
@@ -1332,9 +1312,8 @@ bool is_initialized(const fs::path &store_dir) {
     const std::string root_cn = locked("root.cn");
     if (root_cn.empty())
       return false;
-    // Initialization is a historical fact about the ceremony, what
-    // later became of an anchor does not unmake it. What still
-    // matters is that the anchors the config names were actually issued.
+    // What matters is that the anchors the config names were actually
+    // issued.
     auto anchor = [&](const std::string &kind, const std::string &cn) {
       auto s =
           h->stmt("SELECT 1 FROM cert_index WHERE kind=?1 AND cn=?2 LIMIT 1");
@@ -1366,9 +1345,8 @@ bool init(const cfg::Config &config, const fs::path &store_dir,
     log::error("already initialized ({})", db_path.string());
     return false;
   }
-  // Not initialized: init starts from a store_dir that is absent or an empty
-  // directory. Whatever else occupies it (a truncated db, stray leftovers) is
-  // the user's to move or back up - the filesystem is left alone.
+  // Whatever else occupies store_dir (a truncated db, stray leftovers) is
+  // the operator's to move or back up - the filesystem is left alone.
   std::error_code ec;
   const bool present = fs::exists(store_dir, ec);
   const bool usable = !present || (fs::is_directory(store_dir, ec) &&
@@ -1602,9 +1580,6 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
   c.root.curve = S("root.curve");
   c.root.digest = S("root.digest");
   c.root.valid_days = I("root.valid_days");
-  // The prefix is the rotation baseline; the
-  // derived slug is the operative identity for files, URLs and key
-  // labels. Both are snapshotted at init and read back here.
   c.root.slug_prefix = S("root.slug_prefix");
   c.root.slug = S("root.slug");
   c.root.key_backend = S("root.key_backend");
@@ -1644,8 +1619,6 @@ std::optional<cfg::Config> load_config(const fs::path &store_dir) {
 }
 
 void reconcile(const cfg::Config &file, const cfg::Config &eff) {
-  // Every materialized section is locked: warn and ignore any change, the
-  // DB stays authoritative. Re-init to change a locked section.
   auto compare = [](const std::string &section, const KeyValues &fk,
                     const KeyValues &ek) {
     for (std::size_t i = 0; i < fk.size(); ++i)
@@ -1676,9 +1649,6 @@ void reconcile(const cfg::Config &file, const cfg::Config &eff) {
 
 namespace {
 
-// --valid must sit inside the policy: at least the 5-minute floor (below
-// it clock skew kills the certificate on arrival), at most the effective
-// ee_valid_days ceiling - shorter than policy is always allowed.
 bool check_valid_override(const cfg::SigningCa &ca, std::chrono::seconds v) {
   if (v >= std::chrono::minutes(app::min_valid_override_minutes) &&
       v <= std::chrono::days(ca.ee_valid_days))
@@ -1744,7 +1714,6 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   }
   sans.insert(sans.end(), extra_sans.begin(), extra_sans.end());
 
-  // dns/email SANs are IA5String (ASCII); IDN hosts must come as punycode.
   for (const auto &s : sans) {
     if (s.type == San::Type::Dns && !dns_safe(s.value)) {
       log::error("--san dns must be an ASCII hostname (IDN: use punycode): {}",
@@ -1803,7 +1772,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
   if (duplicate())
     return false;
 
-  TokenSessions tokens; // must outlive sign_key (owns the session)
+  TokenSessions tokens;
   std::shared_ptr<const Botan::Private_Key> sign_key;
   try {
     sign_key =
@@ -1851,8 +1820,6 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
     }
   }
 
-  // The same extension set and the same DN rules as the CSR path; only the
-  // origin of the key differs.
   const std::vector<uint8_t> pub = Botan::X509::BER_encode(ee_key);
   Botan::X509_CA issuer(*sign_cert, *sign_key, ca_cfg->ee_digest, rng);
   const auto tp = Clock::now();
@@ -1895,9 +1862,8 @@ void ensure_enrollment(store::Database &db) {
                   "consumed INTEGER NOT NULL DEFAULT 1)");
 }
 
-// Resolves the sign --csr argument: inline PEM (a single-line paste works -
-// Botan's PEM decoder ignores line structure), "-" for stdin, or a file path.
-// PEM vs DER is auto-detected later, at PKCS#10 decode.
+// Resolves the sign --csr argument (see ca::sign_csr). A single-line PEM
+// paste works: Botan's PEM decoder ignores line structure.
 std::optional<std::string> read_csr_bytes(const std::string &src) {
   if (src.starts_with("-----BEGIN"))
     return src;
@@ -1986,10 +1952,8 @@ bool get_nonce(const fs::path &store_dir, const std::string &id) {
   const std::size_t validity_min = q->get_size_t(2);
   const bool consumed = q->get_size_t(3) != 0;
 
-  // Return the pending nonce while it has usable life left - at least
-  // max(nonce_rotate_floor_secs, nonce_rotate_pct% of its validity);
-  // otherwise rotate. Rotation is free (nothing references the old nonce),
-  // so no grace-period corner cases.
+  // Rotation is free (nothing references the old nonce), so no
+  // grace-period corner cases.
   const std::size_t now = now_epoch();
   const std::size_t expiry = issued + validity_min * 60;
   const std::size_t min_left =
@@ -2033,8 +1997,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   if (valid_override && !check_valid_override(*ca_cfg, *valid_override))
     return false;
   // Parse and police the CSR first: cheap failures before any store or key
-  // access. PKCS#10 decode already verifies the CSR's self-signature
-  // (proof-of-possession); a tampered or unsigned request never parses.
+  // access.
   auto bytes = read_csr_bytes(csr_src);
   if (!bytes)
     return false;
@@ -2056,10 +2019,6 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  // Subject DN: only the CN is taken from the request, and even that only
-  // as a name - the DN itself is rebuilt from the CA's own configuration
-  // (detail::subject_dn), so an organization or country the requester
-  // asked for is never the one that ends up in the certificate.
   // Modern ACME clients (certbot) send SAN-only CSRs with an empty subject:
   // the CN is derived from the first dns SAN then (deterministic - Botan
   // keeps SANs sorted). More than one CN stays an error.
@@ -2118,8 +2077,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   Botan::AlternativeName an;
   switch (prof->subject) {
   case profile::Subject::DnsCn:
-    // Same CN rules as issue_ee: hostname CN, always present as DNS:CN (the
-    // set-backed AlternativeName dedups if the CSR listed it too).
+    // The set-backed AlternativeName dedups DNS:CN if the CSR listed it too.
     if (!dns_safe(cn)) {
       log::error("{} CN must be an ASCII hostname [A-Za-z0-9.*-]: '{}'",
                  profile, cn);
@@ -2182,9 +2140,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   if (outlives_issuer(*sign_cert, validity))
     return false;
 
-  // Fail fast before the signing key lookup (seconds on NK HSM): nonce and
-  // uniqueness are answerable from the DB alone. The write lock below
-  // repeats both checks authoritatively.
+  // Fail fast (see issue_ee): nonce and uniqueness.
   ensure_cert_index(*dbh);
   ensure_enrollment(*dbh);
   auto nonce_rejected = [&] {
@@ -2211,7 +2167,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   if (nonce_rejected() || duplicate())
     return false;
 
-  TokenSessions tokens; // owns the sessions; must outlive sign_key
+  TokenSessions tokens;
   std::shared_ptr<const Botan::Private_Key> sign_key;
   try {
     sign_key =
@@ -2226,9 +2182,8 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  // Nonce check, uniqueness check, insert and nonce consumption share one
-  // write lock: a nonce cannot be double-spent and a concurrent create for
-  // the same (cn, profile) cannot slip in between.
+  // Nonce check and consumption share the write lock with the uniqueness
+  // check and insert (as in issue_ee): a nonce cannot be double-spent.
   begin_write(*dbh);
   ensure_cert_index(*dbh);
   ensure_enrollment(*dbh);
@@ -2256,9 +2211,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   consume->spin();
   commit_write(*dbh);
 
-  // No <store>/ee/ artifacts: the CA never sees the requester's private key,
-  // and delivery is `get <profile> --cn`. stdout carries just the CN so the
-  // output pipes into it.
+  // stdout carries just the CN so the output pipes into `get`.
   log::info("issued {} certificate for CN '{}' from CSR (requested by '{}')",
             profile, cn, id);
   log::to_stdout("{}", cn);
@@ -2284,9 +2237,7 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   auto dbh = open_store(db);
   Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
 
-  // Fail fast before the signing key lookup (seconds on NK HSM): whether an
-  // active cert exists is answerable from cert_index alone. The write lock
-  // below repeats the lookup authoritatively.
+  // Fail fast (see issue_ee): whether an active cert exists.
   const std::string &subject_cn = cn;
   const std::string sel = normalize_serial(serial);
   auto lookup = [&](store::Database &d) {
@@ -2324,9 +2275,7 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
   const CaGen sign = *issuing;
-  // The entry goes on the issuing generation's CRL, so it is that CA's key
-  // and secret that matter - not those of whichever CA issues the profile
-  // today.
+  // So it is that CA's key and secret.
   const cfg::SigningCa *ca_cfg = config_of(config, sign);
   if (!ca_cfg)
     return false;
@@ -2349,7 +2298,7 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  TokenSessions tokens; // must outlive sign_key (owns the sessions)
+  TokenSessions tokens;
   std::shared_ptr<const Botan::Private_Key> sign_key;
   try {
     sign_key =
@@ -2378,8 +2327,8 @@ bool revoke(const cfg::Config &config, const fs::path &store_dir,
   }
 
   Botan::X509_CA ca(*sign_cert, *sign_key, ca_cfg->digest, rng);
-  // Carry forward only the unexpired entries (RFC 5280 3.3 pruning), plus
-  // the new one; make_crl continues the crlNumber that update_crl would.
+  // Carry forward the entries not pruned per crl_entry_prunable, plus the
+  // new one; make_crl continues the crlNumber that update_crl would.
   auto entries = prune_crl_entries(*dbh, prev);
   const std::size_t pruned = prev.get_revoked().size() - entries.size();
   entries.emplace_back(*target_cert, *reason);
@@ -2444,8 +2393,6 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
 
   const CaGen root = active_ca(*dbh, config, "root");
 
-  // A self-signed root cannot be revoked by anything below it: dropping a
-  // trust anchor is the relying parties' job, not the CA's.
   if (selector == "root-ca" || selector == root.cn) {
     log::error("the root cannot be revoked; remove it from the trust stores "
                "and re-initialize");
@@ -2459,9 +2406,7 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
     log::error("no issuing CA generation named '{}'", cn);
     return false;
   }
-  // Revoking the issuer of record would leave that purpose with nothing to
-  // issue with, and the successor is one command away with the root key
-  // already in hand. Only the victim's own lineage matters here.
+  // Only the victim's own lineage matters here.
   const CaGen active = active_ca(*dbh, config, victim->purpose);
   if (victim->gen == active.gen) {
     log::error("'{}' is the active issuer for '{}'; run '{} renew signing-ca "
@@ -2491,7 +2436,7 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  TokenSessions tokens; // must outlive root_key (owns the sessions)
+  TokenSessions tokens;
   std::shared_ptr<const Botan::Private_Key> root_key;
   try {
     root_key =
@@ -2506,17 +2451,14 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
     return false;
   }
 
-  // Same lock discipline as revoke: read-CRL -> write-CRL under the write
-  // lock. This is the entry that stops the root CRL being structurally
-  // empty, and it carries a fresh nextUpdate of its own, so nothing needs
-  // a separate root refresh afterwards - only publication.
+  // Same lock discipline as revoke. This is the entry that stops the root
+  // CRL being structurally empty.
   begin_write(*dbh);
   ensure_cert_index(*dbh);
   Botan::X509_CRL prev(root_crl_path.string());
   // `root_ca` is the CaSpec here, so the CRL issuer is named for its role.
   Botan::X509_CA root_issuer(*root_cert, *root_key, config.root.digest, rng);
-  // Same RFC 5280 3.3 pruning as the signing CRL: an expired signing CA
-  // generation leaves the root CRL after its final scheduled appearance.
+  // Pruned per crl_entry_prunable, as the signing CRL.
   auto entries = prune_crl_entries(*dbh, prev);
   const std::size_t pruned = prev.get_revoked().size() - entries.size();
   entries.emplace_back(*victim_cert, *reason);
@@ -2581,9 +2523,8 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
   Botan::Certificate_Store_In_SQL store(dbh, secrets.passphrase, rng);
   const fs::path ca_dir = store_dir / "ca";
 
-  // One job per CA whose CRL is re-signed. A rotation leaves retiring
-  // generations behind and each keeps publishing its own CRL until the
-  // last certificate it issued is gone, so the scope is a set, not one CA.
+  // One job per CA whose CRL is re-signed: the scope is a set, not one CA
+  // (see detail::live_cas).
   struct Job {
     CaGen ca;
     CaSpec spec;
@@ -2632,11 +2573,8 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
     return true;
   }
 
-  // Keys through per-kind token sessions (backend pkcs11), loaded before the
-  // write lock: a NK HSM lookup takes seconds and other writers wait at most
-  // busy_timeout. The signing scope never touches the root key or its token
-  // - that is the point of the separate root cadence
-  // (root_crl_next_update_days vs crl_next_update_days).
+  // Keys through per-kind token sessions (backend pkcs11), loaded before
+  // the write lock: a NK HSM lookup takes seconds.
   TokenSessions tokens;
   try {
     for (Job &j : jobs)
@@ -2652,11 +2590,7 @@ bool refresh_crl(const cfg::Config &config, const fs::path &store_dir,
       return false;
     }
 
-  // Same lock discipline as revoke: read-CRL -> write-CRL under the write
-  // lock, so a refresh cannot lose a concurrent revocation's entry. The
-  // refresh re-signs the unexpired revocation set (RFC 5280 3.3 pruning,
-  // see ca.h crl_entry_prunable) with crlNumber+1 and a fresh
-  // thisUpdate/nextUpdate.
+  // Same lock discipline as revoke.
   begin_write(*dbh);
   bool ok = true;
   std::string refreshed;
@@ -2770,8 +2704,7 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
   }
 
   // A CRL is a file artifact; the file is named by the CA slug, guaranteed
-  // to be ASCII. The aliases follow the active generation; an explicit CN
-  // reaches whichever generation carries it.
+  // to be ASCII.
   if (target == "crl") {
     auto dbh_crl = open_store(db);
     const std::string cn = resolve_ca_cn(*dbh_crl, config, selector);

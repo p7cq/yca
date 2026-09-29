@@ -85,8 +85,7 @@ public:
   // overload below, which is the Botan-facing one.
   void create_table(std::string_view schema);
 
-  // Botan::SQL_Database overrides - for Certificate_Store_In_SQL only, see
-  // above. Not called anywhere else in yca.
+  // Botan::SQL_Database overrides.
   void create_table(const Botan::SQL_Database::Table_Schema &schema) override;
   std::shared_ptr<Botan::SQL_Database::Statement>
   new_statement(std::string_view sql) const override;

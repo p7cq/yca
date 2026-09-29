@@ -82,8 +82,9 @@ struct SigningCa : CaFields {
   // certificate: a CA DN is always the full C, O, CN.
   //
   // The default is the full DN because that is the shape a directoryName
-  // name constraint can contain. A profile whose subject must be
-  // organizational (profile::Def::full_dn) refuses the knob at load.
+  // name constraint can contain (see ca::detail::subject_dn). A profile whose
+  // subject must be organizational (profile::Def::full_dn) refuses the knob at
+  // load.
   bool simple_dn = false;
   // Optional nameConstraints permitted subtrees. Absent means the CA is
   // bounded only by its EKU, which bounds what a certificate may be used
@@ -109,9 +110,7 @@ struct Config {
   // The CA named by `purpose`, or nullptr if none carries that name.
   const SigningCa *ca(const std::string &purpose) const;
 
-  // The CA that issues `profile`, or nullptr if no configured CA claims
-  // it. This is how issuance picks an issuer without naming one: load
-  // guarantees at most one CA claims any given profile.
+  // The CA that issues `profile`, or nullptr if no configured CA claims it.
   const SigningCa *ca_for_profile(const std::string &profile) const;
 };
 

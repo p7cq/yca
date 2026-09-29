@@ -3,8 +3,6 @@
 
 // ACME Renewal Information (RFC 9773): unauthenticated GET keyed by
 // base64url(AKI keyIdentifier) "." base64url(DER serial content octets).
-// The suggested window mirrors the CA's renewal-window policy, so clients
-// renew exactly when the CA will accept a successor.
 package main
 
 import (
@@ -28,12 +26,10 @@ const (
 	closePct = 10
 )
 
-// Spread for a certificate that must be replaced at once. Issuance is
-// serialized behind a single CA (one PKCS#11 login per exec), so a fleet
-// arriving together only queues; clients randomize inside the window
-// instead. Revocation of one certificate is urgent but small, hence the
-// short default; an operator accelerating a whole issuer sizes that case
-// with `yca-acme ari accelerate --window`.
+// Spread for a certificate that must be replaced at once. Revocation of
+// one certificate is urgent but small, hence the short default; an
+// operator accelerating a whole issuer sizes that case with
+// `yca-acme ari accelerate --window`.
 const revokedWindow = time.Hour
 
 // derIntBytes returns the DER INTEGER content octets of a serial: big.Int
@@ -69,10 +65,8 @@ func leafOf(chainPEM string) (*x509.Certificate, error) {
 
 // replaceNow reports the window to suggest when a certificate should be
 // replaced at once rather than at its policy age, and how long the fleet
-// has to get there. Two things call for it: the certificate is revoked, or
-// an operator accelerated everything its issuer signed (a CA compromise,
-// see docs/ca-rotation.md). Callers spread themselves across the window,
-// which matters because issuance is serialized behind one CA.
+// has to get there: the certificate is revoked, or its issuer was
+// accelerated (see ariMain).
 func (s *server) replaceNow(cert *Cert) (time.Duration, bool) {
 	if !cert.RevokedAt.IsZero() {
 		return revokedWindow, true

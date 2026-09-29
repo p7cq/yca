@@ -19,11 +19,11 @@ namespace x509ext {
 // GeneralName forms this PKI constrains are supported: a CA issuing TLS
 // certificates is bounded by dNSName, one issuing S/MIME by rfc822Name.
 //
-// There are deliberately no excluded subtrees and no directoryName. A
-// directoryName constraint would reject every leaf this PKI issues, whose
-// DN carries a CN and nothing else, so no non-empty subtree can contain
-// it; the S/MIME BR ask for one, and meeting that would mean putting O and
-// C into leaf DNs first.
+// There are no excluded subtrees and no directoryName: this encoder does
+// not emit them. A directoryName subtree fits only leaves issued with the
+// full DN (C, O, CN, see ca::detail::subject_dn); a [ca.*] simple_dn leaf
+// carries the CN alone, which no non-empty subtree can contain. The S/MIME
+// BR ask for one (7.1.5).
 struct NameConstraints {
   // Bare FQDNs. RFC 5280 dNSName matching is by label suffix, so
   // "example.ca" also covers "www.example.ca".

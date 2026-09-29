@@ -1,7 +1,7 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// finalize (RFC 8555 §7.4): the CSR arrives here, and issuance execs the
+// finalize (RFC 8555 7.4): the CSR arrives here, and issuance execs the
 // yca CLI - the single owner of the CA store. The pipeline mirrors the
 // manual flow: get nonce -> sign server --csr - (DER on stdin, CN on
 // stdout) -> get server --chain. One issuance at a time:
@@ -26,7 +26,7 @@ import (
 )
 
 // valid is passed to `yca sign --valid` verbatim when non-empty; the CA
-// validates it ([5m, ee_valid_days]) - the daemon only requests.
+// validates it - the daemon only requests.
 type ycaRunner struct {
 	bin, config, store, id, valid string
 	mu                            sync.Mutex
@@ -154,7 +154,7 @@ func (s *server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 			"CSR carries non-dns SANs"))
 		return
 	}
-	// The CSR must request exactly the order's identifiers (RFC 8555 §7.4);
+	// The CSR must request exactly the order's identifiers (RFC 8555 7.4);
 	// the CN, when present, must be one of them.
 	names := map[string]bool{}
 	for _, d := range csr.DNSNames {

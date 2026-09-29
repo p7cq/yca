@@ -1,9 +1,8 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// Orders and authorizations (RFC 8555 §7.4, §7.5). dns identifiers only,
-// no wildcards (they require dns-01 - a later phase), and every identifier
-// must pass the account's EAB --allow policy.
+// Orders and authorizations (RFC 8555 7.4, 7.5). dns identifiers only;
+// wildcards only with dns-01 enabled.
 package main
 
 import (
@@ -69,7 +68,7 @@ func (s *server) handleNewOrder(w http.ResponseWriter, r *http.Request) {
 	for _, id := range payload.Identifiers {
 		name := strings.ToLower(id.Value)
 		// A single leading "*." label is the only wildcard form (RFC 8555
-		// §7.1.3); it restricts the authz to dns-01.
+		// 7.1.3); it restricts the authz to dns-01.
 		base, wildcard := strings.CutPrefix(name, "*.")
 		switch {
 		case id.Type != "dns":
@@ -111,7 +110,7 @@ func (s *server) handleNewOrder(w http.ResponseWriter, r *http.Request) {
 	var authzs []*Authz
 	for _, name := range names {
 		// The wildcard authz carries the BASE domain plus a flag (RFC 8555
-		// §7.1.4); dns-01 validates _acme-challenge.<base> either way.
+		// 7.1.4); dns-01 validates _acme-challenge.<base> either way.
 		base, wildcard := strings.CutPrefix(name, "*.")
 		a := &Authz{
 			ID:         newID(),

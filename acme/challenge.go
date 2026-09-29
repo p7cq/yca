@@ -1,7 +1,7 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// Challenge validation (RFC 8555 §8.3 http-01, §8.4 dns-01). Validation
+// Challenge validation (RFC 8555 8.3 http-01, 8.4 dns-01). Validation
 // runs inline in the challenge POST - at private-CA scale there is nothing
 // to queue, and clients poll the challenge/authz anyway.
 package main
@@ -27,7 +27,7 @@ type http01Validator struct {
 // validate fetches http://<name>:<port>/.well-known/acme-challenge/<token>
 // and compares the body with the expected key authorization.
 func (v *http01Validator) validate(name, token, keyAuth string) error {
-	client := &http.Client{Timeout: 10 * time.Second} // follows ≤10 redirects
+	client := &http.Client{Timeout: 10 * time.Second} // up to 10 redirects
 	url := fmt.Sprintf("http://%s:%d/.well-known/acme-challenge/%s",
 		name, v.port, token)
 	resp, err := client.Get(url)
@@ -55,8 +55,8 @@ type dns01Validator struct {
 }
 
 // validate checks _acme-challenge.<name> TXT against
-// base64url(SHA-256(key authorization)) (RFC 8555 §8.4). For a wildcard
-// authorization `name` is the base domain - the same record proves both.
+// base64url(SHA-256(key authorization)) (RFC 8555 8.4). For a wildcard
+// authorization `name` is the base domain.
 func (v *dns01Validator) validate(name, keyAuth string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -99,7 +99,7 @@ func (s *server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 			"no such challenge"))
 		return
 	}
-	// RFC 8555 §7.5.1: challenge responses MUST link the parent authz
+	// RFC 8555 7.5.1: challenge responses MUST link the parent authz
 	// (certbot refuses to proceed without it; acme.sh does not care).
 	w.Header().Set("Link",
 		fmt.Sprintf(`<%s>;rel="up"`, s.url("/acme/authz/"+authz.ID)))

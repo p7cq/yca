@@ -1,7 +1,7 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// newAccount (RFC 8555 §7.3): registration is EAB-gated - no anonymous
+// newAccount (RFC 8555 7.3): registration is EAB-gated - no anonymous
 // accounts. The EAB credential's --allow patterns become the account's
 // identifier policy.
 package main
@@ -27,7 +27,7 @@ type newAccountPayload struct {
 	ExternalAccountBinding json.RawMessage `json:"externalAccountBinding"`
 }
 
-// accountJSON is the resource representation (RFC 8555 §7.1.2).
+// accountJSON is the resource representation (RFC 8555 7.1.2).
 func (s *server) accountJSON(a *Account) map[string]any {
 	return map[string]any{
 		"status": a.Status,
@@ -102,7 +102,7 @@ func (s *server) handleNewAccount(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusCreated, s.accountJSON(acct))
 }
 
-// handleAccount serves POST-as-GET, deactivation (RFC 8555 §7.3.6) and
+// handleAccount serves POST-as-GET, deactivation (RFC 8555 7.3.6) and
 // no-op updates on the account object.
 func (s *server) handleAccount(w http.ResponseWriter, r *http.Request) {
 	req, p := s.verifyJWS(r, false)

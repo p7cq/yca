@@ -35,7 +35,7 @@ import (
 var version = "dev"
 
 // tsWriter prefixes each log line with a timestamp matching the CA's
-// yca.log format (see responder/main.go).
+// yca.log format (see src/log.h).
 type tsWriter struct{ w io.Writer }
 
 func (t tsWriter) Write(p []byte) (int, error) {
@@ -177,15 +177,14 @@ func (s *server) handleNewNonce(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Replay-Nonce", nonce)
 	w.Header().Set("Cache-Control", "no-store")
-	if r.Method == http.MethodGet { // RFC 8555 §7.2: GET gets 204
+	if r.Method == http.MethodGet { // RFC 8555 7.2: GET gets 204
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-// Protocol-state garbage collection: orders/authzs expire 24 h after
-// creation (RFC-visible in the resource); the grace period keeps
+// Protocol-state garbage collection (see DB.GC); the grace period keeps
 // recently-expired objects readable a while longer so clients can still
 // fetch the error off a failed order.
 const (
@@ -308,8 +307,7 @@ func eabMain(args []string) {
 			fmt.Fprintln(os.Stderr, "usage: yca-acme eab delete [--state db] <kid>")
 			os.Exit(2)
 		}
-		// The bound accounts survive, but allowed() denies every order
-		// once the credential is gone - this IS the containment step.
+		// This IS the containment step (see DB.DeleteEAB).
 		bound, err := db.AccountsByEAB(kid)
 		if err != nil {
 			log.Fatalf("accounts: %v", err)

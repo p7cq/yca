@@ -13,8 +13,7 @@ namespace {
 
 namespace P = Botan::PKCS11;
 
-// CK_TOKEN_INFO.label is a fixed 32-byte field, space-padded, not
-// NULL-terminated.
+// CK_TOKEN_INFO.label is space-padded, not NULL-terminated.
 std::string token_label(const P::TokenInfo &info) {
   std::string s(reinterpret_cast<const char *>(info.label), sizeof(info.label));
   while (!s.empty() && s.back() == ' ')
@@ -35,10 +34,8 @@ Botan::EC_AffinePoint public_point_of(const P::PKCS11_ECDSA_PublicKey &pub,
   return *pt;
 }
 
-// One loaded module across live Tokens: C_Initialize may run only once,
-// and the split layout opens two Tokens on slots of the same module. The
-// config carries a single pkcs11_module, so one path covers every Token;
-// the module finalizes with the last Token holding it.
+// One loaded module across live Tokens (see Token). The config carries a
+// single pkcs11_module, so one path covers every Token.
 std::shared_ptr<Botan::PKCS11::Module> shared_module(const std::string &path) {
   static std::weak_ptr<Botan::PKCS11::Module> cache;
   static std::string loaded;

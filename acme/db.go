@@ -1,9 +1,8 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// ACME protocol state. This database belongs to the frontend alone - CA
-// state lives in the yca store, which yca-acme never opens (issuance goes
-// through the yca CLI; see finalize.go.
+// ACME protocol state, owned by this frontend alone (see the package doc
+// in main.go).
 package main
 
 import (
@@ -405,7 +404,7 @@ func (d *DB) SetAuthzStatus(id, status string) error {
 type Challenge struct {
 	ID        string
 	AuthzID   string
-	Type      string // http-01
+	Type      string // http-01 | dns-01
 	Token     string
 	Status    string // pending -> processing -> valid | invalid
 	Validated time.Time
@@ -502,7 +501,7 @@ type Cert struct {
 	NotBefore time.Time
 	NotAfter  time.Time
 	// Set when this frontend revoked the certificate. Zero means "no local
-	// record", not "active": the CA is the source of truth.
+	// record" (see MarkCertRevoked).
 	RevokedAt     time.Time
 	RevokedReason string
 }

@@ -42,7 +42,7 @@ Botan::X509_DN subject_dn(const cfg::Pki &pki, const std::string &cn,
                           bool simple);
 
 // Opens a store connection with the store contract's bounded lock waits
-// (busy_timeout ≥ 5000 ms): even pure readers can hit SQLITE_BUSY
+// (busy_timeout >= 5000 ms): even pure readers can hit SQLITE_BUSY
 // for a moment - e.g. the exclusive lock of the WAL checkpoint a closing
 // writer runs on exit - so every connection waits instead of failing instantly.
 std::shared_ptr<store::Database> open_store(const std::filesystem::path &db);

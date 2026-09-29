@@ -181,10 +181,8 @@ int main(int argc, char **argv) {
                 "append the issuers, up to but excluding the root (PEM only)");
 
   auto *list = app.add_subcommand("list", "list certificates by filter");
-  // The window cap is the longest life any profile allows, not an
-  // arbitrary year: `--expiring` must be able to cover a full EE lifetime,
-  // so the issuing CA becomes visible no later than the moment issuance
-  // starts refusing.
+  // The window cap is profile::max_valid_days(), so an expiring issuing CA
+  // becomes visible no later than the moment issuance starts refusing.
   const CLI::Range window(1, profile::max_valid_days());
   int l_expiring = app::default_list_window_days;
   int l_expired = app::default_list_window_days;
@@ -226,8 +224,7 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  // Log file next to the store dir. An empty --log falls back to the
-  // default, an unwritable path is fatal.
+  // An empty --log falls back to the default log path.
   if (lo_log->count() && !log_path.empty()) {
     log::set_file(log_path);
   } else {
@@ -248,8 +245,7 @@ int main(int argc, char **argv) {
       log::fatal("invalid configuration");
     }
 
-    // The CA secrets from the environment; which ones an operation needs
-    // depends on the key layout (see ca::Secrets).
+    // The CA secrets from the environment (see ca::Secrets).
     auto env = [](const char *k) {
       const char *v = std::getenv(k);
       return std::string_view(v ? v : "");

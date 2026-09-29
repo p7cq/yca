@@ -1,9 +1,8 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// JWS handling (RFC 8555 §6): every ACME POST body is a JWS whose protected
-// header binds an anti-replay nonce and the request URL, and carries either
-// the full account key (jwk, newAccount only) or the account URL (kid).
+// JWS handling (RFC 8555 6): every ACME POST body is a JWS whose protected
+// header binds an anti-replay nonce and the request URL (see verifyJWS).
 package main
 
 import (
@@ -171,7 +170,7 @@ func (s *server) verifyJWS(r *http.Request, allowJWK bool) (*request, *problemEr
 
 // verifyEAB checks the External Account Binding of a newAccount request: an
 // inner HS256 JWS over the account key, signed with a provisioned HMAC
-// credential (RFC 8555 §7.3.4). Returns the credential on success.
+// credential (RFC 8555 7.3.4). Returns the credential on success.
 func (s *server) verifyEAB(raw json.RawMessage, outerURL string,
 	acctKey *jose.JSONWebKey) (*EABCred, *problemErr) {
 	if len(raw) == 0 {

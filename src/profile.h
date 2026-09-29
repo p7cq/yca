@@ -25,10 +25,8 @@ enum class Subject {
 // what a profile means: which EKU it carries, which key usage bits, what it
 // demands of the subject, and how long it may live.
 //
-// Before adding one, check that a CA carrying it can still be a CA to
-// Botan, which treats a certificate whose EKU names none of serverAuth,
-// clientAuth, OCSPSigning or anyExtendedKeyUsage as not being one at all
-// (see ca_companion_eku below).
+// Before adding one, see ca_companion_eku below: not every EKU leaves a CA
+// that Botan still accepts as one.
 struct Def {
   std::string_view name;
   // extendedKeyUsage. An issuing CA carries the union of the EKUs of the
@@ -41,12 +39,13 @@ struct Def {
   // Whether the subject must carry the organizational attributes (C and O)
   // beside the CN. Set for any profile whose standards put organizational
   // identity in the subject, and for any profile that has to fit inside a
-  // directoryName name constraint, which is compared position by position
-  // against a C, O, CN encoding.
+  // directoryName name constraint (see ca::detail::subject_dn).
   bool full_dn;
   // Ceiling on this profile's certificates. 398 days is the TLS Baseline
   // Requirements number; the S/MIME BR cap the Strict and Multipurpose
-  // profiles at 825.
+  // profiles at 825. The TLS profiles keep the historic CA/Browser Forum
+  // limit deliberately - private trust is exempt from the SC-081
+  // reductions (200 days from 2026, 100 from 2027, 47 from 2029).
   int max_valid_days;
   // Not available through `create`: the CA must never hold the private key.
   bool csr_only;

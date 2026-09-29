@@ -67,9 +67,8 @@ std::size_t Statement::spin() {
 
 namespace {
 
-// Implements Botan::SQL_Database::Statement, for Database::new_statement()
-// (Botan::Certificate_Store_In_SQL's own queries) only - yca's own code
-// never sees this type, it uses store::Statement above.
+// Implements Botan::SQL_Database::Statement; backs
+// Database::new_statement() only.
 class BotanStatement final : public Botan::SQL_Database::Statement {
 public:
   BotanStatement(sqlite3 *db, std::string_view sql) : m_stmt(nullptr) {

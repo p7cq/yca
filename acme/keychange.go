@@ -1,7 +1,7 @@
 // Copyright 2026 p7cq <707c71@gmail.com>
 // SPDX-License-Identifier: Apache-2.0
 
-// keyChange (RFC 8555 §7.3.5): account key rollover. The outer JWS is a
+// keyChange (RFC 8555 7.3.5): account key rollover. The outer JWS is a
 // normal account-authenticated POST (old key, kid, nonce); its payload is
 // an inner JWS signed by the NEW key, proving its holder requested the
 // change: jwk (the new key), the same url, no nonce, over
@@ -36,7 +36,7 @@ func (s *server) handleKeyChange(w http.ResponseWriter, r *http.Request) {
 	}
 	hdr := inner.Signatures[0].Header
 	newKey := hdr.JSONWebKey
-	switch { // §7.3.5: jwk required, same url, and no nonce on the inner JWS
+	switch { // RFC 8555 7.3.5: jwk required, same url, no nonce on the inner JWS
 	case newKey == nil || hdr.KeyID != "":
 		s.writeProblem(w, problem(http.StatusBadRequest, "malformed",
 			"inner JWS must carry the new key as jwk"))
@@ -93,8 +93,8 @@ func (s *server) handleKeyChange(w http.ResponseWriter, r *http.Request) {
 			"new key equals the current account key"))
 		return
 	}
-	// §7.3.5: a key already bound to another account is a conflict, and the
-	// response names the holder.
+	// RFC 8555 7.3.5: a key already bound to another account is a conflict, and
+	// the response names the holder.
 	other, err := s.db.AccountByThumbprint(newTP)
 	if err != nil {
 		s.writeProblem(w, problem(http.StatusInternalServerError,
