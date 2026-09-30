@@ -440,6 +440,15 @@ use, no trailing slash). The `.crt`/`.crl` publication stays on
 the existing plain-HTTP server block - CRL/AIA fetchers do not need (and
 some refuse) TLS there.
 
+`/acme/` is rate limited per client address (`limit_req`, 10 r/s with a
+burst of 40, excess answered 429): `new-nonce` is unauthenticated, and
+behind the proxy the daemon sees only 127.0.0.1, so a per-client limit
+can only live here. An issuance is about ten requests plus polling; raise
+the rate or burst if many clients share one address (NAT). The daemon
+additionally caps its live nonces at 10000, dropping the oldest; a client
+whose nonce was dropped gets `badNonce` and retries with the fresh one
+(RFC 8555 6.5).
+
 ## EAB lifecycle
 
 No open registration: every account needs a provisioned credential.

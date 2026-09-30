@@ -52,6 +52,12 @@ CREATE TABLE IF NOT EXISTS ari_accel (
 // nonces are garbage-collected opportunistically on issue.
 const nonceTTL = 30 * time.Minute
 
+// maxNonces caps the live nonces: new-nonce is unauthenticated, so without
+// a cap a flood grows the table (and the disk) for the whole nonceTTL.
+// Past it the oldest are dropped; a client whose nonce went that way gets
+// badNonce and retries with the fresh one it carries (RFC 8555 6.5).
+const maxNonces = 10000
+
 type DB struct{ sql *sql.DB }
 
 func OpenDB(path string) (*DB, error) {
@@ -140,6 +146,12 @@ func (d *DB) IssueNonce() (string, error) {
 	n := newID()
 	if _, err := d.sql.Exec("DELETE FROM nonces WHERE created < ?",
 		time.Now().Add(-nonceTTL).Unix()); err != nil {
+		return "", err
+	}
+	// Newest by rowid (insertion order): an indexed range delete, not a
+	// scan or a sort.
+	if _, err := d.sql.Exec("DELETE FROM nonces WHERE rowid <= "+
+		"(SELECT MAX(rowid) FROM nonces) - ?", maxNonces-1); err != nil {
 		return "", err
 	}
 	_, err := d.sql.Exec("INSERT INTO nonces (value, created) VALUES (?, ?)",

@@ -5,9 +5,11 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNonceSingleUse(t *testing.T) {
@@ -91,5 +93,44 @@ func TestUnknownAccountKid(t *testing.T) {
 	if resp.StatusCode != http.StatusUnauthorized ||
 		problemType(v) != "accountDoesNotExist" {
 		t.Fatalf("unknown kid: %d %v", resp.StatusCode, v)
+	}
+}
+
+// new-nonce is unauthenticated: a flood must not grow the table past
+// maxNonces, and the newest nonce must survive the trim.
+func TestNonceTableBounded(t *testing.T) {
+	e := newTestEnv(t)
+	// The flood, compressed: maxNonces+500 live nonces in one transaction
+	// (the same rows a burst of HEAD /acme/new-nonce would leave).
+	tx, err := e.s.db.sql.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().Unix()
+	for i := 0; i < maxNonces+500; i++ {
+		if _, err := tx.Exec("INSERT INTO nonces (value, created) "+
+			"VALUES (?, ?)", fmt.Sprintf("flood-%d", i), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	fresh := e.nonce() // HEAD /acme/new-nonce
+	var n int
+	if err := e.s.db.sql.QueryRow("SELECT COUNT(*) FROM nonces").
+		Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n > maxNonces {
+		t.Fatalf("%d live nonces, cap is %d", n, maxNonces)
+	}
+	// The newest is usable; the oldest flood entry is gone.
+	if ok, _ := e.s.db.ConsumeNonce(fresh); !ok {
+		t.Fatal("fresh nonce trimmed")
+	}
+	if ok, _ := e.s.db.ConsumeNonce("flood-0"); ok {
+		t.Fatal("oldest nonce survived the trim")
 	}
 }
