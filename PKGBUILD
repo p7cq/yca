@@ -3,7 +3,7 @@
 # Builds from the local checkout (source=()), not a downloaded tarball: CI
 # runs makepkg directly against a git checkout.
 pkgname=yca
-pkgver=0.7.10
+pkgver=0.7.49
 pkgrel=1
 pkgdesc='Two-tier ECDSA certificate authority CLI with an ACME frontend'
 arch=('x86_64')
@@ -58,7 +58,8 @@ package() {
   install -Dm644 share/bash-completion/yca-acme \
     "$pkgdir/usr/share/bash-completion/completions/yca-acme"
 
-  install -Dm600 yca.toml "$pkgdir/etc/yca/yca.toml"
+  install -dm750 "$pkgdir/etc/yca"
+  install -m640 yca.toml "$pkgdir/etc/yca/yca.toml"
 
   install -Dm644 share/sysusers.d/yca.conf "$pkgdir/usr/lib/sysusers.d/yca.conf"
   install -Dm644 share/tmpfiles.d/yca.conf "$pkgdir/usr/lib/tmpfiles.d/yca.conf"

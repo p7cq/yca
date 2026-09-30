@@ -35,7 +35,8 @@ override_dh_auto_install:
 		debian/yca/usr/share/zsh/site-functions/_yca-acme
 	install -Dm644 share/bash-completion/yca-acme \
 		debian/yca/usr/share/bash-completion/completions/yca-acme
-	install -Dm600 yca.toml debian/yca/etc/yca/yca.toml
+	install -dm750 debian/yca/etc/yca
+	install -m640 yca.toml debian/yca/etc/yca/yca.toml
 	install -Dm644 share/sysusers.d/yca.conf debian/yca/usr/lib/sysusers.d/yca.conf
 	install -Dm644 share/tmpfiles.d/yca.conf debian/yca/usr/lib/tmpfiles.d/yca.conf
 	install -dm755 debian/yca/lib/systemd/system
@@ -64,6 +65,8 @@ override_dh_strip:
 override_dh_installsystemd:
 	dh_installsystemd --no-enable --no-start
 
-# dh_fixperms to preserve the 0600 set in override_dh_auto_install above.
+# dh_fixperms would reset /etc/yca to 0755 and yca.toml to 0644: keep the
+# modes set in override_dh_auto_install, tmpfiles.d/yca.conf's (the yca
+# group is applied by the tmpfiles snippet in the postinst).
 override_dh_fixperms:
-	dh_fixperms -X etc/yca/yca.toml
+	dh_fixperms -X etc/yca

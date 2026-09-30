@@ -68,12 +68,14 @@ src_install() {
 	insinto /usr/share/bash-completion/completions
 	doins share/bash-completion/yca-acme
 
-	# Root-only until pkg_postinst: the yca group is applied there by
-	# tmpfiles.d/yca.conf (root:yca 0640), which also creates the state
-	# and publication directories.
+	# Modes as tmpfiles.d/yca.conf sets them (0750 dir, 0640 config), still
+	# root-only until pkg_postinst: the yca group is applied there by
+	# tmpfiles.d/yca.conf, which also creates the state and publication
+	# directories.
 	insinto /etc/yca
 	doins yca.toml
-	fperms 600 /etc/yca/yca.toml
+	fperms 0750 /etc/yca
+	fperms 0640 /etc/yca/yca.toml
 	dotmpfiles share/tmpfiles.d/yca.conf
 
 	# Installed but not enabled: a CA rollout is a manual ceremony (see
