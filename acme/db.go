@@ -548,10 +548,6 @@ func (d *DB) CertByID(id string) (*Cert, error) {
 	return d.certRow("id = ?", id)
 }
 
-func (d *DB) CertByAccountSerial(accountID, serial string) (*Cert, error) {
-	return d.certRow("account_id = ? AND serial = ?", accountID, serial)
-}
-
 func (d *DB) CertBySerial(serial string) (*Cert, error) {
 	return d.certRow("serial = ?", serial)
 }

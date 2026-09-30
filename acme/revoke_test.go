@@ -5,12 +5,16 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // issueViaStub drives a full happy flow and returns the stub (which holds
@@ -142,5 +146,59 @@ func TestRevokeBadReason(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest ||
 		problemType(v) != "badRevocationReason" {
 		t.Fatalf("cACompromise from an EE holder: %d %v", resp.StatusCode, v)
+	}
+}
+
+// A certificate made by the attacker, carrying the serial of one the CA
+// issued next to the attacker's own key. The CA revokes by serial alone,
+// so accepting it on the jwk path would let anyone revoke any certificate
+// whose serial they have seen, without an account.
+func TestRevokeForgedSerial(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	st := issueViaStub(t, e)
+
+	key, err := generateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: st.leaf.SerialNumber,
+		Subject:      pkix.Name{CommonName: "localhost"},
+		DNSNames:     []string{"localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(),
+		key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]any{
+		"certificate": base64.RawURLEncoding.EncodeToString(der),
+		"reason":      1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := e.signWith(key, "/acme/revoke-cert", payload, "", "")
+	resp, err := http.Post(e.ts.URL+"/acme/revoke-cert",
+		"application/jose+json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("forged certificate accepted: %d", resp.StatusCode)
+	}
+	args, _ := os.ReadFile(st.args)
+	if bytes.Contains(args, []byte("revoke ")) {
+		t.Fatalf("the CA was asked to revoke:\n%s", args)
+	}
+
+	// The genuine certificate is untouched: its holder still revokes it.
+	resp2, v := e.post("/acme/revoke-cert", revokeBody(t, st, 0), e.kid, "")
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("genuine revoke after the forgery: %d %v", resp2.StatusCode, v)
 	}
 }

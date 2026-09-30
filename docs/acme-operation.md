@@ -791,7 +791,9 @@ wrapper around it, or use a purpose-built delegated-DNS ACME helper
   `yca list --last N`. The ACME account responsible is in the daemon log
   (order id -> account id -> EAB kid).
 - **Revocation**: clients revoke via ACME (`revokeCert`, authorized by the
-  ordering account or by the certificate key; reasons limited to
+  ordering account or by the certificate key, for certificates issued
+  through this frontend only - the presented certificate must match the
+  issued one byte for byte; reasons limited to
   unspecified/keyCompromise/superseded/cessationOfOperation) - the daemon
   execs `yca revoke server --serial <hex>`, so the EXACT certificate dies
   even during a renewal overlap. Operators keep the CLI: `yca revoke server

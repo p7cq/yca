@@ -67,15 +67,27 @@ func (s *server) handleRevokeCert(w http.ResponseWriter, r *http.Request) {
 	}
 	serial := strings.ToUpper(cert.SerialNumber.Text(16))
 
+	// The certificate must be one this frontend issued, byte for byte, per
+	// RFC 8555 7.6: the server checks that it issued the certificate.
+	known, err := s.db.CertBySerial(serial)
+	if err != nil {
+		s.writeProblem(w, problem(http.StatusInternalServerError,
+			"serverInternal", "certificate lookup"))
+		return
+	}
+	var leaf *x509.Certificate
+	if known != nil {
+		leaf, _ = leafOf(known.ChainPEM)
+	}
+	if leaf == nil || !bytes.Equal(leaf.Raw, cert.Raw) {
+		s.writeProblem(w, problem(http.StatusForbidden, "unauthorized",
+			"certificate was not issued by this server"))
+		return
+	}
+
 	// Authorization: the ordering account, or the certificate key itself.
 	if req.account != nil {
-		owned, err := s.db.CertByAccountSerial(req.account.ID, serial)
-		if err != nil {
-			s.writeProblem(w, problem(http.StatusInternalServerError,
-				"serverInternal", "certificate lookup"))
-			return
-		}
-		if owned == nil {
+		if known.AccountID != req.account.ID {
 			s.writeProblem(w, problem(http.StatusForbidden, "unauthorized",
 				"this account did not order that certificate"))
 			return
@@ -93,8 +105,7 @@ func (s *server) handleRevokeCert(w http.ResponseWriter, r *http.Request) {
 
 	// A revocation we already performed is answerable without the CA (see
 	// MarkCertRevoked).
-	if known, err := s.db.CertBySerial(serial); err == nil && known != nil &&
-		!known.RevokedAt.IsZero() {
+	if !known.RevokedAt.IsZero() {
 		s.writeProblem(w, problem(http.StatusBadRequest, "alreadyRevoked",
 			"certificate is not active (revoked or expired)"))
 		return
