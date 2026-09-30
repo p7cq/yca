@@ -109,9 +109,31 @@ func (s *server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		s.writeJSON(w, http.StatusOK, s.challengeJSON(chall))
 		return
 	}
+	// RFC 8555 7.5.1: a failed challenge invalidates its authorization,
+	// and a decided authorization is not validated again.
+	if authz.Status != "pending" {
+		s.writeProblem(w, problem(http.StatusForbidden, "malformed",
+			"authorization is already "+authz.Status))
+		return
+	}
 	if time.Now().After(authz.Expires) {
 		s.writeProblem(w, problem(http.StatusForbidden, "malformed",
 			"authorization expired; submit a new order"))
+		return
+	}
+	// Claimed atomically: a concurrent POST, or a sibling challenge in
+	// flight, gets the current state instead of a second validation.
+	claimed, err := s.db.ClaimChallenge(chall)
+	if err != nil {
+		s.writeProblem(w, problem(http.StatusInternalServerError,
+			"serverInternal", "challenge update"))
+		return
+	}
+	if !claimed {
+		if cur, err := s.db.ChallengeByID(chall.ID); err == nil && cur != nil {
+			chall = cur
+		}
+		s.writeJSON(w, http.StatusOK, s.challengeJSON(chall))
 		return
 	}
 

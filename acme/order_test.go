@@ -161,3 +161,68 @@ func TestOrderOwnership(t *testing.T) {
 		t.Fatalf("foreign order visible: %d %v", resp.StatusCode, v)
 	}
 }
+
+// challengeOfType returns the URL of the first authz's challenge of `typ`.
+func challengeOfType(t *testing.T, e *testEnv, order map[string]any,
+	typ string) string {
+	t.Helper()
+	authzURL := order["authorizations"].([]any)[0].(string)
+	_, authz := e.post(e.path(authzURL), nil, e.kid, "")
+	for _, c := range authz["challenges"].([]any) {
+		if ch := c.(map[string]any); ch["type"] == typ {
+			return ch["url"].(string)
+		}
+	}
+	t.Fatalf("no %s challenge: %v", typ, authz)
+	return ""
+}
+
+// A failed challenge invalidates the authorization (RFC 8555 7.5.1): a
+// sibling challenge must not bring the order back to ready.
+func TestChallengeAfterFailedSibling(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	order, loc := e.order("localhost")
+
+	e.s.http01.port = 1 // nothing listens there
+	resp, v := e.post(e.path(challengeOfType(t, e, order, "http-01")),
+		[]byte("{}"), e.kid, "")
+	if resp.StatusCode != http.StatusOK || v["status"] != "invalid" {
+		t.Fatalf("http-01: %d %v", resp.StatusCode, v)
+	}
+
+	challURL, token := dnsChallenge(t, e, order)
+	e.s.dns01.lookupTXT = fakeTXT("_acme-challenge.localhost",
+		txtFor(token+"."+e.thumbprint()))
+	e.post(e.path(challURL), []byte("{}"), e.kid, "")
+
+	if _, o := e.post(e.path(loc), nil, e.kid, ""); o["status"] != "invalid" {
+		t.Fatalf("order after a failed challenge: %v", o)
+	}
+}
+
+// A valid order stays valid: validating a leftover challenge must not
+// reopen it and drop its certificate.
+func TestChallengeCannotReopenValidOrder(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	st := newStub(t, "localhost")
+	e.s.yca = newYcaRunner(st.bin, "", "", "acme", "")
+	orderPath := runChallenge(t, e, false)
+	_, order := e.post(orderPath, nil, e.kid, "")
+	fin := e.path(order["finalize"].(string))
+	if resp, v := e.post(fin, finalizeBody(t, csrFor(t, "",
+		[]string{"localhost"})), e.kid, ""); v["status"] != "valid" {
+		t.Fatalf("finalize: %d %v", resp.StatusCode, v)
+	}
+
+	challURL, token := dnsChallenge(t, e, order)
+	e.s.dns01.lookupTXT = fakeTXT("_acme-challenge.localhost",
+		txtFor(token+"."+e.thumbprint()))
+	e.post(e.path(challURL), []byte("{}"), e.kid, "")
+
+	_, o := e.post(orderPath, nil, e.kid, "")
+	if o["status"] != "valid" || o["certificate"] == nil {
+		t.Fatalf("valid order reopened: %v", o)
+	}
+}

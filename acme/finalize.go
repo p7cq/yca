@@ -174,7 +174,19 @@ func (s *server) handleFinalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = s.db.SetOrderStatus(order.ID, "processing", "", "")
+	// ready -> processing in one statement: of concurrent finalizes
+	// exactly one issues, and an order past its expiry issues nothing.
+	claimed, err := s.db.ClaimOrder(order.ID, time.Now())
+	if err != nil {
+		s.writeProblem(w, problem(http.StatusInternalServerError,
+			"serverInternal", "order update"))
+		return
+	}
+	if !claimed {
+		s.writeProblem(w, problem(http.StatusForbidden, "orderNotReady",
+			"order is no longer ready (finalized concurrently, or expired)"))
+		return
+	}
 	chain, cn, err := s.yca.issue(der)
 	if err != nil {
 		if strings.Contains(err.Error(), "renewal window") {

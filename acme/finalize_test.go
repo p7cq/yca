@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -358,5 +359,78 @@ func TestFinalizeIssuanceFailure(t *testing.T) {
 	_, o := e.post(orderPath, nil, e.kid, "")
 	if o["status"] != "invalid" {
 		t.Fatalf("order after failed issuance: %v", o)
+	}
+}
+
+// An order past its expiry must not issue, even while it still reads
+// "ready" (GC keeps expired orders around for a grace period).
+func TestFinalizeExpiredOrder(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	st := newStub(t, "localhost")
+	e.s.yca = newYcaRunner(st.bin, "", "", "acme", "")
+	orderPath := runChallenge(t, e, false)
+	id := strings.TrimPrefix(orderPath, "/acme/order/")
+	if _, err := e.s.db.sql.Exec("UPDATE orders SET expires = ? WHERE id = ?",
+		time.Now().Add(-time.Minute).Unix(), id); err != nil {
+		t.Fatal(err)
+	}
+
+	_, order := e.post(orderPath, nil, e.kid, "")
+	fin := e.path(order["finalize"].(string))
+	resp, v := e.post(fin, finalizeBody(t, csrFor(t, "", []string{"localhost"})),
+		e.kid, "")
+	if resp.StatusCode != http.StatusForbidden || problemType(v) != "orderNotReady" {
+		t.Fatalf("finalize on expired order: %d %v", resp.StatusCode, v)
+	}
+	if args, _ := os.ReadFile(st.args); strings.Contains(string(args), "sign ") {
+		t.Fatalf("the CA was asked to sign:\n%s", args)
+	}
+}
+
+// Concurrent finalizes of one ready order: exactly one issues.
+func TestFinalizeConcurrent(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	st := newStub(t, "localhost")
+	e.s.yca = newYcaRunner(st.bin, "", "", "acme", "")
+	orderPath := runChallenge(t, e, false)
+	_, order := e.post(orderPath, nil, e.kid, "")
+	fin := e.path(order["finalize"].(string))
+
+	// Signed up front (each needs its own nonce), posted all at once.
+	const n = 10
+	bodies := make([]string, n)
+	for i := range bodies {
+		bodies[i] = e.sign(fin, finalizeBody(t, csrFor(t, "",
+			[]string{"localhost"})), e.kid, "")
+	}
+	codes := make([]int, n)
+	var wg sync.WaitGroup
+	for i := range bodies {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := http.Post(e.ts.URL+fin, "application/jose+json",
+				strings.NewReader(bodies[i]))
+			if err != nil {
+				return
+			}
+			resp.Body.Close()
+			codes[i] = resp.StatusCode
+		}()
+	}
+	wg.Wait()
+
+	ok := 0
+	for _, c := range codes {
+		if c == http.StatusOK {
+			ok++
+		}
+	}
+	args, _ := os.ReadFile(st.args)
+	if signs := strings.Count(string(args), "sign server"); ok != 1 || signs != 1 {
+		t.Fatalf("%d finalizes succeeded, %d issuances (codes %v)", ok, signs,
+			codes)
 	}
 }

@@ -340,6 +340,21 @@ func (d *DB) SetOrderStatus(id, status, certID, problem string) error {
 	return err
 }
 
+// ClaimOrder moves a ready, unexpired order to processing in a single
+// statement, so of concurrent finalizes exactly one issues. False when
+// the order was not claimable.
+func (d *DB) ClaimOrder(id string, now time.Time) (bool, error) {
+	res, err := d.sql.Exec(
+		"UPDATE orders SET status = 'processing' "+
+			"WHERE id = ? AND status = 'ready' AND expires > ?",
+		id, now.Unix())
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 type Authz struct {
 	ID         string
 	OrderID    string
@@ -417,6 +432,26 @@ func (d *DB) InsertChallenge(c *Challenge) error {
 			"VALUES (?, ?, ?, ?, ?)",
 		c.ID, c.AuthzID, c.Type, c.Token, c.Status)
 	return err
+}
+
+// ClaimChallenge moves a pending challenge to processing in a single
+// statement, only while its authorization is pending and no sibling
+// challenge was attempted: one validation per authorization, and none
+// once it is decided. False when the challenge was not claimable.
+func (d *DB) ClaimChallenge(c *Challenge) (bool, error) {
+	res, err := d.sql.Exec(
+		"UPDATE challenges SET status = 'processing' "+
+			"WHERE id = ? AND status = 'pending' "+
+			"AND NOT EXISTS (SELECT 1 FROM challenges "+
+			"WHERE authz_id = ? AND status <> 'pending') "+
+			"AND EXISTS (SELECT 1 FROM authzs "+
+			"WHERE id = ? AND status = 'pending')",
+		c.ID, c.AuthzID, c.AuthzID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 func (d *DB) ChallengeByID(id string) (*Challenge, error) {

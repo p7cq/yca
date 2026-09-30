@@ -805,7 +805,9 @@ wrapper around it, or use a purpose-built delegated-DNS ACME helper
   configuration, `list`/`get` see them, and the store is their source of
   truth (the copy in `acme.db` only feeds the ACME certificate URL).
 - **Stuck orders**: orders and authorizations expire 24 h after creation;
-  clients just start a new order. Nothing to clean manually: an hourly GC
+  clients just start a new order. A failed challenge invalidates its
+  authorization and the order and an expired order can not be finalized;
+  both need a new order. Nothing to clean manually: an hourly GC
   pass removes protocol objects 24 h after their expiry (the grace keeps a
   failed order's error readable for a while); issued chains stay (they
   feed the certificate URL and ARI).
