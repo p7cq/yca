@@ -293,7 +293,9 @@ yca-acme ari clear --issuer <cn>                    back to the policy window
 
 Behind nginx, leave `--tls-cert` unset (plain HTTP on loopback) and let
 nginx terminate TLS; `--tls-cert/key` exists for tests and for running
-without a proxy.
+without a proxy. Either way the listener drops a client that has not sent
+its request headers within 10 s or its body within 30 s, and closes idle
+keep-alive connections after 2 min.
 
 ### State database
 

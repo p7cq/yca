@@ -148,10 +148,28 @@ func main() {
 	})
 
 	log.Printf("listening on %s, directory %s/acme/directory", *listen, s.baseURL)
+	srv := newHTTPServer(*listen, mux)
 	if *tlsCrt != "" {
-		log.Fatal(http.ListenAndServeTLS(*listen, *tlsCrt, *tlsKey, mux))
+		log.Fatal(srv.ListenAndServeTLS(*tlsCrt, *tlsKey))
 	}
-	log.Fatal(http.ListenAndServe(*listen, mux))
+	log.Fatal(srv.ListenAndServe())
+}
+
+// Slow clients hold a connection (and a goroutine) only this long. The
+// daemon normally sits behind nginx, which buffers, but --tls-cert serves
+// clients directly. No WriteTimeout: a finalize may wait behind other
+// issuances (ycaRunner serializes them, each exec up to 60 s), and a
+// write deadline would drop the response for a certificate already issued.
+const (
+	readHeaderTimeout = 10 * time.Second
+	readTimeout       = 30 * time.Second
+	idleTimeout       = 2 * time.Minute
+)
+
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{Addr: addr, Handler: h,
+		ReadHeaderTimeout: readHeaderTimeout, ReadTimeout: readTimeout,
+		IdleTimeout: idleTimeout}
 }
 
 func (s *server) handleDirectory(w http.ResponseWriter, _ *http.Request) {
