@@ -31,8 +31,8 @@ _yca_acme() {
         COMPREPLY=($(compgen -d -- "$cur"))
         return
         ;;
-    --allow | --issuer | --window | --listen | --url | --id | --valid | \
-        --http01-port | --dns)
+    --allow | --expires | --issuer | --window | --listen | --url | --id | \
+        --valid | --http01-port | --dns)
         return
         ;;
     esac
@@ -43,7 +43,7 @@ _yca_acme() {
         if ((COMP_CWORD == 2)); then
             COMPREPLY=($(compgen -W "new list delete" -- "$cur"))
         elif [[ $cur == -* ]]; then
-            COMPREPLY=($(compgen -W "--state --allow" -- "$cur"))
+            COMPREPLY=($(compgen -W "--state --allow --reusable --expires" -- "$cur"))
         fi
         return
         ;;

@@ -18,6 +18,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
 )
@@ -30,6 +31,9 @@ func generateKey() (*ecdsa.PrivateKey, error) {
 func noTXT(context.Context, string) ([]string, error) {
 	return nil, errors.New("no TXT records in this test")
 }
+
+// testAllow is the --allow policy of every test credential.
+const testAllow = "localhost,*.test.ca"
 
 // testEnv is a running yca-acme with its own state db, plus one provisioned
 // EAB credential and an ACME client key.
@@ -82,7 +86,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	if _, err := rand.Read(env.eabHMAC); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.InsertEAB(env.eabKid, env.eabHMAC, "localhost,*.test.ca"); err != nil {
+	if err := db.InsertEAB(env.eabKid, env.eabHMAC, testAllow, false,
+		time.Time{}); err != nil {
 		t.Fatal(err)
 	}
 	return env
@@ -191,14 +196,26 @@ func (e *testEnv) eab() json.RawMessage {
 	return json.RawMessage(jws.FullSerialize())
 }
 
-// register creates the account and remembers its URL (kid).
-func (e *testEnv) register() {
+// registerBody is a newAccount payload bound to e's EAB credential.
+func (e *testEnv) registerBody() []byte {
 	e.t.Helper()
 	body, _ := json.Marshal(map[string]any{
 		"termsOfServiceAgreed":   true,
 		"externalAccountBinding": e.eab(),
 	})
-	resp, v := e.post("/acme/new-account", body, "", "")
+	return body
+}
+
+// tryRegister attempts newAccount and returns the outcome as is.
+func (e *testEnv) tryRegister() (*http.Response, map[string]any) {
+	e.t.Helper()
+	return e.post("/acme/new-account", e.registerBody(), "", "")
+}
+
+// register creates the account and remembers its URL (kid).
+func (e *testEnv) register() {
+	e.t.Helper()
+	resp, v := e.tryRegister()
 	if resp.StatusCode != http.StatusCreated {
 		e.t.Fatalf("register: %d %v", resp.StatusCode, v)
 	}
@@ -249,4 +266,42 @@ func (e *testEnv) path(absURL string) string {
 		e.t.Fatalf("URL %q is not under the test server", absURL)
 	}
 	return absURL[len(e.ts.URL):]
+}
+
+// sameEAB is an unregistered client with a fresh key on e's credential.
+func (e *testEnv) sameEAB() *testEnv {
+	e.t.Helper()
+	o := &testEnv{t: e.t, s: e.s, ts: e.ts, eabKid: e.eabKid,
+		eabHMAC: e.eabHMAC}
+	var err error
+	if o.key, err = generateKey(); err != nil {
+		e.t.Fatal(err)
+	}
+	return o
+}
+
+// newEAB provisions another credential on e's server and returns an
+// unregistered client with a fresh key on it.
+func (e *testEnv) newEAB(allow string, reusable bool,
+	expires time.Time) *testEnv {
+	e.t.Helper()
+	o := e.sameEAB()
+	o.eabKid, o.eabHMAC = newID(), make([]byte, 32)
+	if _, err := rand.Read(o.eabHMAC); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := e.s.db.InsertEAB(o.eabKid, o.eabHMAC, allow, reusable,
+		expires); err != nil {
+		e.t.Fatal(err)
+	}
+	return o
+}
+
+// otherAccount registers a second account, on its own credential with
+// the same policy as e's.
+func (e *testEnv) otherAccount() *testEnv {
+	e.t.Helper()
+	o := e.newEAB(testAllow, false, time.Time{})
+	o.register()
+	return o
 }

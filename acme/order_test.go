@@ -4,7 +4,6 @@
 package main
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -13,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewOrderPolicy(t *testing.T) {
@@ -151,13 +151,8 @@ func TestOrderOwnership(t *testing.T) {
 	e.register()
 	_, loc := e.order("localhost")
 
-	// A second account (own key, same EAB cred for simplicity) cannot see it.
-	e2 := &testEnv{t: t, s: e.s, ts: e.ts, eabKid: e.eabKid, eabHMAC: e.eabHMAC}
-	var err error
-	if e2.key, err = generateKey(); err != nil {
-		t.Fatal(err)
-	}
-	e2.register()
+	// A second account (own key and credential) cannot see it.
+	e2 := e.otherAccount()
 	resp, v := e2.post(e.path(loc), nil, e2.kid, "")
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("foreign order visible: %d %v", resp.StatusCode, v)
@@ -237,18 +232,7 @@ func TestNewOrderRejectsNonHostnames(t *testing.T) {
 	e.register()
 	// A second account on a credential without --allow (any name), so the
 	// IP-shaped names reach the syntax check instead of the policy one.
-	open := &testEnv{t: t, s: e.s, ts: e.ts, eabKid: newID(),
-		eabHMAC: make([]byte, 32)}
-	if _, err := rand.Read(open.eabHMAC); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.s.db.InsertEAB(open.eabKid, open.eabHMAC, ""); err != nil {
-		t.Fatal(err)
-	}
-	var err error
-	if open.key, err = generateKey(); err != nil {
-		t.Fatal(err)
-	}
+	open := e.newEAB("", false, time.Time{})
 	open.register()
 
 	newOrder := func(env *testEnv, name string) (int, string) {

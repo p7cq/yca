@@ -99,10 +99,7 @@ func TestKeyChangeConflictOnBoundKey(t *testing.T) {
 	e.register()
 
 	// Second account with its own key.
-	other := &testEnv{t: t, s: e.s, ts: e.ts,
-		eabKid: e.eabKid, eabHMAC: e.eabHMAC}
-	other.key, _ = generateKey()
-	other.register()
+	other := e.otherAccount()
 
 	// Rolling the first account onto the second account's key: 409 +
 	// Location naming the holder.

@@ -126,12 +126,7 @@ func TestRevokeForeignAccount(t *testing.T) {
 	e.register()
 	st := issueViaStub(t, e)
 
-	e2 := &testEnv{t: t, s: e.s, ts: e.ts, eabKid: e.eabKid, eabHMAC: e.eabHMAC}
-	var err error
-	if e2.key, err = generateKey(); err != nil {
-		t.Fatal(err)
-	}
-	e2.register()
+	e2 := e.otherAccount()
 	resp, v := e2.post("/acme/revoke-cert", revokeBody(t, st, 0), e2.kid, "")
 	if resp.StatusCode != http.StatusForbidden || problemType(v) != "unauthorized" {
 		t.Fatalf("foreign account revoke: %d %v", resp.StatusCode, v)

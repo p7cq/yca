@@ -24,9 +24,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -275,8 +277,14 @@ func eabMain(args []string) {
 	allow := fs.String("allow", "",
 		"comma-separated identifier patterns this credential may order "+
 			"(e.g. '*.example.ca,host.example.ca'; empty = any)")
+	reusable := fs.Bool("reusable", false,
+		"admit any number of accounts (default: the first one registered "+
+			"binds the credential)")
+	expires := fs.String("expires", "",
+		"end registration after this long, <N>d or a duration such as 12h "+
+			"(default: never); registered accounts keep ordering")
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: yca-acme eab <new|list|delete> [--state db] [--allow patterns] [kid]")
+		fmt.Fprintln(os.Stderr, "usage: yca-acme eab <new|list|delete> [--state db] [--allow patterns] [--reusable] [--expires dur] [kid]")
 		os.Exit(2)
 	}
 	verb := args[0]
@@ -291,34 +299,60 @@ func eabMain(args []string) {
 
 	switch verb {
 	case "new":
+		var exp time.Time
+		if *expires != "" {
+			d, err := parseExpiry(*expires)
+			if err != nil {
+				log.Fatal(err)
+			}
+			exp = time.Now().Add(d)
+		}
 		kid := newID()
 		hmac := make([]byte, 32)
 		if _, err := rand.Read(hmac); err != nil {
 			log.Fatalf("rng: %v", err)
 		}
-		if err := db.InsertEAB(kid, hmac, *allow); err != nil {
+		if err := db.InsertEAB(kid, hmac, *allow, *reusable, exp); err != nil {
 			log.Fatalf("insert: %v", err)
 		}
 		// Shown once, like the CA passphrase banner: the HMAC key is not
 		// recoverable from the (hashed-nothing, but private) state db by
 		// design of the workflow - hand it to the client operator now.
 		fmt.Printf("\n┌ EAB credential (shown once) %s┐\n"+
-			"%8s %s\n"+
-			"%8s %s\n"+
-			"%8s %s\n"+
+			"%10s %s\n"+
+			"%10s %s\n"+
+			"%10s %s\n"+
+			"%10s %s\n"+
+			"%10s %s\n"+
 			"└%s┘\n\n",
-			strings.Repeat("─", 24),
+			strings.Repeat("─", 26),
 			"KID:", kid,
 			"HMAC:", base64.RawURLEncoding.EncodeToString(hmac),
 			"Allow:", orAny(*allow),
-			strings.Repeat("─", 53))
+			"Use:", useOf(*reusable),
+			"Expires:", expiryOf(exp),
+			strings.Repeat("─", 55))
 	case "list":
 		creds, err := db.ListEAB()
 		if err != nil {
 			log.Fatalf("list: %v", err)
 		}
+		now := time.Now()
 		for _, c := range creds {
-			fmt.Printf("%s\tallow: %s\n", c[0], orAny(c[1]))
+			state := useOf(c.Reusable)
+			switch {
+			case c.Reusable:
+			case c.AccountID != "":
+				state += ", bound to " + c.AccountID
+			default:
+				state += ", unused"
+			}
+			exp := expiryOf(c.Expires)
+			if !c.Expires.IsZero() && !c.Expires.After(now) {
+				exp += " (expired)"
+			}
+			fmt.Printf("%s\tallow: %s\tuse: %s\texpires: %s\n", c.KID,
+				orAny(strings.Join(c.Allow, ",")), state, exp)
 		}
 	case "delete":
 		if kid == "" {
@@ -346,6 +380,43 @@ func eabMain(args []string) {
 		fmt.Fprintln(os.Stderr, "usage: yca-acme eab <new|list|delete>")
 		os.Exit(2)
 	}
+}
+
+// parseExpiry reads an EAB lifetime from any Go duration ("90m", "12h").
+func parseExpiry(s string) (time.Duration, error) {
+	var d time.Duration
+	if n, ok := strings.CutSuffix(s, "d"); ok {
+		days, err := strconv.ParseInt(n, 10, 64)
+		if err != nil || days > math.MaxInt64/int64(24*time.Hour) {
+			return 0, fmt.Errorf("invalid --expires %q (<N>d or a duration "+
+				"such as 12h)", s)
+		}
+		d = time.Duration(days) * 24 * time.Hour
+	} else {
+		var err error
+		if d, err = time.ParseDuration(s); err != nil {
+			return 0, fmt.Errorf("invalid --expires %q (<N>d or a duration "+
+				"such as 12h)", s)
+		}
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("--expires must be positive, got %q", s)
+	}
+	return d, nil
+}
+
+func useOf(reusable bool) string {
+	if reusable {
+		return "reusable"
+	}
+	return "single-use"
+}
+
+func expiryOf(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return t.UTC().Format(time.RFC3339)
 }
 
 func orAny(s string) string {

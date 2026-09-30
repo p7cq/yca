@@ -210,3 +210,20 @@ func TestOpenStateDB(t *testing.T) {
 	}
 	db.Close()
 }
+
+func TestParseExpiry(t *testing.T) {
+	for in, want := range map[string]time.Duration{
+		"7d": 7 * 24 * time.Hour, "1d": 24 * time.Hour,
+		"12h": 12 * time.Hour, "90m": 90 * time.Minute,
+	} {
+		if got, err := parseExpiry(in); err != nil || got != want {
+			t.Errorf("%q: got %v %v, want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "d", "0d", "-1d", "1.5d", "7x", "0s",
+		"-1h", "99999999999999d"} {
+		if _, err := parseExpiry(in); err == nil {
+			t.Errorf("%q accepted", in)
+		}
+	}
+}

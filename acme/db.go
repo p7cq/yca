@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,7 +22,8 @@ CREATE TABLE IF NOT EXISTS nonces (
   value TEXT PRIMARY KEY, created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS eab_creds (
   kid TEXT PRIMARY KEY, hmac TEXT NOT NULL, allow TEXT NOT NULL,
-  created INTEGER NOT NULL);
+  created INTEGER NOT NULL, account_id TEXT NOT NULL DEFAULT '',
+  reusable INTEGER NOT NULL DEFAULT 0, expires INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS accounts (
   id TEXT PRIMARY KEY, thumbprint TEXT NOT NULL UNIQUE, jwk TEXT NOT NULL,
   eab_kid TEXT NOT NULL, status TEXT NOT NULL, created INTEGER NOT NULL);
@@ -73,6 +75,9 @@ func OpenDB(path string) (*DB, error) {
 	// Self-heal for databases created by earlier versions (CREATE TABLE IF
 	// NOT EXISTS does not grow existing tables), like the CA's cert_index.
 	for _, m := range []struct{ table, column, ddl string }{
+		{"eab_creds", "account_id", "TEXT NOT NULL DEFAULT ''"},
+		{"eab_creds", "reusable", "INTEGER NOT NULL DEFAULT 0"},
+		{"eab_creds", "expires", "INTEGER NOT NULL DEFAULT 0"},
 		{"authzs", "wildcard", "INTEGER NOT NULL DEFAULT 0"},
 		{"certs", "serial", "TEXT NOT NULL DEFAULT ''"},
 		{"certs", "ari_id", "TEXT NOT NULL DEFAULT ''"},
@@ -173,34 +178,64 @@ func (d *DB) ConsumeNonce(n string) (bool, error) {
 
 type EABCred struct {
 	KID   string
-	HMAC  []byte   // raw key (stored base64url)
+	HMAC  []byte   // raw key (stored base64url); not loaded by ListEAB
 	Allow []string // identifier suffix patterns, e.g. "*.example.ca"
+	// Reusable credentials register any number of accounts; the others
+	// bind the first one registered, recorded in AccountID.
+	Reusable  bool
+	AccountID string
+	// Expires ends registration with the credential (zero: never).
+	// Accounts registered before keep ordering.
+	Expires time.Time
 }
 
-func (d *DB) InsertEAB(kid string, hmac []byte, allow string) error {
+func (d *DB) InsertEAB(kid string, hmac []byte, allow string, reusable bool,
+	expires time.Time) error {
+	var exp int64
+	if !expires.IsZero() {
+		exp = expires.Unix()
+	}
 	_, err := d.sql.Exec(
-		"INSERT INTO eab_creds (kid, hmac, allow, created) VALUES (?, ?, ?, ?)",
+		"INSERT INTO eab_creds (kid, hmac, allow, created, reusable, expires) "+
+			"VALUES (?, ?, ?, ?, ?, ?)",
 		kid, base64.RawURLEncoding.EncodeToString(hmac), allow,
-		time.Now().Unix())
+		time.Now().Unix(), reusable, exp)
 	return err
 }
 
+// eabCols reads the columns every EABCred carries besides the key.
+const eabCols = "kid, allow, reusable, account_id, expires"
+
+func scanEAB(row interface{ Scan(...any) error }, extra ...any) (*EABCred,
+	error) {
+	var c EABCred
+	var allow string
+	var exp int64
+	if err := row.Scan(append([]any{&c.KID, &allow, &c.Reusable,
+		&c.AccountID, &exp}, extra...)...); err != nil {
+		return nil, err
+	}
+	c.Allow = splitAllow(allow)
+	if exp != 0 {
+		c.Expires = time.Unix(exp, 0)
+	}
+	return &c, nil
+}
+
 func (d *DB) GetEAB(kid string) (*EABCred, error) {
-	var enc, allow string
-	err := d.sql.QueryRow(
-		"SELECT hmac, allow FROM eab_creds WHERE kid = ?", kid).
-		Scan(&enc, &allow)
+	var enc string
+	c, err := scanEAB(d.sql.QueryRow(
+		"SELECT "+eabCols+", hmac FROM eab_creds WHERE kid = ?", kid), &enc)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	raw, err := base64.RawURLEncoding.DecodeString(enc)
-	if err != nil {
+	if c.HMAC, err = base64.RawURLEncoding.DecodeString(enc); err != nil {
 		return nil, err
 	}
-	return &EABCred{KID: kid, HMAC: raw, Allow: splitAllow(allow)}, nil
+	return c, nil
 }
 
 // DeleteEAB removes a credential; accounts registered with it keep
@@ -234,19 +269,20 @@ func (d *DB) AccountsByEAB(kid string) ([]string, error) {
 	return out, rows.Err()
 }
 
-func (d *DB) ListEAB() ([][2]string, error) { // kid, allow
-	rows, err := d.sql.Query("SELECT kid, allow FROM eab_creds ORDER BY created")
+func (d *DB) ListEAB() ([]*EABCred, error) {
+	rows, err := d.sql.Query(
+		"SELECT " + eabCols + " FROM eab_creds ORDER BY created")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out [][2]string
+	var out []*EABCred
 	for rows.Next() {
-		var kid, allow string
-		if err := rows.Scan(&kid, &allow); err != nil {
+		c, err := scanEAB(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, [2]string{kid, allow})
+		out = append(out, c)
 	}
 	return out, rows.Err()
 }
@@ -261,12 +297,57 @@ type Account struct {
 	Status     string
 }
 
-func (d *DB) InsertAccount(a *Account) error {
-	_, err := d.sql.Exec(
+// Why InsertAccountEAB refused a credential that verified.
+var (
+	errEABUsed    = errors.New("EAB credential already used; request a new one")
+	errEABExpired = errors.New("EAB credential expired; request a new one")
+	errEABGone    = errors.New("EAB credential no longer exists")
+)
+
+// InsertAccountEAB registers a and consumes its EAB credential in one
+// transaction: an unexpired reusable credential admits any number of
+// accounts, an unexpired single-use one binds the first and no other. On
+// refusal nothing is written and the error is one of errEAB*.
+func (d *DB) InsertAccountEAB(a *Account, now time.Time) error {
+	tx, err := d.sql.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() // no-op after Commit
+	res, err := tx.Exec("UPDATE eab_creds SET account_id = CASE "+
+		"WHEN reusable = 1 THEN account_id ELSE ? END "+
+		"WHERE kid = ? AND (reusable = 1 OR account_id = '') "+
+		"AND (expires = 0 OR expires > ?)", a.ID, a.EABKid, now.Unix())
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		// Refused: say why, from the row as it stands.
+		var reusable bool
+		var bound string
+		var exp int64
+		err := tx.QueryRow("SELECT reusable, account_id, expires FROM "+
+			"eab_creds WHERE kid = ?", a.EABKid).Scan(&reusable, &bound, &exp)
+		switch {
+		case err == sql.ErrNoRows:
+			return errEABGone
+		case err != nil:
+			return err
+		case exp != 0 && exp <= now.Unix():
+			return errEABExpired
+		default:
+			return errEABUsed
+		}
+	}
+	if _, err := tx.Exec(
 		"INSERT INTO accounts (id, thumbprint, jwk, eab_kid, status, created) "+
 			"VALUES (?, ?, ?, ?, ?, ?)",
-		a.ID, a.Thumbprint, a.JWK, a.EABKid, a.Status, time.Now().Unix())
-	return err
+		a.ID, a.Thumbprint, a.JWK, a.EABKid, a.Status, now.Unix()); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (d *DB) accountRow(where, arg string) (*Account, error) {

@@ -6,7 +6,7 @@ yca\-acme \- ACME (RFC 8555) issuance frontend for a yca certificate authority
 [\fIflags\fR]
 .br
 .B yca\-acme eab new
-[\fB\-\-state\fR \fIdb\fR] [\fB\-\-allow\fR \fIpatterns\fR]
+[\fB\-\-state\fR \fIdb\fR] [\fB\-\-allow\fR \fIpatterns\fR] [\fB\-\-reusable\fR] [\fB\-\-expires\fR \fIdur\fR]
 .br
 .B yca\-acme eab list
 [\fB\-\-state\fR \fIdb\fR]
@@ -88,13 +88,19 @@ unset: nginx terminates TLS (see share/nginx/yca.conf).
 Print version and exit.
 .SH COMMANDS
 .TP
-\fBeab new\fR [\fB\-\-allow\fR \fIpatterns\fR]
+\fBeab new\fR [\fB\-\-allow\fR \fIpatterns\fR] [\fB\-\-reusable\fR] [\fB\-\-expires\fR \fIdur\fR]
 Provision an External Account Binding credential; the kid and HMAC key
 are printed ONCE. \fIpatterns\fR is a comma\-separated identifier policy:
-exact names or \fB*.\fIsuffix\fR wildcards (empty = any name).
+exact names or \fB*.\fIsuffix\fR wildcards (empty = any name). A
+credential is single\-use: the first account registered with it binds it.
+\fB\-\-reusable\fR admits any number of accounts, for fleets that
+enroll unattended. \fB\-\-expires\fR (\fIN\fBd\fR or a duration such as
+\fB12h\fR) ends registration with the credential after \fIdur\fR;
+accounts registered before keep ordering.
 .TP
 .B eab list
-List provisioned credentials (kids and policies, never keys).
+List provisioned credentials: kid, policy, use (single\-use with the
+account bound to it or \fBunused\fR, or reusable) and expiry, never keys.
 .TP
 .BI "eab delete " kid
 Revoke a credential. Accounts registered with it keep existing but can

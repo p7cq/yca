@@ -117,6 +117,7 @@ CASES=(
   'yca-acme ari --|--window'
   'yca-acme ari |accelerate'
   'yca-acme eab --|--allow'
+  'yca-acme eab --re|--reusable'
   'yca-acme eab |delete'
 )
 

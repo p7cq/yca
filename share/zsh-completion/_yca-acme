@@ -25,6 +25,8 @@ _yca-acme() {
       '2:verb:(new list delete)' \
       '--state[protocol state database (default ./acme.db, must already exist)]:state db:_files' \
       '--allow[identifier patterns, comma-separated (exact or *.suffix; empty = any)]:patterns:' \
+      '--reusable[admit any number of accounts (default: single-use)]' \
+      '--expires[end registration after this long]:duration (e.g. 7d, 12h):' \
       '*:kid (for delete):'
     return
   fi

@@ -460,22 +460,56 @@ No open registration: every account needs a provisioned credential.
 yca-acme eab new --allow 'pki.example.ca'
 
 ┌ EAB credential (shown once) ────────────────────────┐
-    KID: SXYGc6ccV4D0DX_b4rkTk3w
-   HMAC: mfHzIkCGmmmJva_fXK0ybcg2N1KzdfY4uQYeEL-73Gs
-  Allow: pki.example.ca
+     KID: SXYGc6ccV4D0DX_b4rkTk3w
+    HMAC: mfHzIkCGmmmJva_fXK0ybcg2N1KzdfY4uQYeEL-73Gs
+   Allow: pki.example.ca
+     Use: single-use
+ Expires: never
 └─────────────────────────────────────────────────────┘
 
 ```
 
 - The HMAC is displayed once - hand it to the client operator over a safe
-  channel. `eab list` shows kids and policies, never keys.
+  channel. `eab list` shows kids, policies, use (and for a single-use
+  credential the account bound to it, or `unused`) and expiry, never keys.
 - `--allow` is the account's identifier policy: comma-separated patterns,
   each an exact name (`pki.example.ca`) or a wildcard suffix
   (`*.example.ca` - any depth below the suffix, not the bare suffix).
   Empty = any name. Orders outside the policy fail with
-  `rejectedIdentifier`.
-- One credential per team/host class is a sensible granularity: the kid is
-  recorded on the account and appears in the daemon log at registration.
+  `rejectedIdentifier`. The policy is the operator's: it is fixed at
+  `eab new`, and no ACME request can widen it. That includes single-label
+  names such as `localhost`, which an empty policy admits too. http-01
+  validates them against whatever the PKI host resolves them to: the PKI
+  host itself for `localhost`, a search-domain expansion otherwise. The
+  proof is then of control over that host, not over a name of the client's
+  own. List such names only for clients meant to have them (the test suites
+  do, with `--allow localhost`), and prefer an explicit policy over an empty
+  one outside a lab.
+- A credential is **single-use** by default: the first account registered
+  with it binds it, and any further registration (another key, even after
+  that account is deactivated) fails with `unauthorized`. A leaked kid/HMAC
+  then mints nothing, and a client that finds its credential used learns
+  that someone else got there first. `--reusable` admits any number of
+  accounts instead - for fleets that enroll unattended (images, config
+  management, ephemeral hosts), where one credential per host class sits in
+  a secret store. Keep a reusable credential's `--allow` narrow: it is a
+  standing secret, and `eab delete` then cuts the whole fleet.
+
+  | Case | Credential |
+  |---|---|
+  | Hosts enrolled by hand, one name each | single-use |
+  | A critical host (the ACME endpoint's own certificate) | single-use |
+  | Hosts provisioned automatically or rebuilt often | `--reusable`, narrow `--allow` |
+
+- `--expires` (`<N>d` or a duration such as `12h`) ends registration with
+  the credential: an unused ticket, or a fleet's enrollment window, does
+  not stay valid forever. Accounts registered before keep ordering;
+  `eab delete` is what stops them.
+- A registered account rotates its key with ACME key-change, no new
+  credential needed; a host that lost its account key needs a new
+  single-use credential.
+- The kid is recorded on the account and appears in the daemon log at
+  registration.
 - Revoking a credential: `eab delete <kid>`. Accounts registered with it
   keep existing (and keep authenticating) but can no longer order
   anything - their identifier policy is gone. The command names the

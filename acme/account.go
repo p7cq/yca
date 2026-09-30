@@ -8,10 +8,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 )
 
 func writeIndentedJSON(w io.Writer, v any) error {
@@ -91,7 +93,14 @@ func (s *server) handleNewAccount(w http.ResponseWriter, r *http.Request) {
 		EABKid:     cred.KID,
 		Status:     "valid",
 	}
-	if err := s.db.InsertAccount(acct); err != nil {
+	// After verifyEAB: only a holder of the HMAC key learns why a
+	// credential is refused.
+	if err := s.db.InsertAccountEAB(acct, time.Now()); errors.Is(err, errEABUsed) ||
+		errors.Is(err, errEABExpired) || errors.Is(err, errEABGone) {
+		s.writeProblem(w, problem(http.StatusUnauthorized, "unauthorized",
+			err.Error()))
+		return
+	} else if err != nil {
 		s.writeProblem(w, problem(http.StatusInternalServerError,
 			"serverInternal", "account insert"))
 		return
