@@ -183,6 +183,37 @@ TEST_CASE("store::Database: malformed SQL throws") {
   std::filesystem::remove(path);
 }
 
+TEST_CASE("store::Statement: a failed write throws instead of reading as "
+          "done") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "yca_store_step_ut.db";
+  std::filesystem::remove(path);
+  store::Database db(path.string());
+  db.create_table("CREATE TABLE u (k TEXT PRIMARY KEY)");
+  db.stmt("INSERT INTO u (k) VALUES ('a')")->spin();
+  // A duplicate key: SQLITE_CONSTRAINT used to be indistinguishable from
+  // SQLITE_DONE, so the insert "succeeded" with nothing written.
+  CHECK_THROWS_AS(db.stmt("INSERT INTO u (k) VALUES ('a')")->spin(),
+                  store::Error);
+  std::filesystem::remove(path);
+}
+
+TEST_CASE("store::Statement: BEGIN IMMEDIATE on a locked store throws") {
+  const auto path =
+      std::filesystem::temp_directory_path() / "yca_store_lock_ut.db";
+  std::filesystem::remove(path);
+  store::Database holder(path.string());
+  store::Database waiter(path.string()); // busy_timeout 0: fails at once
+  holder.stmt("BEGIN IMMEDIATE")->spin();
+  // The second writer must not proceed outside a transaction, which is
+  // what the check-then-insert sequences in ca.cpp rely on.
+  CHECK_THROWS_AS(waiter.stmt("BEGIN IMMEDIATE")->spin(), store::Error);
+  holder.stmt("COMMIT")->spin();
+  waiter.stmt("BEGIN IMMEDIATE")->spin(); // free again
+  waiter.stmt("COMMIT")->spin();
+  std::filesystem::remove(path);
+}
+
 TEST_CASE("store::Database: new_statement backs a Botan certificate store "
           "over the same connection") {
   const auto path =

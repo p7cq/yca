@@ -56,7 +56,15 @@ std::pair<const uint8_t *, std::size_t> Statement::get_blob(int column) {
   return {static_cast<const uint8_t *>(blob), static_cast<std::size_t>(size)};
 }
 
-bool Statement::step() { return ::sqlite3_step(m_stmt) == SQLITE_ROW; }
+bool Statement::step() {
+  const int rc = ::sqlite3_step(m_stmt);
+  if (rc == SQLITE_ROW)
+    return true;
+  if (rc == SQLITE_DONE)
+    return false;
+  throw Error(std::string("sqlite3_step failed: ") +
+              ::sqlite3_errmsg(::sqlite3_db_handle(m_stmt)));
+}
 
 std::size_t Statement::spin() {
   std::size_t steps = 0;

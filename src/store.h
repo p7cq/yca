@@ -57,7 +57,8 @@ public:
   std::size_t get_size_t(int column);
   std::pair<const uint8_t *, std::size_t> get_blob(int column);
 
-  // Advances to the next row; true while one is available.
+  // Advances to the next row; true while one is available. Throws Error
+  // on any SQLite failure.
   bool step();
   // Runs to completion (for statements with no rows to read); returns the
   // number of rows stepped over.
