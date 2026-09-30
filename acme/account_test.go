@@ -4,9 +4,13 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
+	"log"
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -64,5 +68,29 @@ func TestOnlyReturnExistingUnknown(t *testing.T) {
 	resp, v := e.post("/acme/new-account", body, "", "")
 	if problemType(v) != "accountDoesNotExist" {
 		t.Fatalf("onlyReturnExisting: %d %v", resp.StatusCode, v)
+	}
+}
+
+// Contacts are client-supplied: a newline in one must not start a forged
+// line in the daemon log.
+func TestContactCannotForgeLogLines(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(tsWriter{os.Stderr}) })
+
+	e := newTestEnv(t)
+	forged := "account XYZ deactivated"
+	body, _ := json.Marshal(map[string]any{
+		"contact":                []string{"mailto:a@test.ca\n" + forged},
+		"termsOfServiceAgreed":   true,
+		"externalAccountBinding": e.eab(),
+	})
+	if resp, v := e.post("/acme/new-account", body, "", ""); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register: %d %v", resp.StatusCode, v)
+	}
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if strings.HasPrefix(line, forged) {
+			t.Fatalf("forged log line:\n%s", buf.String())
+		}
 	}
 }

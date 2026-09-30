@@ -96,8 +96,8 @@ func (s *server) handleNewAccount(w http.ResponseWriter, r *http.Request) {
 			"serverInternal", "account insert"))
 		return
 	}
-	log.Printf("account %s registered (eab %s, contact %s)", acct.ID,
-		cred.KID, strings.Join(payload.Contact, " "))
+	log.Printf("account %s registered (eab %s, contact %q)", acct.ID,
+		cred.KID, payload.Contact)
 	w.Header().Set("Location", s.url("/acme/acct/"+acct.ID))
 	s.writeJSON(w, http.StatusCreated, s.accountJSON(acct))
 }
