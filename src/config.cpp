@@ -24,6 +24,22 @@ constexpr std::array<std::string_view, 3> kCurves = {"secp256r1", "secp384r1",
 // Botan's canonical hash names, passed to Botan verbatim.
 constexpr std::array<std::string_view, 3> kDigests = {"SHA-256", "SHA-384",
                                                       "SHA-512"};
+// The keys each section must hold, in step with the reads in load().
+constexpr std::array<std::string_view, 4> kSections = {"pki", "pkcs11", "root",
+                                                       "ca"};
+constexpr std::array<std::string_view, 3> kPkiKeys = {
+    "org_name", "country_code", "repository_host"};
+constexpr std::array<std::string_view, 2> kPkcs11Keys = {"module",
+                                                         "token_label"};
+// [root] and [ca.*].
+constexpr std::array<std::string_view, 7> kCaKeys = {
+    "cn",          "curve",       "digest",     "valid_days",
+    "slug_prefix", "key_backend", "token_label"};
+// [ca.*] only.
+constexpr std::array<std::string_view, 8> kSigningCaKeys = {
+    "profiles",  "ee_curve",      "ee_digest",       "ee_valid_days",
+    "simple_dn", "permitted_dns", "permitted_email", "policies"};
+
 bool one_of(std::span<const std::string_view> set, std::string_view v) {
   for (auto s : set)
     if (s == v)
@@ -165,6 +181,22 @@ load(const std::filesystem::path &path) {
 
   Config c;
 
+  // Unknown keys go to c.unknown, not errs: whether they are fatal depends
+  // on the command.
+  auto check_keys = [&](const toml::table &t, std::string_view sec,
+                        std::span<const std::string_view> known,
+                        std::span<const std::string_view> more = {}) {
+    for (const auto &[k, v] : t)
+      if (!one_of(known, k.str()) && !one_of(more, k.str()))
+        c.unknown.push_back(std::format("[{}] {}: unknown key", sec, k.str()));
+  };
+  for (const auto &[k, v] : tbl)
+    if (!one_of(kSections, k.str()))
+      c.unknown.push_back(
+          v.is_table()
+              ? std::format("[{}]: unknown section", k.str())
+              : std::format("{}: unknown key outside any section", k.str()));
+
   // Errors name the section and key the way the file spells them, so a
   // message points at a line the operator can find.
   auto get_str = [&](const toml::table &t, std::string_view sec,
@@ -260,6 +292,7 @@ load(const std::filesystem::path &path) {
   };
 
   if (const toml::table *t = require_table("pki")) {
+    check_keys(*t, "pki", kPkiKeys);
     get_str(*t, "pki", "org_name", c.pki.org_name); // DN-only
     if (get_str(*t, "pki", "country_code", c.pki.country_code) &&
         !two_letters(c.pki.country_code))
@@ -281,14 +314,17 @@ load(const std::filesystem::path &path) {
   if (tbl.contains("pkcs11") && !p11)
     errs.push_back("[pkcs11] must be a section");
   if (p11) {
+    check_keys(*p11, "pkcs11", kPkcs11Keys);
     if (p11->contains("module"))
       get_str(*p11, "pkcs11", "module", c.pkcs11.module);
     if (p11->contains("token_label"))
       get_str(*p11, "pkcs11", "token_label", c.pkcs11.token_label);
   }
 
-  if (const toml::table *t = require_table("root"))
+  if (const toml::table *t = require_table("root")) {
+    check_keys(*t, "root", kCaKeys);
     read_ca(*t, "root", c.root);
+  }
 
   // [ca.<purpose>]: the purpose is the section key, so TOML itself rejects
   // a duplicate rather than this loader having to.
@@ -317,6 +353,7 @@ load(const std::filesystem::path &path) {
       if (purpose == "root")
         errs.push_back("[ca.root]: 'root' names the trust anchor, which is "
                        "declared in [root]; pick another purpose");
+      check_keys(*t, sec, kCaKeys, kSigningCaKeys);
       read_ca(*t, sec, ca);
       if (const auto *arr = (*t)["profiles"].as_array()) {
         for (const auto &p : *arr) {
@@ -581,8 +618,10 @@ load(const std::filesystem::path &path) {
     errs.push_back("[pkcs11] token_label: set but every token-held CA "
                    "declares a label of its own");
 
-  if (!errs.empty())
+  if (!errs.empty()) {
+    errs.insert(errs.end(), c.unknown.begin(), c.unknown.end());
     return std::unexpected(std::move(errs));
+  }
   return c;
 }
 

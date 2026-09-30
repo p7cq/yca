@@ -27,7 +27,12 @@ is how issuance picks an issuer. At
 .B yca init
 each section is snapshotted into the store database, which becomes the
 source of truth; later edits to locked fields in the file are ignored with a
-warning. Per\-issuance flexibility is \fB\-\-valid\fR, capped by
+warning. Unknown keys and sections are refused by
+.B yca init
+and
+.BR "yca add" ,
+and only warned about by every other command.
+Per\-issuance flexibility is \fB\-\-valid\fR, capped by
 \fBee_valid_days\fR.
 .PP
 Subject DNs are encoded \fBC\fR, \fBO\fR, \fBCN\fR, from the most general

@@ -357,6 +357,17 @@ sed 's/SHA-384/SHA-999/' "$CFG" >"$WORK/bad.toml"
 sed 's/ee_curve = "secp256r1"/ee_curve = "prime256v1"/' "$CFG" >"$WORK/alias.toml"
 "$BIN" --config "$WORK/alias.toml" --store "$WORK/pki2" init >/dev/null 2>&1 &&
   bad "prime256v1 alias accepted" || ok "prime256v1 alias rejected"
+# unknown keys: fatal where the file is materialized, a warning elsewhere
+awk '{ print } /^\[ca\.tls\]/ { print "unknown = true" }' "$CFG" >"$WORK/unknown.toml"
+ERR="$("$BIN" --config "$WORK/unknown.toml" --store "$WORK/pki2" init 2>&1)" &&
+  bad "init accepted an unknown key" || ok "init rejects an unknown key"
+printf '%s' "$ERR" | grep -q '\[ca.tls\] unknown: unknown key' &&
+  ok "init names the unknown key" || bad "init unknown key message"
+ERR="$("$BIN" --config "$WORK/unknown.toml" --store "$PKI" get config 2>&1 >/dev/null)" &&
+  ok "day-2 command runs despite an unknown key" ||
+  bad "day-2 command blocked by an unknown key"
+printf '%s' "$ERR" | grep -q '\[ca.tls\] unknown: unknown key (ignored)' &&
+  ok "day-2 unknown key warned on stderr" || bad "day-2 unknown key silent"
 
 # --- simple_dn: a per-CA preference the profile can veto ---
 # The default is the organizational DN, because that is the shape a
@@ -536,6 +547,9 @@ DAYS=$((($(epoch "$NA") - $(epoch "$NB")) / 86400))
 w get config 2>/dev/null >"$WORK/dump1.toml"
 head -1 "$WORK/dump1.toml" | grep -q "^# showing configuration stored in database" &&
   ok "get config shows provenance" || bad "provenance header missing"
+grep -q '^slug_prefix = "ca-e"  # slug: ca-e1$' "$WORK/dump1.toml" &&
+  ok "get config shows the current slug as a comment" ||
+  bad "current slug missing from get config"
 (env -u CA_STORE_PASSPHRASE "$BIN" --config "$WORK/dump1.toml" \
   --store "$WORK/pki_rt" init >/dev/null 2>&1)
 "$BIN" --config "$WORK/dump1.toml" --store "$WORK/pki_rt" get config \
@@ -927,6 +941,11 @@ m create client --cn c.multi.ca --san=email:c@multi.ca >/dev/null 2>&1 &&
 m add signing-ca --purpose nosuch >/dev/null 2>&1 &&
   bad "add of an undeclared purpose accepted" ||
   ok "add refuses a purpose the file does not declare"
+awk '{ print } /^\[ca\.mtls\]/ { print "permited_dns = [\"multi.ca\"]" }' \
+  "$MCFG" >"$WORK/multi-unknown.toml"
+"$BIN" --config "$WORK/multi-unknown.toml" --store "$MPKI" add signing-ca \
+  --purpose mtls >/dev/null 2>&1 &&
+  bad "add accepted an unknown key" || ok "add rejects an unknown key"
 m add signing-ca --purpose mtls >/dev/null 2>&1 &&
   ok "add signing-ca --purpose mtls" || bad "add signing-ca"
 for f in mtls-e1.pem mtls-e1.crt mtls-e1.crl; do

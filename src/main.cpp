@@ -244,6 +244,18 @@ int main(int argc, char **argv) {
         log::error("config: {}", e);
       log::fatal("invalid configuration");
     }
+    // Unknown keys are fatal where the file is materialized (init and add).
+    const bool materializes = *init || *add;
+    for (const auto &u : config->unknown) {
+      if (materializes) {
+        log::error("config: {}", u);
+        continue;
+      }
+      log::warn("config: {} (ignored)", u);
+      log::to_stderr("config: {} (ignored)", u);
+    }
+    if (materializes && !config->unknown.empty())
+      log::fatal("invalid configuration");
 
     // The CA secrets from the environment (see ca::Secrets).
     auto env = [](const char *k) {

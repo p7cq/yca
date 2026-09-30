@@ -635,6 +635,47 @@ TEST_CASE("cfg::load: pkcs11 layouts") {
                    "PKCS#11"));
 }
 
+TEST_CASE("cfg::load: unknown keys are collected, not load errors") {
+  auto unknown = [](const std::string &toml) {
+    const auto c = parse(toml);
+    REQUIRE(c.has_value());
+    return c->unknown;
+  };
+  using V = std::vector<std::string>;
+
+  // Every key the loader reads is known, in every section.
+  const std::string ON_TOKEN = "key_backend = \"pkcs11\"";
+  CHECK(unknown(in_ca("simple_dn = true\npermitted_dns = [\"example.ca\"]\n"
+                      "permitted_email = [\"example.ca\"]\n"
+                      "policies = { server = [\"1.2.3\"] }\n" +
+                          ON_TOKEN,
+                      in_root(ON_TOKEN + "\ntoken_label = \"ets-root\"")) +
+                "\n[pkcs11]\nmodule = \"/usr/lib/opensc-pkcs11.so\"\n"
+                "token_label = \"ets\"\n")
+            .empty());
+
+  CHECK(unknown(with("country_code = \"CA\"",
+                     "contry = \"CA\"\ncountry_code = \"CA\"")) ==
+        V{"[pki] contry: unknown key"});
+  // A key valid in [ca.*] only is unknown in [root].
+  CHECK(unknown(in_root("simple_dn = true")) ==
+        V{"[root] simple_dn: unknown key"});
+  CHECK(unknown(in_ca("permited_dns = [\"example.ca\"]")) ==
+        V{"[ca.tls] permited_dns: unknown key"});
+  CHECK(unknown(in_root(ON_TOKEN + "\ntoken_label = \"ets-root\"") +
+                "\n[pkcs11]\nmodule = \"/usr/lib/opensc-pkcs11.so\"\n"
+                "modul = \"x\"\n") == V{"[pkcs11] modul: unknown key"});
+  CHECK(unknown(VALID + "\n[pkcs1l]\nmodule = \"x\"\n") ==
+        V{"[pkcs1l]: unknown section"});
+  CHECK(unknown("stray = true\n" + VALID) ==
+        V{"stray: unknown key outside any section"});
+
+  // A file that fails anyway lists them with its errors.
+  CHECK(rejected_for(
+      in_ca("stray = 1", with("digest = \"SHA-384\"", "digest = \"sha999\"")),
+      "[ca.tls] stray: unknown key"));
+}
+
 TEST_CASE("cfg::load validates repository_host as a DNS host, optional :port") {
   auto url = [](const char *v) {
     return loads(with("repository_host = \"pki.example.ca\"",

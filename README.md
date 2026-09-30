@@ -86,7 +86,7 @@ Shared by `[root]` and `[ca.<purpose>]`
 Constraints:
 
 - Every key that is neither optional nor defaulted is required and
-  non-empty.
+  non-empty; unknown keys and sections are refused by `init` and `add`.
 - At least one `[ca.<purpose>]`; a purpose is lowercase `[a-z0-9.-]` and
   not `root`.
 - `country_code` is two letters; `repository_host` is a DNS host name (no

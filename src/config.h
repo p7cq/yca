@@ -106,6 +106,8 @@ struct Config {
   CaFields root;
   // Keyed by purpose; TOML enforces the uniqueness of the keys itself.
   std::map<std::string, SigningCa> cas;
+  // Keys and sections the loader does not know, one message each.
+  std::vector<std::string> unknown;
 
   // The CA named by `purpose`, or nullptr if none carries that name.
   const SigningCa *ca(const std::string &purpose) const;

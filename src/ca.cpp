@@ -2651,7 +2651,7 @@ bool get_cert(const cfg::Config &config, const fs::path &store_dir,
     // default it may have come from: the snapshot records what was used.
     auto print_ca = [](const std::string &section, const cfg::CaFields &ca) {
       std::print("\n[{}]\ncn = \"{}\"\ncurve = \"{}\"\ndigest = \"{}\"\n"
-                 "valid_days = {}\nslug_prefix = \"{}\"\nslug = \"{}\"\n"
+                 "valid_days = {}\nslug_prefix = \"{}\"  # slug: {}\n"
                  "key_backend = \"{}\"\n",
                  section, ca.cn, ca.curve, ca.digest, ca.valid_days,
                  ca.slug_prefix, ca.slug, ca.key_backend);
