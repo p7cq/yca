@@ -2815,11 +2815,26 @@ bool list_certs(const fs::path &store_dir, const std::string &filter, int days,
     q->bind(1, now);
     q->bind(2, now - win);
   } else { // cn
-    // A CA alias selects the role, so every generation of it is listed; a
-    // literal CN selects exactly that name.
+    // A CA alias selects one issuing CA's lineage, so every generation
+    // of it is listed; a literal CN selects exactly that name.
+    std::string purpose;
+    if (cn.ends_with("-ca")) {
+      purpose = cn.substr(0, cn.size() - 3);
+      auto p = dbh->stmt("SELECT 1 FROM cert_index WHERE kind='signing' AND "
+                         "purpose=?1 LIMIT 1");
+      p->bind(1, purpose);
+      if (!p->step())
+        purpose.clear();
+    }
     if (cn == "root-ca" || cn == "signing-ca") {
       q = dbh->stmt(cols + "WHERE kind=?1 ORDER BY not_before DESC" + lim);
       q->bind(1, std::string(cn == "root-ca" ? "root" : "signing"));
+    } else if (!purpose.empty()) {
+      q = dbh->stmt(cols +
+                    "WHERE kind='signing' AND purpose=?1 "
+                    "ORDER BY not_before DESC" +
+                    lim);
+      q->bind(1, purpose);
     } else {
       q = dbh->stmt(cols + "WHERE cn=?1 ORDER BY not_before DESC" + lim);
       q->bind(1, cn);

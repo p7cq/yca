@@ -822,6 +822,8 @@ r get crl --cn signing-ca 2>/dev/null | openssl crl -noout -issuer 2>/dev/null |
   grep -q "CA E2" && ok "get crl signing-ca -> generation 2" || bad "crl alias stuck"
 r list --cn signing-ca 2>/dev/null | grep -c "signing" | grep -q "^2$" &&
   ok "list --cn signing-ca shows both generations" || bad "list shows one generation"
+r list --cn tls-ca 2>/dev/null | grep -c "signing" | grep -q "^2$" &&
+  ok "list --cn tls-ca shows both generations" || bad "list --cn tls-ca"
 
 # Both chains verify against the same root: that is the point of rotating
 # under a 2-tier hierarchy.
@@ -954,6 +956,15 @@ done
 m add signing-ca --purpose mtls >/dev/null 2>&1 &&
   bad "add accepted a purpose the store already holds" ||
   ok "add refuses an existing purpose (renew rotates it)"
+# <purpose>-ca lists that CA's lineage only.
+OUT="$(m list --cn mtls-ca 2>/dev/null)"
+printf '%s' "$OUT" | grep -q "^mTLS CA E1 " &&
+  ! printf '%s' "$OUT" | grep -q "^CA E1 " &&
+  ok "list --cn mtls-ca lists the mtls CA only" || bad "list --cn mtls-ca"
+OUT="$(m list --cn tls-ca 2>/dev/null)"
+printf '%s' "$OUT" | grep -q "^CA E1 " &&
+  ! printf '%s' "$OUT" | grep -q "^mTLS CA E1 " &&
+  ok "list --cn tls-ca lists the tls CA only" || bad "list --cn tls-ca"
 
 # The profile picks the issuer: each leaf chains to its own CA and to no
 # other, which is the whole point of the separation.

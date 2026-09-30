@@ -206,8 +206,8 @@ int main(int argc, char **argv) {
       list->add_option("--last", l_last, "issued within last N days")
           ->expected(0, 1)
           ->check(window);
-  auto *lo_cn =
-      list->add_option("--cn", l_cn, "by CN (root-ca|signing-ca or literal)");
+  auto *lo_cn = list->add_option(
+      "--cn", l_cn, "by CN (root-ca|<purpose>-ca|signing-ca or literal)");
   list->add_flag("--tsv", l_tsv, "tab-separated output");
   int l_limit = app::default_list_limit;
   list->add_option("--limit", l_limit,
