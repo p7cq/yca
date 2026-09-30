@@ -245,15 +245,27 @@ func (s *server) handleAuthz(w http.ResponseWriter, r *http.Request) {
 	s.writeJSON(w, http.StatusOK, s.authzJSON(authz, challs))
 }
 
-// hostSafe mirrors the CA-side dns_safe rule minus '*' (wildcards are
-// rejected earlier): ASCII hostname characters only, IDN as punycode.
+// hostSafe reports whether s (lowercase, wildcard prefix removed) is a DNS
+// hostname: LDH labels of 1..63 characters with no leading or trailing
+// hyphen, at most 253 characters, IDN as punycode. The last label must not
+// be all digits (RFC 3696 2), which also keeps IPv4 literals out of
+// dNSName SANs.
 func hostSafe(s string) bool {
-	for _, c := range s {
-		switch {
-		case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '.', c == '-':
-		default:
+	if len(s) == 0 || len(s) > 253 {
+		return false
+	}
+	labels := strings.Split(s, ".")
+	for _, l := range labels {
+		if len(l) == 0 || len(l) > 63 || l[0] == '-' || l[len(l)-1] == '-' {
 			return false
 		}
+		for _, c := range l {
+			switch {
+			case c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '-':
+			default:
+				return false
+			}
+		}
 	}
-	return true
+	return strings.Trim(labels[len(labels)-1], "0123456789") != ""
 }

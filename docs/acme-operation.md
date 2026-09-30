@@ -31,7 +31,8 @@ flowchart TD
   passed on. Anything else runs the real binary unchanged.
 - http-01 validation is outbound from the daemon: it fetches
   `http://<identifier>/.well-known/acme-challenge/<token>` - identifiers
-  must resolve (internal DNS) from the PKI host's point of view.
+  must resolve (internal DNS) from the PKI host's point of view. Redirects
+  are followed (up to 10) only to default http/https ports.
 
 ## Prerequisites
 
@@ -850,7 +851,8 @@ wrapper around it, or use a purpose-built delegated-DNS ACME helper
 - JWS URL binding (`--url`) plus single-use nonces make replay/cross-site
   reuse of captured requests ineffective; TLS is still required by the
   RFC and by common sense.
-- Identifiers are validated with the CA's hostname rules; the CSR goes
+- Identifiers must be DNS hostnames; single-label names are accepted,
+  subject to the EAB `--allow` policy. The CSR goes
   through the same `sign` path as the manual flow (see
   [Issue a certificate from a CSR](operation.md#issue-a-certificate-from-a-csr)).
 - The CSR may carry only dNSName SANs and must match the order's

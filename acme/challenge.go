@@ -11,6 +11,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -27,7 +28,22 @@ type http01Validator struct {
 // validate fetches http://<name>:<port>/.well-known/acme-challenge/<token>
 // and compares the body with the expected key authorization.
 func (v *http01Validator) validate(name, token, keyAuth string) error {
-	client := &http.Client{Timeout: 10 * time.Second} // up to 10 redirects
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+		// Redirects stay on the web ports, as public ACME CAs do.
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			u := req.URL
+			if (u.Scheme != "http" && u.Scheme != "https") ||
+				(u.Port() != "" && u.Port() != "80" && u.Port() != "443") {
+				return fmt.Errorf("redirect to %s refused: only http/https "+
+					"on ports 80/443", u.Redacted())
+			}
+			return nil
+		},
+	}
 	url := fmt.Sprintf("http://%s:%d/.well-known/acme-challenge/%s",
 		name, v.port, token)
 	resp, err := client.Get(url)

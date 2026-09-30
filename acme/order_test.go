@@ -4,12 +4,14 @@
 package main
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -224,5 +226,88 @@ func TestChallengeCannotReopenValidOrder(t *testing.T) {
 	_, o := e.post(orderPath, nil, e.kid, "")
 	if o["status"] != "valid" || o["certificate"] == nil {
 		t.Fatalf("valid order reopened: %v", o)
+	}
+}
+
+// Identifiers must be DNS hostnames, not just hostname characters: an
+// empty or oversized label, an edge hyphen, or an all-numeric last label
+// (which covers IPv4 literals) would otherwise land in a dNSName SAN.
+func TestNewOrderRejectsNonHostnames(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	// A second account on a credential without --allow (any name), so the
+	// IP-shaped names reach the syntax check instead of the policy one.
+	open := &testEnv{t: t, s: e.s, ts: e.ts, eabKid: newID(),
+		eabHMAC: make([]byte, 32)}
+	if _, err := rand.Read(open.eabHMAC); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.db.InsertEAB(open.eabKid, open.eabHMAC, ""); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	if open.key, err = generateKey(); err != nil {
+		t.Fatal(err)
+	}
+	open.register()
+
+	newOrder := func(env *testEnv, name string) (int, string) {
+		body, _ := json.Marshal(map[string]any{"identifiers": []map[string]string{
+			{"type": "dns", "value": name}}})
+		resp, v := env.post("/acme/new-order", body, env.kid, "")
+		return resp.StatusCode, problemType(v)
+	}
+	// Inside --allow "*.test.ca", so only the syntax check can refuse them.
+	for _, name := range []string{"a..test.ca", "-a.test.ca", "a-.test.ca",
+		"test.ca.", strings.Repeat("a", 64) + ".test.ca"} {
+		if code, typ := newOrder(e, name); typ != "malformed" {
+			t.Errorf("%q: got %d %q, want malformed", name, code, typ)
+		}
+	}
+	for _, name := range []string{"10.0.0.5", "127.0.0.1", "1.2.3"} {
+		if code, typ := newOrder(open, name); typ != "malformed" {
+			t.Errorf("%q: got %d %q, want malformed", name, code, typ)
+		}
+	}
+	// Single-label and ordinary names stay acceptable.
+	for _, name := range []string{"localhost", "host.lan", "a1.test.ca"} {
+		if code, typ := newOrder(open, name); code != http.StatusCreated {
+			t.Errorf("%q: got %d %q, want 201", name, code, typ)
+		}
+	}
+}
+
+// http-01 redirects stay on the web ports: a redirect to another port
+// would turn the validator into a probe of internal services.
+func TestHTTP01RedirectToOtherPortRefused(t *testing.T) {
+	e := newTestEnv(t)
+	e.register()
+	order, loc := e.order("localhost")
+	authzURL := order["authorizations"].([]any)[0].(string)
+	_, authz := e.post(e.path(authzURL), nil, e.kid, "")
+	ch := authz["challenges"].([]any)[0].(map[string]any)
+	token := ch["token"].(string)
+
+	// The target answers correctly; only the redirect to it is at issue.
+	target := challengeHost(t, token, token+"."+e.thumbprint())
+	front := httptest.NewServer(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, fmt.Sprintf("http://127.0.0.1:%d%s", target,
+				r.URL.Path), http.StatusFound)
+		}))
+	t.Cleanup(front.Close)
+	_, portStr, _ := net.SplitHostPort(front.Listener.Addr().String())
+	e.s.http01.port, _ = strconv.Atoi(portStr)
+
+	resp, v := e.post(e.path(ch["url"].(string)), []byte("{}"), e.kid, "")
+	if resp.StatusCode != http.StatusOK || v["status"] != "invalid" {
+		t.Fatalf("redirect to port %d followed: %d %v", target,
+			resp.StatusCode, v)
+	}
+	if detail, _ := v["error"].(map[string]any)["detail"].(string); !strings.Contains(detail, "refused") {
+		t.Fatalf("error detail: %q", detail)
+	}
+	if _, o := e.post(e.path(loc), nil, e.kid, ""); o["status"] != "invalid" {
+		t.Fatalf("order: %v", o)
 	}
 }
