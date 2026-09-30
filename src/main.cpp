@@ -238,24 +238,26 @@ int main(int argc, char **argv) {
   }
 
   try {
-    auto config = cfg::load(config_path);
-    if (!config) {
-      for (const auto &e : config.error())
-        log::error("config: {}", e);
-      log::fatal("invalid configuration");
-    }
-    // Unknown keys are fatal where the file is materialized (init and add).
+    // Any problem with the file is fatal where the file is materialized
+    // (init and add).
     const bool materializes = *init || *add;
-    for (const auto &u : config->unknown) {
-      if (materializes) {
-        log::error("config: {}", u);
-        continue;
+    std::optional<cfg::Config> config;
+    if (materializes || *create || *sign) {
+      auto loaded = cfg::load(config_path);
+      const auto &problems = loaded ? loaded->unknown : loaded.error();
+      for (const auto &p : problems) {
+        if (materializes) {
+          log::error("config: {}", p);
+          continue;
+        }
+        log::warn("config: {} (ignored)", p);
+        log::to_stderr("config: {} (ignored)", p);
       }
-      log::warn("config: {} (ignored)", u);
-      log::to_stderr("config: {} (ignored)", u);
+      if (materializes && !problems.empty())
+        log::fatal("invalid configuration");
+      if (loaded)
+        config = std::move(*loaded);
     }
-    if (materializes && !config->unknown.empty())
-      log::fatal("invalid configuration");
 
     // The CA secrets from the environment (see ca::Secrets).
     auto env = [](const char *k) {
@@ -282,7 +284,8 @@ int main(int argc, char **argv) {
     }
 
     if (*create) {
-      ca::reconcile(*config, *eff);
+      if (config)
+        ca::reconcile(*config, *eff);
       if (c_cn.empty()) {
         log::error("--cn is required for create {}", c_target);
         return 1;
@@ -314,7 +317,8 @@ int main(int argc, char **argv) {
       return ca::enroll(store_dir, e_id) ? 0 : 1;
 
     if (*sign) {
-      ca::reconcile(*config, *eff);
+      if (config)
+        ca::reconcile(*config, *eff);
       std::optional<std::chrono::seconds> valid;
       if (!s_valid.empty()) {
         valid = util::parse_duration(s_valid);

@@ -10,7 +10,6 @@
 
 #include "app.h"
 #include "ca.h"
-#include "config.h"
 #include "log.h"
 #include "seed.h"
 
@@ -18,10 +17,8 @@ int main(int argc, char **argv) {
   CLI::App app{std::string(app::name) +
                "-seed - load-test store seeder (not for production use)"};
 
-  std::string config_path = "yca.toml";
   std::string store_dir{app::store_dir};
   int count = 0, same_cn = 0;
-  app.add_option("--config", config_path, "config file (default yca.toml)");
   app.add_option("--store", store_dir,
                  std::string("store/artifacts directory (default ") +
                      std::string(app::store_dir) + ")");
@@ -36,13 +33,6 @@ int main(int argc, char **argv) {
   log::set_file(log::default_path(store_dir));
 
   try {
-    auto config = cfg::load(config_path);
-    if (!config) {
-      for (const auto &e : config.error())
-        log::error("config: {}", e);
-      log::fatal("invalid configuration");
-    }
-
     if (!ca::is_initialized(store_dir)) {
       log::error("not initialized; run '{} init'", app::name);
       return 1;

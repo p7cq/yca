@@ -383,6 +383,34 @@ deliberate trade-off for a root key that stays quiet the rest of the
 year. `revoke ca` re-signs the root CRL itself; publish it at once rather
 than waiting for the publish timer.
 
+## Editing yca.toml after init
+
+After `init` the store is the source of truth and the file matters only to
+the commands that read it:
+
+| Command                                               | `yca.toml`                                       |
+| ----------------------------------------------------- | -------------------------------------------------|
+| `init`, `add`                                         | read; any problem is fatal                       |
+| `create`, `sign`                                      | read; drift warnings only, logged as `(ignored)` |
+| `revoke`, `renew`, `refresh`, `get`, `list`, `enroll` | not read                                         |
+
+A broken or missing file does not stop the CRL timers, revocation, or
+ACME issuance, but it goes unnoticed there: a typo surfaces as a warning
+on the next `create` or `sign` (on stderr and in `yca.log`), or as an error
+on (an eventual) next `add`.
+
+To silence the warnings, recreate it from store (or from a backup):
+
+```bash
+yca get config | sudo tee /etc/yca/yca.toml >/dev/null
+```
+
+If the file was missing:
+
+```bash
+sudo chown root:yca /etc/yca/yca.toml && sudo chmod 0640 /etc/yca/yca.toml
+```
+
 ## Add an issuing CA
 
 An issuing CA exists per purpose - `[ca.tls]`, `[ca.email]` - and each

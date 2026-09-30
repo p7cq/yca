@@ -61,7 +61,7 @@ for N in "${SIZES[@]}"; do
   W() { "$BIN" --config "$CFG" --store "$PKI" "$@"; }
 
   s=$(date +%s)
-  "$SEED_BIN" --config "$CFG" --store "$PKI" --count "$N" >/dev/null 2>&1
+  "$SEED_BIN" --store "$PKI" --count "$N" >/dev/null 2>&1
   seed_s=$(($(date +%s) - s))
 
   list_ms=$(ms W list --expiring 30)

@@ -363,11 +363,28 @@ ERR="$("$BIN" --config "$WORK/unknown.toml" --store "$WORK/pki2" init 2>&1)" &&
   bad "init accepted an unknown key" || ok "init rejects an unknown key"
 printf '%s' "$ERR" | grep -q '\[ca.tls\] unknown: unknown key' &&
   ok "init names the unknown key" || bad "init unknown key message"
-ERR="$("$BIN" --config "$WORK/unknown.toml" --store "$PKI" get config 2>&1 >/dev/null)" &&
-  ok "day-2 command runs despite an unknown key" ||
-  bad "day-2 command blocked by an unknown key"
+ERR="$("$BIN" --config "$WORK/unknown.toml" --store "$PKI" create server \
+  --cn unknown.ca 2>&1 >/dev/null)" &&
+  ok "create runs despite an unknown key" || bad "create blocked by an unknown key"
 printf '%s' "$ERR" | grep -q '\[ca.tls\] unknown: unknown key (ignored)' &&
-  ok "day-2 unknown key warned on stderr" || bad "day-2 unknown key silent"
+  ok "create warns about an unknown key on stderr" || bad "create unknown key silent"
+# After init the store is the source of truth: an invalid or missing file
+# stops only the commands that materialize it.
+ERR="$("$BIN" --config "$WORK/bad.toml" --store "$PKI" create server \
+  --cn bad.ca 2>&1 >/dev/null)" &&
+  ok "create runs off the snapshot despite an invalid file" ||
+  bad "create blocked by an invalid file"
+printf '%s' "$ERR" | grep -q 'digest.*(ignored)' &&
+  ok "create warns about an invalid file" || bad "create invalid file silent"
+ERR="$("$BIN" --config "$WORK/bad.toml" --store "$PKI" get config 2>&1 >/dev/null)" &&
+  ok "get runs despite an invalid file" || bad "get blocked by an invalid file"
+[ -z "$ERR" ] && ok "get does not read the file" || bad "get read the file: $ERR"
+"$BIN" --config "$WORK/nosuch.toml" --store "$PKI" list --cn root-ca \
+  >/dev/null 2>&1 && ok "list runs without a config file" ||
+  bad "list blocked by a missing file"
+"$BIN" --config "$WORK/nosuch.toml" --store "$PKI" add signing-ca \
+  --purpose tls >/dev/null 2>&1 &&
+  bad "add accepted a missing file" || ok "add refuses a missing file"
 
 # --- simple_dn: a per-CA preference the profile can veto ---
 # The default is the organizational DN, because that is the shape a
@@ -824,6 +841,10 @@ r list --cn signing-ca 2>/dev/null | grep -c "signing" | grep -q "^2$" &&
   ok "list --cn signing-ca shows both generations" || bad "list shows one generation"
 r list --cn tls-ca 2>/dev/null | grep -c "signing" | grep -q "^2$" &&
   ok "list --cn tls-ca shows both generations" || bad "list --cn tls-ca"
+# The CRL timer must survive a broken edit of the file.
+"$BIN" --config "$WORK/bad.toml" --store "$ROT" refresh crl signing \
+  >/dev/null 2>&1 && ok "refresh runs despite an invalid file" ||
+  bad "refresh blocked by an invalid file"
 
 # Both chains verify against the same root: that is the point of rotating
 # under a 2-tier hierarchy.
