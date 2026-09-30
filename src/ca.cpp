@@ -1689,7 +1689,7 @@ bool issue_ee(const cfg::Config &config, const fs::path &store_dir,
     // The CN becomes a dNSName SAN (IA5String): hostname ASCII only. Other
     // profiles keep the CN DN-only (UTF8String), so it is free-form.
     if (!dns_safe(cn)) {
-      log::error("{} CN must be an ASCII hostname [A-Za-z0-9.*-]: '{}'",
+      log::error("{} CN must be a DNS host name (IDN: use punycode): '{}'",
                  profile, cn);
       return false;
     }
@@ -2079,7 +2079,7 @@ bool sign_csr(const cfg::Config &config, const fs::path &store_dir,
   case profile::Subject::DnsCn:
     // The set-backed AlternativeName dedups DNS:CN if the CSR listed it too.
     if (!dns_safe(cn)) {
-      log::error("{} CN must be an ASCII hostname [A-Za-z0-9.*-]: '{}'",
+      log::error("{} CN must be a DNS host name (IDN: use punycode): '{}'",
                  profile, cn);
       return false;
     }

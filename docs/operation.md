@@ -37,6 +37,10 @@ yca create client --cn "Client Name" --san email:client@example.ca
 yca create client --cn web --san uri:spiffe://example.ca/ns/prod/sa/web
 ```
 
+A `dns` SAN, and the CN of a server certificate, must be a DNS host name,
+optionally under one leading `*.`, IDN as punycode. The last label may not
+be all digits, so an IPv4 address goes in an `ip` SAN instead.
+
 A `uri` SAN must be an absolute URI; when it uses the `spiffe` scheme it
 is validated as a SPIFFE ID (lowercase trust domain, no port, no query or
 fragment, no trailing slash). At most one `uri` per certificate, because

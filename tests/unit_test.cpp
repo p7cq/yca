@@ -55,6 +55,23 @@ TEST_CASE("dns_safe / ascii_graphic") {
   CHECK_FALSE(util::dns_safe(""));
   CHECK_FALSE(util::dns_safe("has space.ca"));
   CHECK_FALSE(util::dns_safe("株.ca")); // raw IDN
+  // Structure, not just the charset: the ACME frontend's hostSafe rule.
+  CHECK(util::dns_safe("localhost")); // single label
+  CHECK(util::dns_safe("Server.CA")); // case carries no meaning
+  CHECK(util::dns_safe("a1.ca"));
+  CHECK_FALSE(util::dns_safe("a..ca")); // empty label
+  CHECK_FALSE(util::dns_safe(".ca"));   // leading dot
+  CHECK_FALSE(util::dns_safe("ca."));   // trailing dot
+  CHECK_FALSE(util::dns_safe("-a.ca")); // edge hyphens
+  CHECK_FALSE(util::dns_safe("a-.ca"));
+  CHECK_FALSE(util::dns_safe(std::string(64, 'a') + ".ca"));  // label > 63
+  CHECK_FALSE(util::dns_safe(std::string(250, 'a') + ".ca")); // name > 253
+  CHECK_FALSE(util::dns_safe("10.0.0.5")); // IPv4 belongs in --san ip
+  CHECK_FALSE(util::dns_safe("1.2.3"));    // all-numeric last label
+  CHECK_FALSE(util::dns_safe("foo.*.ca")); // '*' only as the whole
+  CHECK_FALSE(util::dns_safe("**.ca"));    // leftmost label
+  CHECK_FALSE(util::dns_safe("*"));
+  CHECK_FALSE(util::dns_safe("*."));
   CHECK(util::ascii_graphic("p@example.ca"));
   CHECK_FALSE(util::ascii_graphic("p @example.ca")); // space
   CHECK_FALSE(util::ascii_graphic("пример@example.ca"));
@@ -1009,6 +1026,20 @@ TEST_CASE("ca::revoke_ca puts a signing generation on the root CRL") {
   CHECK(ca::is_initialized(t.dir));
   // Issuance is unaffected: the active generation never moved.
   CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "after.ut.ca", {}));
+}
+
+TEST_CASE("ca::issue_ee refuses a dNSName that is not a host name") {
+  TempPki t;
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+  // The CN of a server certificate becomes a dNSName SAN.
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "10.0.0.5", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "a..ut.ca", {}));
+  CHECK_FALSE(ca::issue_ee(*eff, t.dir, kPass, "server", "ok.ut.ca",
+                           {{ca::San::Type::Dns, "-bad.ut.ca"}}));
+  CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "ok.ut.ca",
+                     {{ca::San::Type::Ip, "10.0.0.5"}}));
 }
 
 TEST_CASE("ca::revoke_ca touches only the victim's own lineage") {

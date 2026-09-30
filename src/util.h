@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace util {
 
@@ -22,9 +23,15 @@ std::optional<uint32_t> parse_ipv4(const std::string &s);
 // seconds; nullopt if malformed.
 std::optional<std::chrono::seconds> parse_duration(const std::string &s);
 
-// True if `s` is non-empty and contains only ASCII hostname characters
-// [A-Za-z0-9.*-] ('*' for wildcards). dNSName SANs are IA5String (ASCII);
-// IDN hosts must be given in punycode.
+// DNS host name (RFC 1123): dot-separated labels of [A-Za-z0-9-], 1..63 chars
+// each, no leading/trailing hyphen, at most 253 chars. Notably no underscore -
+// resolvers reject it, and repository_host goes verbatim into the AIA/CDP URLs.
+bool valid_hostname(std::string_view s);
+
+// True if `s` may be a dNSName SAN: a valid_hostname, optionally under one
+// leading "*." wildcard label, whose last label is not all digits (RFC 3696
+// 2 - which also keeps IPv4 literals out; they belong in an IP SAN).
+// dNSName SANs are IA5String (ASCII); IDN hosts must be given in punycode.
 bool dns_safe(const std::string &s);
 
 // True if `s` is non-empty, all printable ASCII (0x21..0x7E) - IA5-safe.

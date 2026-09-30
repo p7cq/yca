@@ -83,6 +83,10 @@ Fails if the store is already initialized.
 Issue an end-entity certificate. \fB\-\-san\fR is repeatable with
 \fItype\fR one of \fBdns\fR, \fBemail\fR, \fBip\fR, \fBuri\fR; servers
 always get DNS:\fIcn\fR added, clients require at least one SAN. A
+\fBdns\fR SAN, and a server \fIcn\fR, must be a DNS host name: labels of
+[A\-Za\-z0\-9\-], 1..63 characters, no leading or trailing hyphen,
+optionally under one leading \fB*.\fR, IDN as punycode, and not an IPv4
+address (use \fBip\fR). A
 \fBuri\fR SAN must be an absolute, printable-ASCII URI, and one using
 the \fBspiffe\fR scheme must be a valid SPIFFE ID; at most one
 \fBuri\fR per certificate (an X509\-SVID carries exactly one).

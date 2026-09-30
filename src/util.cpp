@@ -81,16 +81,39 @@ std::optional<std::chrono::seconds> parse_duration(const std::string &s) {
   return std::chrono::seconds(v * mult);
 }
 
-bool dns_safe(const std::string &s) {
-  if (s.empty())
+bool valid_hostname(std::string_view s) {
+  if (s.empty() || s.size() > 253)
     return false;
-  for (char c : s) {
-    const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                    (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '*';
-    if (!ok)
+  std::size_t label = 0;
+  for (std::size_t i = 0; i < s.size(); ++i) {
+    const char c = s[i];
+    if (c == '.') {
+      if (label == 0 || s[i - 1] == '-')
+        return false;
+      label = 0;
+      continue;
+    }
+    const bool alnum = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                       (c >= '0' && c <= '9');
+    if (!alnum && c != '-')
+      return false;
+    if (c == '-' && label == 0)
+      return false;
+    if (++label > 63)
       return false;
   }
-  return true;
+  return label > 0 && s.back() != '-';
+}
+
+bool dns_safe(const std::string &s) {
+  std::string_view host = s;
+  if (host.starts_with("*."))
+    host.remove_prefix(2);
+  if (!valid_hostname(host))
+    return false;
+  const auto dot = host.rfind('.');
+  const auto last = dot == std::string_view::npos ? host : host.substr(dot + 1);
+  return last.find_first_not_of("0123456789") != std::string_view::npos;
 }
 
 bool ascii_graphic(const std::string &s) {

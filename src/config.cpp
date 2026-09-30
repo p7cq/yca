@@ -15,6 +15,7 @@
 
 #include "app.h"
 #include "profile.h"
+#include "util.h"
 
 namespace cfg {
 namespace {
@@ -76,33 +77,6 @@ bool valid_slug(std::string_view s) {
   return true;
 }
 
-// DNS host name (RFC 1123): dot-separated labels of [A-Za-z0-9-], 1..63 chars
-// each, no leading/trailing hyphen. Notably no underscore - resolvers reject
-// it, and repository_host goes verbatim into the AIA/CDP URLs.
-bool valid_hostname(std::string_view s) {
-  if (s.empty() || s.size() > 253)
-    return false;
-  std::size_t label = 0;
-  for (std::size_t i = 0; i < s.size(); ++i) {
-    const char c = s[i];
-    if (c == '.') {
-      if (label == 0 || s[i - 1] == '-')
-        return false;
-      label = 0;
-      continue;
-    }
-    const bool alnum = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
-                       (c >= '0' && c <= '9');
-    if (!alnum && c != '-')
-      return false;
-    if (c == '-' && label == 0)
-      return false;
-    if (++label > 63)
-      return false;
-  }
-  return label > 0 && s.back() != '-';
-}
-
 // repository_host = host name, optionally with a ":port" (1..65535). No
 // scheme, no path: the code prepends "http://" and appends artifact paths.
 bool valid_host_port(std::string_view s) {
@@ -120,7 +94,7 @@ bool valid_host_port(std::string_view s) {
       return false;
     s = s.substr(0, colon);
   }
-  return valid_hostname(s);
+  return util::valid_hostname(s);
 }
 
 // Two slug prefixes collide once generations are appended when one is the
@@ -420,7 +394,7 @@ load(const std::filesystem::path &path) {
                 "[{}] {}: '{}' is a mailbox; a constraint is a domain, "
                 "optionally preceded by a full stop",
                 sec, field, *name));
-          else if (!valid_hostname(host))
+          else if (!util::valid_hostname(host))
             errs.push_back(std::format("[{}] {}: '{}' is not a DNS host name",
                                        sec, field, *name));
           else
