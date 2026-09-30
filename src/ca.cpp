@@ -2479,8 +2479,9 @@ bool revoke_ca(const cfg::Config &config, const fs::path &store_dir,
   u->bind(3, victim_fp);
   u->spin();
   auto g = dbh->stmt("UPDATE ca_cert_index SET status='revoked' "
-                     "WHERE kind='signing' AND gen=?1");
-  g->bind(1, static_cast<std::size_t>(victim->gen));
+                     "WHERE kind='signing' AND purpose=?1 AND gen=?2");
+  g->bind(1, victim->purpose);
+  g->bind(2, static_cast<std::size_t>(victim->gen));
   g->spin();
   commit_write(*dbh);
 

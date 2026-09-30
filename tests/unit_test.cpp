@@ -1011,6 +1011,49 @@ TEST_CASE("ca::revoke_ca puts a signing generation on the root CRL") {
   CHECK(ca::issue_ee(*eff, t.dir, kPass, "server", "after.ut.ca", {}));
 }
 
+TEST_CASE("ca::revoke_ca touches only the victim's own lineage") {
+  TempPki t;
+  // A second issuing CA: generation numbers repeat across purposes, so a
+  // revocation keyed on the generation alone would reach both.
+  t.config.cas.at("tls").profiles = {"server"};
+  t.config.cas.at("tls").policies.erase("client");
+  cfg::SigningCa cli = t.config.cas.at("tls");
+  cli.purpose = "cli";
+  cli.profiles = {"client"};
+  cli.cn = "UT CLI E1";
+  cli.slug_prefix = "ut-cli-e";
+  cli.slug = "ut-cli-e1";
+  cli.policies = {{"client", {"1.3.6.1.4.1.32473.1.2"}}};
+  t.config.cas.emplace(cli.purpose, std::move(cli));
+  REQUIRE(ca::init(t.config, t.dir, kPass));
+  auto eff = ca::load_config(t.dir);
+  REQUIRE(eff.has_value());
+
+  // Rotate cli, then revoke its generation 1; tls generation 1 stays the
+  // active server issuer.
+  REQUIRE(ca::renew_signing_ca(*eff, t.dir, kPass, "cli", "UT CLI E2"));
+  REQUIRE(ca::revoke_ca(*eff, t.dir, kPass, "UT CLI E1", "cacompromise"));
+
+  {
+    auto h = ca::detail::open_store(t.dir / "ca-store.db");
+    auto st = h->stmt("SELECT status FROM ca_cert_index "
+                      "WHERE purpose='tls' AND gen=1");
+    REQUIRE(st->step());
+    CHECK(st->get_str(0) == "active");
+    std::vector<std::string> live;
+    for (const auto &g : ca::detail::live_cas(*h, *eff, "signing"))
+      live.push_back(g.slug);
+    CHECK(live == std::vector<std::string>{"ut-cli-e2", "ut-ca-e1"});
+  }
+
+  // tls's CRL keeps being re-signed; before the fix the refresh skipped it
+  // and it went stale at its nextUpdate.
+  const auto tls_crl = (t.dir / "ca" / "ut-ca-e1.crl").string();
+  const auto before = Botan::X509_CRL(tls_crl).crl_number();
+  REQUIRE(ca::refresh_crl(*eff, t.dir, kPass, ca::CrlScope::Signing));
+  CHECK(Botan::X509_CRL(tls_crl).crl_number() == before + 1);
+}
+
 TEST_CASE("ca::is_initialized: active anchors must match the locked config") {
   TempPki t;
   CHECK_FALSE(ca::is_initialized(t.dir)); // absent store
