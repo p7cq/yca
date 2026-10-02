@@ -1,4 +1,4 @@
-# Day-to-day operation - usage examples
+# Day-to-day operation
 
 Examples for every issuance and lookup flow the CLI offers. Commands
 assume an initialized store and run as the admin through the packaged
@@ -7,7 +7,7 @@ assume an initialized store and run as the admin through the packaged
 from `/etc/yca/yca.env`. In the split and hybrid layouts the root token
 leaves the safe only for root key ceremonies: `init`, `add signing-ca`,
 `renew signing-ca`, `refresh crl root` and `revoke ca`. Its PIN is
-exported for the ceremony only, and the wrapper passes it on:
+exported and the wrapper passes it on:
 
 ```bash
 read -rs CA_HSM_ROOT_PIN && export CA_HSM_ROOT_PIN  # root token (split/hybrid)
@@ -16,10 +16,8 @@ unset CA_HSM_ROOT_PIN
 ```
 
 Without the wrapper (a development build) the secrets come from the
-environment the same way (see
-[Key backend layouts](../README.md#key-backend-layouts)). Through the
-wrapper the CLI runs in `/var/lib/yca` as `yca` and cannot open files in
-your home, which is why the examples pass CSRs on stdin.
+environment the same way - through the wrapper the CLI runs in
+`/var/lib/yca` as `yca`.
 
 ## Issue a certificate (CA-generated key)
 

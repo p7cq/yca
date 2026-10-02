@@ -25,14 +25,13 @@ flowchart TD
   chains) lives in the daemon's own database (`--state`), not in the CA store.
 - Like `yca`, the `yca-acme` on `PATH` is an operator wrapper; the daemon
   itself is `/usr/libexec/yca/yca-acme`, which the unit starts directly.
-  The wrapper runs the `eab` and `ari` subcommands as the service account
-  (the database is `yca:yca` 0600), with umask 077 and `--state
-  /var/lib/yca/acme.db` unless given; they need no CA secret, so none is
-  passed on. Anything else runs the real binary unchanged.
-- http-01 validation is outbound from the daemon: it fetches
-  `http://<identifier>/.well-known/acme-challenge/<token>` - identifiers
-  must resolve (internal DNS) from the PKI host's point of view. Redirects
-  are followed (up to 10) only to default http/https ports.
+  The wrapper runs the `eab` and `ari` subcommands as the service account,
+  with umask 077 and `--state /var/lib/yca/acme.db`; they need no CA secret
+  passed on.
+- HTTP-01 validation is outbound from the daemon: it fetches
+  `http://<repository_host>/.well-known/acme-challenge/<token>` - identifiers
+  must resolve from the PKI host's point of view. Redirects are followed
+  (up to 10) only to default http/https ports.
 
 ## Prerequisites
 
@@ -52,12 +51,7 @@ flowchart TD
 5. DNS: the endpoint name (e.g. `pki.example.ca`) and every identifier
    clients will order must resolve in the environment's DNS.
 
-ACME client on Fedora:
-```bash
-sudo curl https://get.acme.sh | sh -s email=so@example.ca --home /usr/local/share/acme --config-home /usr/local/share/acme --cert-home /usr/local/share/acme
-```
-
-## TLS bootstrap (chicken and egg, resolved by ceremony)
+## TLS bootstrap
 
 RFC 8555 requires HTTPS, and the endpoint's own certificate comes from the
 CA behind it. Issue it manually, once:
@@ -72,8 +66,8 @@ acme.sh, `REQUESTS_CA_BUNDLE=root.pem` for certbot).
 
 Renewing the endpoint certificate manually works the same way. For an
 automated setup where `yca-acme` issues and renews its own endpoint
-certificate via ACME against itself (dns-01 - the endpoint is not
-reachable for http-01 until nginx is already serving it), see
+certificate via ACME against itself (chicken and egg - the endpoint is not
+reachable for HTTP-01 until nginx is already serving it), see
 "Automated renewal" below. Either way the CA's renewal window applies
 (see the [renewal cadence](#renewal-cadence-vs-the-cas-renewal-window)).
 
@@ -87,7 +81,7 @@ SAN (`create server --cn other-cn --san dns:shared-name`).
 
 ### Automated renewal for yca's ACME TLS certificate
 
-This only works if the DNS server is already configured to accept `dns-01`
+This only works if the DNS server is already configured to accept `DNS-01`
 challenges for the `repository_host` domain name.
 
 #### 1. Initialize the store
@@ -107,14 +101,10 @@ sudo trust list | head -3
 
 #### 3. Configure nginx
 
-`/etc/yca` and `/srv/yca` (with `pub/` and the http-01 `webroot/`) come
+`/etc/yca` and `/srv/yca` (with `pub/` and the HTTP-01 `webroot/`) come
 with the package. The acme.sh home and the
 endpoint certificate live under `/etc/yca/acme`, root-only (acme.sh and
-nginx run as root there):
-
-```bash
-sudo install -d -m 700 /etc/yca/acme
-```
+nginx run as root there).
 
 Install the example server block as in
 [installation, section 6](install.md#6-repository-host-publication-and-reverse-proxy),
@@ -161,8 +151,8 @@ sudo chmod 600 /etc/yca/acme/.{kid,hmac}
 #### 6. Configure and start the daemon
 
 Override the unit's `ExecStart` with the public URL, the desired validity
-and the target DNS server (`sudo systemctl edit yca-acme.service`, which
-also reloads the unit). For example:
+and the target DNS server (`sudo systemctl edit yca-acme.service`).
+For example:
 
 ```ini
 [Service]
@@ -196,9 +186,6 @@ Enable `yca-root-crl-refresh.timer` as well where the layout allows it
 
 #### 7. Register the acme.sh account
 
-Use a new `--home`/`--config-home` if `acme.sh` will issue multiple
-certificates on the *same* host.
-
 ```bash
 export ACME=https://pki.example.ca/acme/directory
 
@@ -213,8 +200,7 @@ sudo acme.sh \
 
 #### 8. Issue and install the certificate
 
-Note that the `nsupdate` command (used by `dns_nsupdate` hook) must be
-available in PATH.
+The `nsupdate` command (used by `dns_nsupdate` hook) must be available in PATH.
 
 ```bash
 sudo acme.sh \
@@ -277,7 +263,7 @@ yca-acme [flags]
               short ACME certificates without touching the CA config -
               set it in the systemd unit and restart the daemon.
 --http01-port port the validator connects to on identifiers (default 80)
---dns         resolver for dns-01 TXT lookups, host[:53] - point it at the
+--dns         resolver for DNS-01 TXT lookups, host[:53] - point it at the
               bind serving the identifier zones (default: system resolver)
 --tls-cert    serve TLS directly (file may hold the full chain)
 --tls-key     TLS private key
@@ -315,10 +301,7 @@ database; pass `--state` only if the unit uses another one.
 
 ## systemd
 
-The unit ships as `share/systemd/yca-acme.service` (installed, not
-enabled, by the packages; `--url` carries a placeholder - see below).
-It is the one long-running yca service, with the CA secret and write
-access the exec pipeline needs:
+The unit ships as `share/systemd/yca-acme.service`:
 
 ```ini
 [Unit]
@@ -339,10 +322,6 @@ ExecStart=/usr/libexec/yca/yca-acme \
   --store /var/lib/yca/store
 Restart=on-failure
 
-# Hardening, mirroring the yca-* oneshot units. The daemon needs the whole state
-# dir read-write: the store (issuance), yca.log next to it, and acme.db.
-# pkcs11 backend additionally needs AF_UNIX (pcscd) - AF_INET/AF_INET6 are
-# for the listener and the outbound http-01 fetches.
 UMask=0077
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -371,9 +350,7 @@ SystemCallErrorNumber=EPERM
 WantedBy=multi-user.target
 ```
 
-Override the shipped placeholder `--url https://pki.example.ca` with
-the real `repository_host` set in `yca.toml` BEFORE the first client
-connects:
+Override the placeholder from `[pki] repository_host`:
 
 ```bash
 systemctl edit yca-acme
@@ -391,15 +368,14 @@ ExecStart=/usr/libexec/yca/yca-acme \
   --store /var/lib/yca/store
 ```
 
-Enable it like the CRL refresh timers: only after `/etc/yca/yca.env` exists
-(the enable is the operator's explicit decision to automate the secret).
+And enable the service after `/etc/yca/yca.env` is set.
 
 ```bash
 systemctl enable --now yca-acme
 ```
 
 Smoke test with `curl -s https://pki.example.ca/acme/directory`; the
-URLs inside must carry the public host:
+URLs inside must carry the `repository_host` value from config:
 
 ```js
 {
@@ -418,10 +394,10 @@ URLs inside must carry the public host:
 
 ## nginx
 
-`share/nginx/yca.conf` carries the full picture: the plain-HTTP block
-(published .crt/.crl, an http-01 webroot under `/.well-known/acme-challenge/`)
-plus the HTTPS block below. TLS termination at nginx with the bootstrap
-certificate; the daemon stays on loopback HTTP:
+`share/nginx/yca.conf` contains the plain-HTTP block (published .crt/.crl,
+an HTTP-01 webroot under `/.well-known/acme-challenge/`) plus the HTTPS
+block below. TLS termination at nginx with the bootstrap certificate; the
+daemon stays on loopback HTTP:
 
 ```nginx
 server {
@@ -459,13 +435,13 @@ No open registration: every account needs a provisioned credential.
 ```console
 yca-acme eab new --allow 'pki.example.ca'
 
-┌ EAB credential (shown once) ────────────────────────┐
-     KID: SXYGc6ccV4D0DX_b4rkTk3w
-    HMAC: mfHzIkCGmmmJva_fXK0ybcg2N1KzdfY4uQYeEL-73Gs
-   Allow: pki.example.ca
-     Use: single-use
- Expires: never
-└─────────────────────────────────────────────────────┘
+┌ EAB credential (shown once) ──────────────────────────┐
+      KID: SXYGc6ccV4D0DX_b4rkTk3w
+     HMAC: mfHzIkCGmmmJva_fXK0ybcg2N1KzdfY4uQYeEL-73Gs
+    Allow: pki.example.ca
+      Use: single-use
+  Expires: never
+└───────────────────────────────────────────────────────┘
 
 ```
 
@@ -478,7 +454,7 @@ yca-acme eab new --allow 'pki.example.ca'
   Empty = any name. Orders outside the policy fail with
   `rejectedIdentifier`. The policy is the operator's: it is fixed at
   `eab new`, and no ACME request can widen it. That includes single-label
-  names such as `localhost`, which an empty policy admits too. http-01
+  names such as `localhost`, which an empty policy admits too. HTTP-01
   validates them against whatever the PKI host resolves them to: the PKI
   host itself for `localhost`, a search-domain expansion otherwise. The
   proof is then of control over that host, not over a name of the client's
@@ -569,11 +545,11 @@ REQUESTS_CA_BUNDLE=root.pem certbot revoke \
 
 certbot sends CN-less (SAN-only) CSRs; the CA derives the leaf CN from the
 first dns SAN (`CSR has no subject CN; using dns SAN ... as the CN` in
-yca.log). Registration, http-01 issuance and revocation are all verified.
+yca.log). Registration, HTTP-01 issuance and revocation are all verified.
 
-### dns-01 and wildcards
+### Wildcards
 
-See [dns-01 challenges](#dns-01-challenges) below for the full walkthrough
+See [DNS-01 challenges](#dns-01-challenges) below for the full walkthrough
 (manual and automated).
 
 ### Accelerating renewal after a CA compromise
@@ -629,11 +605,11 @@ CA's `ee_valid_days`:
 harmless - the client retries on its schedule - but a cron that retries a
 refused renewal daily for months is noise you can avoid.)
 
-## dns-01 challenges
+## DNS-01 challenges
 
-Any identifier may be validated via dns-01, and it is the only option for
+Any identifier may be validated via DNS-01, and it is the only option for
 two cases: **wildcards** (`*.zone` validates against the base domain,
-never http-01), and any host that cannot answer on port 80 - most
+never HTTP-01), and any host that cannot answer on port 80 - most
 commonly the repository host itself during its own TLS bootstrap/renewal
 (see [TLS bootstrap](#tls-bootstrap-chicken-and-egg-resolved-by-ceremony)),
 or any identifier behind a firewall that only DNS automation can reach.
@@ -653,7 +629,7 @@ sequenceDiagram
     participant S as yca-acme
 
     C->>S: newOrder(identifiers)
-    S-->>C: authz offering http-01 + dns-01 (dns-01 only for wildcards)
+    S-->>C: authz offering HTTP-01 + DNS-01 (DNS-01 only for wildcards)
     C->>C: keyAuth digest = base64url(SHA-256(key authorization))
     C->>N: publish TXT _acme-challenge.<name> = digest
     Note over C,N: propagation - the client must wait/verify before continuing
@@ -722,12 +698,9 @@ removes the manual step entirely. On the authoritative nameserver:
 tsig-keygen acme-dns01 > /etc/bind/keys/acme-dns01.key
 ```
 
-Include the key on the nameserver - but **do not grant it write access
-on the zone the identifiers actually live in** if that zone is
-DNSSEC-signed by anything other than BIND itself (an offline
-`dnssec-signzone` pipeline, a cron job, another tool). Give the
-automation its own small, dedicated, unsigned zone instead - one per
-identifier that will use dns-01 - named exactly after the challenge:
+Include the key on the nameserver - here in an unsigned, dedicated per-host
+zone, named after the challenge and covering the least-privilege scope
+needed for this automation:
 
 ```c
 include "/etc/bind/keys/acme-dns01.key";
@@ -740,20 +713,6 @@ zone "_acme-challenge.host.example.ca" {
     };
 };
 ```
-
-`subdomain` now works cleanly, because the grant is anchored at the
-**zone's own apex** rather than at a fixed suffix inside a bigger zone.
-That distinction matters: the challenge name is
-`_acme-challenge.<identifier>`, so `_acme-challenge` sits in front of a
-variable number of labels, not at a fixed suffix. That rules out
-`subdomain` scoped to the *parent* zone (it only matches names *below*
-a fixed name - it would grant `x._acme-challenge.example.ca`, not
-`_acme-challenge.host.example.ca`), and BIND's `wildcard` match type
-only accepts `*` as the pattern's leftmost label (`named-checkconf`
-rejects `_acme-challenge.*.example.ca` outright: "is not a wildcard"),
-so nothing short of a dedicated per-host zone expresses "just this one
-challenge name, and nothing else" - which is also exactly the
-least-privilege scope you want for an automation credential.
 
 The zone file itself carries no data beyond SOA/NS - TXT records arrive
 solely through `nsupdate`, and BIND bumps the SOA serial on every
@@ -773,8 +732,7 @@ $TTL 300
 Short TTLs throughout: this zone exists only to be read once per
 issuance, seconds after being written, never cached anywhere.
 
-Run `named-checkconf` and `rndc reload` to pick it up. This zone is
-**not delegated** from the parent (no NS record for it inside
+This zone is **not delegated** from the parent (no NS record for it inside
 `example.ca`) - it is an island that only the nameserver hosting it
 knows about directly. That is fine for `yca-acme`, which queries a
 specific server via `--dns`, but it has two consequences worth planning
@@ -785,18 +743,14 @@ for before the first run:
   the record is visible before bothering the ACME server - which never
   succeeds for an undelegated zone, and acme.sh loops
   ("Not valid yet, let's wait...") forever. `--dnssleep` skips that
-  check and sleeps a fixed number of seconds instead; 5s is ample for a
-  same-host dynamic update. It is saved into the domain's conf on first
-  use, so `--cron` renewals replay it automatically.
-- **Point `yca-acme --dns` (and `NSUPDATE_SERVER`) at the master
-  specifically not at a secondary or the system resolver.** Only the
-  master will answer for it (assuming the master carries the
-  configuration performed earlier).
+  check and sleeps a fixed number of seconds instead It is saved into
+  the domain's conf on first use, so `--cron` renewals replay it
+  automatically.
+- **Point `yca-acme --dns` (and `NSUPDATE_SERVER`) at the server
+  carrying the challenge zone.** Only it will answer for it.
 
-Copy the generated `key { ... };` block to the client host (mode 0600),
-then issue with the hook instead of `--dns`. Pin `NSUPDATE_ZONE`
-explicitly - automatic zone-apex detection would otherwise walk up
-past this dedicated zone into the parent:
+Copy the generated `key { ... };` block to the client host (mode 0600)
+then pin `NSUPDATE_ZONE` and `NSUPDATE_SERVER` explicitly:
 
 ```bash
 NSUPDATE_SERVER=ns1.example.ca NSUPDATE_KEY=/etc/yca/nsupdate.key \
@@ -817,21 +771,18 @@ acme.sh --issue --server "$ACME" --ca-bundle root.pem \
 ```
 
 One zone (and one `named.conf` edit) per identifier is the cost of this
-approach. For a fleet where that becomes the bottleneck, the same shape
-generalizes into a single automation zone reached via a static CNAME
-per host (`_acme-challenge.<host> CNAME <host>.acme-automation.example.ca`)
- -  but that requires a hook that resolves the CNAME before writing,
-which `dns_nsupdate` does not do on its own; either write a small
-wrapper around it, or use a purpose-built delegated-DNS ACME helper
-(e.g. [acme-dns](https://github.com/joohoi/acme-dns) with acme.sh's
-`dns_acmedns` hook) instead of `dns_nsupdate`.
+approach; for the ACME endpoint alone it may not be an issue, but for a
+fleet it quickly becomes the bottleneck. An alternative solution is a
+purpose-built delegated-DNS ACME helper (e.g.
+[acme-dns](https://github.com/joohoi/acme-dns) with
+acme.sh's `dns_acmedns` hook).
 
 ## Day-2 operations
 
 - **Health**: `curl -s https://pki.example.ca/acme/directory` and the
   plain `GET /healthz` on the loopback listener; `journalctl -u yca-acme`
   carries the daemon log (accounts registered, orders, issuance results,
-  http-01 failures with reasons).
+  HTTP-01 failures with reasons).
 - **Audit**: every ACME issuance appears in the CA's own `yca.log` as
   `issued server certificate ... from CSR (requested by 'acme')`, and in
   `yca list --last N`. The ACME account responsible is in the daemon log

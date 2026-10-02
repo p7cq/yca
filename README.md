@@ -85,7 +85,7 @@ Shared by `[root]` and `[ca.<purpose>]`
 
 Constraints:
 
-- Every key that is neither optional nor defaulted is required and
+- Every key that is neither optional nor default is required and
   non-empty; unknown keys and sections are refused by `init` and `add`.
 - At least one `[ca.<purpose>]`; a purpose is lowercase `[a-z0-9.-]` and
   not `root`.
@@ -104,13 +104,11 @@ Constraints:
 - `policies` keys are profiles the CA lists; each OID is valid, not
   `anyPolicy`, and not repeated.
 - `simple_dn = true` is refused on a CA listing `email`.
-- `token_label` is at most 32 bytes; the key backend rules are under
-  [Key backend layouts](#key-backend-layouts).
+- `token_label` is at most 32 bytes; see
+  [key backend layout](#key-backend-layouts).
 
 Issuance picks the issuer by profile: `create server` routes to whichever
-CA lists `server`. A profile no CA claims it means this PKI does not issue
-it, and issuance says so.
-`email` is CSR-only, see
+CA lists `server`. `email` is CSR-only, see
 [S/MIME certificates](docs/operation.md#smime-certificates-the-email-profile).
 
 A CA carries the EKUs of the profiles it lists. A CA listing `email` also
@@ -134,9 +132,7 @@ Each section is snapshotted into the store when it is materialized (at
 `yca init`, or at `add signing-ca` for a `[ca.<purpose>]` declared
 later), and the snapshot becomes the definitive reference: its fields are
 locked, later edits to `yca.toml` are warned and ignored, and changing
-them means re-initializing. The snapshot follows the sections:
-`ca_config` holds `[pki]`, `[pkcs11]` and `[root]` under dotted keys,
-`ca_purpose` holds one row per issuing CA.
+them means re-initializing.
 
 ### Default configuration
 

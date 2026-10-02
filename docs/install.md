@@ -27,7 +27,7 @@ flowchart LR
     cli -->|"read-write"| state[("/var/lib/yca<br/>yca:yca 0700")]
     state -->|"yca-publish, rsync as yca"| pub[("/srv/yca/pub<br/>yca:yca 0755")]
     nginx["nginx"] -->|"serves .crt / .crl"| pub
-    acmesh["acme.sh, as root"] -->|"http-01 tokens"| webroot[("/srv/yca/webroot<br/>root:root 0755")]
+    acmesh["acme.sh, as root"] -->|"HTTP-01 tokens"| webroot[("/srv/yca/webroot<br/>root:root 0755")]
     nginx -->|"serves /.well-known/acme-challenge/"| webroot
 ```
 
@@ -39,7 +39,7 @@ flowchart LR
 | `/var/lib/yca` | `yca:yca` 0700 | store (`store/`), `acme.db`, `yca.log` |
 | `/srv/yca` | `root:root` 0755 | parent of the two web roots below; `yca` cannot rename or replace them |
 | `/srv/yca/pub` | `yca:yca` 0755 | published certificates and CRLs, written by `yca-publish`, served by nginx |
-| `/srv/yca/webroot` | `root:root` 0755 | http-01 tokens written by acme.sh (root), served by nginx |
+| `/srv/yca/webroot` | `root:root` 0755 | HTTP-01 tokens written by acme.sh (root), served by nginx |
 
 The packages create the account (system user, `nologin`, password
 locked) and the directories, and `tmpfiles.d/yca.conf` re-applies these
@@ -123,6 +123,7 @@ sudo install -Dm644 share/zsh-completion/_yca-acme \
     /usr/share/zsh/site-functions/_yca-acme
 sudo install -Dm644 share/bash-completion/yca-acme \
     /usr/share/bash-completion/completions/yca-acme
+sudo install -dm750 /etc/yca
 sudo install -Dm640 yca.toml /etc/yca/yca.toml
 sudo install -m644 share/systemd/*.service share/systemd/*.timer \
     /usr/lib/systemd/system/
@@ -147,31 +148,8 @@ for `yca-acme`) in a drop-in.
 sudoedit /etc/yca/yca.toml
 ```
 
-`sudoedit` keeps the file's owner and mode (`root:yca` 0640), `tmpfiles`
-will restore them if modified.
-
-The file is organized in sections: `[pki]`, an optional `[pkcs11]`,
-`[root]`, and one `[ca.<purpose>]` per issuing CA. Fields to review:
-
-- `[pki] org_name`, `country_code`, and each CA's `cn` - DN content.
-- `[pki] repository_host` - the host serving the CRL/caIssuers URLs.
-  Baked into every issued certificate; not changeable after init.
-- each CA's `slug_prefix` - the stable part of the file/URL identifiers;
-  the full slug is `<prefix><generation>` (root-e1, ca-e1 at init).
-- `[ca.<purpose>] profiles` - the EE profiles that CA issues, from
-  `server`, `client`, `email`. A purpose declared here but not created at
-  init is added later with `yca add signing-ca --purpose <p>`.
-- validities; a CA's `ee_valid_days` doubles as its `--valid` ceiling.
-- `[ca.<purpose>] policies` - optional CertificatePolicies OIDs per
-  profile, verbatim (`policies = { server = [...], client = [...] }`); the
-  CA itself carries the union over its profiles.
-- `[ca.<purpose>] permitted_dns` / `permitted_email` - optional
-  `nameConstraints` subtrees bounding who that CA may issue to.
-- `[ca.<purpose>] simple_dn` - optional; reduces the subject DN to the
-  bare `CN`.
-- `key_backend`, per CA - `internal` (software key, passphrase-encrypted
-  in the store) or `pkcs11` (key on a token/HSM). See the
-  [layout](../README.md#key-backend-layouts) table.
+`sudoedit` keeps the file's owner and mode), `tmpfiles` will restore them
+if modified.
 
 ## 3. Only for a `pkcs11` backend
 
@@ -181,8 +159,8 @@ label(s) as in the [layout table](../README.md#key-backend-layouts).
 [user PIN retry counter](nitrokeyhsm.md#user-pin-retry-counter)).
 
 The CLI talks to the token through pcscd, as `yca`. Where pcscd is built
-with polkit and denies the account (the journal shows the denial), allow
-it explicitly with a new rule in `/etc/polkit-1/rules.d/50-yca.rules`:
+with polkit and denies the account allow it explicitly with a new rule
+in `/etc/polkit-1/rules.d/50-yca.rules`:
 
 ```js
 polkit.addRule(function (action, subject) {
@@ -203,7 +181,7 @@ Each operation needs only the secrets of the CA keys it touches:
 for the signing token, `CA_HSM_ROOT_PIN` for the root token. They reach
 the CLI in two ways:
 
-- **`/etc/yca/yca.env`** - for what the timers and `yca-acme` need
+- **`/etc/yca/yca.env`** - for what the timers and `yca` need
   unattended: the store passphrase or the signing token PIN. Root-only;
   systemd (and the wrapper, as root) read it, the `yca` account never
   does.
@@ -253,8 +231,7 @@ init generates a passphrase and **shows it exactly once** - put it into
 ```
 
 For every key on a `pkcs11` backend, init adopts or generates the token
-keypair (see [key backend layouts](../README.md#key-backend-layouts)).
-Init needs every configured token present.
+keypair. Init needs every configured token present.
 
 ## 5. CRL refresh timers
 
@@ -278,8 +255,7 @@ enabled.
 Certificates point at `http://<repository_host>/...`, so that name must
 resolve (DNS record, or a hosts entry in a lab) and nginx must serve it.
 
-Publication (CA certificates and CRLs, hourly rsync from the store to
-`/srv/yca/pub`):
+Publication:
 
 ```bash
 sudo systemctl enable --now yca-publish.timer
@@ -290,15 +266,13 @@ ls /srv/yca/pub
 The publish job mirrors the store strictly (`rsync --delete`, capped by
 `--max-delete=8`): stale artifacts vanish after a re-init, while a
 misconfigured or empty source makes the job fail loudly instead of wiping
-the web root (see the yca-publish unit header).
+the web root.
 
 Reverse proxy: the package ships an example server block
 (`repository_host` is `pki.example.ca` in it). `/<slug>.crt` and
 `/<slug>.crl` are served from `/srv/yca/pub`, `/.well-known/acme-challenge/`
 from `/srv/yca/webroot`, `/acme/` goes to `yca-acme`; everything else is
-closed. The HTTPS server block needs the endpoint certificate from the
-[ACME TLS bootstrap](acme-operation.md#tls-bootstrap-chicken-and-egg-resolved-by-ceremony);
-leave it out until then.
+closed.
 
 | Distribution | Example | Where it goes |
 |--------------|---------|---------------|
@@ -313,9 +287,8 @@ sed 's/pki.example.ca/<your repository_host>/g' <example> |
 sudo nginx -t && sudo systemctl enable --now nginx
 ```
 
-Fedora (SELinux enforcing): rsync from the store to `/srv/yca/pub` is denied
-until both paths carry the types built for content read and written by
-rsync, and nginx needs the boolean for proxying to `yca-acme`:
+On Fedora, keep SELinux enforcing and set the necessary permissive domains
+for rsync and nginx:
 
 ```bash
 sudo semanage fcontext -a -t public_content_t '/var/lib/yca/store/ca(/.*)?'
@@ -326,9 +299,9 @@ sudo setsebool -P rsync_anon_write on
 sudo setsebool -P httpd_can_network_connect on
 ```
 
-## 7. Trust the root on this host
+## 7. Trust the root
 
-Needed for anything local that verifies yca-issued certificates (acme.sh
+Needed for anything that verifies yca-issued certificates (acme.sh
 against `yca-acme`, curl, the nginx upstream checks):
 
 ```bash
@@ -475,11 +448,9 @@ echo 'daily_yca_crl_refresh_enable="YES"' | sudo tee -a /etc/periodic.conf.local
 echo 'daily_yca_acme_renew_enable="YES"' | sudo tee -a /etc/periodic.conf.local
 ```
 
-Publication (hourly) and the root CRL refresh (quarterly) have no
-periodic(8) bucket: append the two lines from
-`/usr/local/share/examples/yca/crontab.sample` to `/etc/crontab` (they
-carry the user field: publish runs as `yca`, the root CRL refresh starts
-as root to read `yca.env`).
+Publication and the root CRL refresh have no periodic(8) bucket: append
+the two lines from `/usr/local/share/examples/yca/crontab.sample` to
+`/etc/crontab`.
 
 nginx: make sure the `http {}` block in `/usr/local/etc/nginx/nginx.conf`
 has `include /usr/local/etc/nginx/conf.d/*.conf;`, then
