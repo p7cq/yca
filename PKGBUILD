@@ -59,6 +59,7 @@ package() {
     "$pkgdir/usr/share/bash-completion/completions/yca-acme"
 
   install -dm750 "$pkgdir/etc/yca"
+  install -dm700 "$pkgdir/etc/yca/acme"
   install -m640 yca.toml "$pkgdir/etc/yca/yca.toml"
 
   install -Dm644 share/sysusers.d/yca.conf "$pkgdir/usr/lib/sysusers.d/yca.conf"

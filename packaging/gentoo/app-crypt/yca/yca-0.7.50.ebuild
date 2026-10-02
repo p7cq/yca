@@ -75,6 +75,7 @@ src_install() {
 	insinto /etc/yca
 	doins yca.toml
 	fperms 0750 /etc/yca
+	fperms 0700 /etc/yca/acme
 	fperms 0640 /etc/yca/yca.toml
 	dotmpfiles share/tmpfiles.d/yca.conf
 

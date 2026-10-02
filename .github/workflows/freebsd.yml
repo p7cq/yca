@@ -62,7 +62,7 @@ jobs:
             mkdir -p stage/usr/local/share/man/man1 \
                      stage/usr/local/share/zsh/site-functions \
                      stage/usr/local/share/bash-completion/completions \
-                     stage/usr/local/etc/yca \
+                     stage/usr/local/etc/yca/acme \
                      stage/usr/local/etc/rc.d \
                      stage/usr/local/etc/periodic/daily \
                      stage/usr/local/share/examples/yca/nginx \
