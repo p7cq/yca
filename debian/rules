@@ -36,6 +36,7 @@ override_dh_auto_install:
 	install -Dm644 share/bash-completion/yca-acme \
 		debian/yca/usr/share/bash-completion/completions/yca-acme
 	install -dm750 debian/yca/etc/yca
+	install -dm700 debian/yca/etc/yca/acme
 	install -m640 yca.toml debian/yca/etc/yca/yca.toml
 	install -Dm644 share/sysusers.d/yca.conf debian/yca/usr/lib/sysusers.d/yca.conf
 	install -Dm644 share/tmpfiles.d/yca.conf debian/yca/usr/lib/tmpfiles.d/yca.conf

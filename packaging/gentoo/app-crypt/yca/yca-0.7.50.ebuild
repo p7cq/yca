@@ -67,6 +67,7 @@ src_install() {
 	doins share/zsh-completion/_yca-acme
 	insinto /usr/share/bash-completion/completions
 	doins share/bash-completion/yca-acme
+  dodir /etc/yca/acme
 
 	# Modes as tmpfiles.d/yca.conf sets them (0750 dir, 0640 config), still
 	# root-only until pkg_postinst: the yca group is applied there by
@@ -75,6 +76,7 @@ src_install() {
 	insinto /etc/yca
 	doins yca.toml
 	fperms 0750 /etc/yca
+	fperms 0700 /etc/yca/acme
 	fperms 0640 /etc/yca/yca.toml
 	dotmpfiles share/tmpfiles.d/yca.conf
 

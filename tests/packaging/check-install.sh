@@ -76,6 +76,7 @@ case "$pw" in
 esac
 
 check "$etc" root yca 750
+check "$etc/acme" root "$wheel" 700
 check "$etc/yca.toml" root yca 640
 check "$state" yca yca 700
 check /srv/yca root "$wheel" 755

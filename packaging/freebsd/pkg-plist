@@ -6,6 +6,7 @@ etc/rc.d/yca_acme
 etc/periodic/daily/500.yca-crl-refresh
 etc/periodic/daily/510.yca-acme-renew
 @dir(root,yca,0750) etc/yca
+@dir(root,wheel,0700) etc/yca/acme
 @config(root,yca,0640) etc/yca/yca.toml
 share/examples/yca/crontab.sample
 share/examples/yca/nginx/yca.conf
