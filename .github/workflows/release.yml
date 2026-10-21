@@ -174,7 +174,7 @@ jobs:
           mkdir -p "$HOME/rpmbuild/SOURCES" "$HOME/rpmbuild/SPECS"
           git archive --format=tar.gz --prefix="yca-${VERSION}/" \
             -o "$HOME/rpmbuild/SOURCES/yca-${VERSION}.tar.gz" HEAD
-          cp packaging/rpm/yca.spec "$HOME/rpmbuild/SPECS/"
+          cp packaging/fedora/yca.spec "$HOME/rpmbuild/SPECS/"
           rpmbuild --define "version ${VERSION}" -bb "$HOME/rpmbuild/SPECS/yca.spec"
           mkdir -p /work/dist
           cp "$HOME"/rpmbuild/RPMS/*/*.rpm /work/dist/
