@@ -1,7 +1,7 @@
-name: FreeBSD package
+name: Package FreeBSD
 
-# Reusable: builds the FreeBSD package  and uploads it as the
-# artifact freebsd-package-<arch>. Called by release.yml (amd64) and
+# Reusable: builds the FreeBSD package and uploads it as the
+# artifact freebsd-package-<arch>. Called by release.yml (for amd64) and
 # release-freebsd-arm64.yml (arm64, slow).
 
 on:
@@ -22,7 +22,7 @@ on:
 
 jobs:
   build:
-    name: build .pkg (${{ inputs.arch }})
+    name: ${{ inputs.arch }}
     runs-on: ubuntu-latest
     # vmactions' docs: keep runs-on: ubuntu-latest even for aarch64.
     timeout-minutes: 90

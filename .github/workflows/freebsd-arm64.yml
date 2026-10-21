@@ -1,4 +1,4 @@
-name: Release FreeBSD arm64
+name: Release FreeBSD (AMD64/ARM64)
 
 # The arm64 FreeBSD VM is built separately (~45 min) and attached to
 # the Release (instead of holding it back).
@@ -48,6 +48,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
   build:
+    name: build .pkg (FreeBSD)
     needs: check
     if: needs.check.outputs.build == 'true'
     uses: ./.github/workflows/freebsd.yml
