@@ -60,7 +60,7 @@ package() {
 
   install -dm750 "$pkgdir/etc/yca"
   install -dm700 "$pkgdir/etc/yca/acme"
-  install -m640 yca.toml "$pkgdir/etc/yca/yca.toml"
+  install -m640 conf/yca.toml "$pkgdir/etc/yca/yca.toml"
 
   install -Dm644 share/sysusers.d/yca.conf "$pkgdir/usr/lib/sysusers.d/yca.conf"
   install -Dm644 share/tmpfiles.d/yca.conf "$pkgdir/usr/lib/tmpfiles.d/yca.conf"

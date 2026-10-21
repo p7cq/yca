@@ -52,7 +52,7 @@ install -Dm755 bin/yca-acme %{buildroot}%{_libexecdir}/yca/yca-acme
 install -Dm644 share/man/yca-acme.1 %{buildroot}%{_mandir}/man1/yca-acme.1
 install -Dm644 share/zsh-completion/_yca-acme %{buildroot}%{_datadir}/zsh/site-functions/_yca-acme
 install -Dm644 share/bash-completion/yca-acme %{buildroot}%{_datadir}/bash-completion/completions/yca-acme
-install -Dm640 yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
+install -Dm640 conf/yca.toml %{buildroot}%{_sysconfdir}/yca/yca.toml
 install -dm700 %{buildroot}%{_sysconfdir}/yca/acme
 install -Dm644 share/sysusers.d/yca.conf %{buildroot}%{_sysusersdir}/yca.conf
 install -Dm644 share/tmpfiles.d/yca.conf %{buildroot}%{_tmpfilesdir}/yca.conf

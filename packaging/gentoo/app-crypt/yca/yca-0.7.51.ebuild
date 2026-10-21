@@ -74,7 +74,7 @@ src_install() {
 	# tmpfiles.d/yca.conf, which also creates the state and publication
 	# directories.
 	insinto /etc/yca
-	doins yca.toml
+	doins conf/yca.toml
 	fperms 0750 /etc/yca
 	fperms 0700 /etc/yca/acme
 	fperms 0640 /etc/yca/yca.toml
