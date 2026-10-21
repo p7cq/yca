@@ -170,6 +170,7 @@ jobs:
             rpm-build systemd-rpm-macros git
           git config --global --add safe.directory /work
           cd /work
+          ln -s /work/packaging/debian
           mkdir -p "$HOME/rpmbuild/SOURCES" "$HOME/rpmbuild/SPECS"
           git archive --format=tar.gz --prefix="yca-${VERSION}/" \
             -o "$HOME/rpmbuild/SOURCES/yca-${VERSION}.tar.gz" HEAD
