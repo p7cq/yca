@@ -212,6 +212,7 @@ jobs:
       - name: Build package
         run: |
           useradd -m builder
+          ln -s "$GITHUB_WORKSPACE/packaging/arch/PKGBUILD"
           chown -R builder:builder "$GITHUB_WORKSPACE"
           su builder -c "cd '$GITHUB_WORKSPACE' && makepkg -f --noconfirm"
 
