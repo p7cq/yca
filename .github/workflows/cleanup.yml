@@ -15,7 +15,7 @@ permissions:
 jobs:
   delete-runs:
     name: delete old workflow runs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       GH_TOKEN: ${{ github.token }}
       KEEP: 20

@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build-test:
     name: build + ctest (${{ matrix.build_type }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     container: debian:trixie # for cmake 3.31+
     timeout-minutes: 45
     strategy:
@@ -121,7 +121,7 @@ jobs:
 
   go:
     name: go (acme)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     defaults:
       run:
@@ -163,7 +163,7 @@ jobs:
 
   lint:
     name: lint (shell + format)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
       CLANG_FORMAT_VERSION: '22.1.8'

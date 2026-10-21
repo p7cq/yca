@@ -19,7 +19,7 @@ jobs:
   check:
     name: check for a new release
     if: github.event.workflow_run.conclusion == 'success'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     outputs:
       build: ${{ steps.check.outputs.build }}
       version: ${{ steps.check.outputs.version }}
@@ -60,7 +60,7 @@ jobs:
   upload:
     name: attach to the release
     needs: [check, build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/download-artifact@v8
         with:

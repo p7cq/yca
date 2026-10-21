@@ -23,8 +23,8 @@ on:
 jobs:
   build:
     name: ${{ inputs.arch }}
-    runs-on: ubuntu-latest
-    # vmactions' docs: keep runs-on: ubuntu-latest even for aarch64.
+    runs-on: ubuntu-26.04
+    # vmactions' docs: keep runs-on: ubuntu-26.04 even for aarch64.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5

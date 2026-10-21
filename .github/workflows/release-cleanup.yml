@@ -22,7 +22,7 @@ permissions:
 jobs:
   delete-releases:
     name: delete old releases
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     env:
       GH_TOKEN: ${{ github.token }}
       KEEP: ${{ inputs.keep }}
