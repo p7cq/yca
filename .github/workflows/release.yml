@@ -109,6 +109,7 @@ jobs:
             libc++-dev libc++abi-dev libsqlite3-dev pkg-config golang-go
           git config --global --add safe.directory /work
           cd /work
+          ln -s /work/packaging/debian
           printf 'yca (%s-1~trixie) unstable; urgency=medium\n\n  * Release %s.\n\n -- p7cq <707c71@gmail.com>  %s\n' \
             "$VERSION" "$VERSION" "$(date -R)" > debian/changelog
           dpkg-buildpackage -b -us -uc
@@ -170,7 +171,6 @@ jobs:
             rpm-build systemd-rpm-macros git
           git config --global --add safe.directory /work
           cd /work
-          ln -s /work/packaging/debian
           mkdir -p "$HOME/rpmbuild/SOURCES" "$HOME/rpmbuild/SPECS"
           git archive --format=tar.gz --prefix="yca-${VERSION}/" \
             -o "$HOME/rpmbuild/SOURCES/yca-${VERSION}.tar.gz" HEAD
